@@ -164,28 +164,38 @@ final class AuditChainLoggerTest extends KernelTestBase {
   }
 
   /**
-   * With a signing key the chain is keyed, and a wrong key fails to verify.
+   * The chain is bound to the key material, not merely to the algorithm.
+   *
+   * Verifying under a different key must fail. That is what stops someone with
+   * database access from editing a row and recomputing the chain over it: an
+   * unkeyed chain can be rebuilt by anyone who can write to the table, a keyed
+   * one cannot without the key.
+   *
+   * The check swaps the configured Key *entity* rather than mutating one key's
+   * value, because the Key repository caches a resolved key for the request —
+   * mutating it in-process leaves verification using the old value and the test
+   * passes for the wrong reason.
    */
-  public function testKeyedChainRequiresTheKey(): void {
-    Key::create([
-      'id' => 'chain_key',
-      'label' => 'Chain key',
-      'key_type' => 'authentication',
-      'key_provider' => 'config',
-      'key_provider_settings' => ['key_value' => 'correct-horse-battery-staple'],
-    ])->save();
+  public function testChainIsBoundToTheKeyMaterial(): void {
+    foreach (['chain_key' => 'correct-horse-battery-staple', 'other_key' => 'a-different-secret'] as $id => $value) {
+      Key::create([
+        'id' => $id,
+        'label' => $id,
+        'key_type' => 'authentication',
+        'key_provider' => 'config',
+        'key_provider_settings' => ['key_value' => $value],
+      ])->save();
+    }
+
     $this->config('audit_chain.settings')->set('hash_key', 'chain_key')->save();
-
     $this->chain->log('personnel', 'field_read', ['id' => '1']);
-    $this->assertTrue($this->chain->verify()['ok']);
+    $this->assertTrue($this->chain->verify()['ok'], 'Verifies under the key it was written with.');
 
-    // Swapping the key's value is indistinguishable from not having it: the
-    // recomputation no longer matches, which is the point of keying.
-    Key::load('chain_key')
-      ->set('key_provider_settings', ['key_value' => 'a-different-secret'])
-      ->save();
+    $this->config('audit_chain.settings')->set('hash_key', 'other_key')->save();
+    $this->assertFalse($this->chain->verify()['ok'], 'Does not verify under a different key.');
 
-    $this->assertFalse($this->chain->verify()['ok']);
+    $this->config('audit_chain.settings')->set('hash_key', '')->save();
+    $this->assertFalse($this->chain->verify()['ok'], 'Does not verify unkeyed either.');
   }
 
   /**

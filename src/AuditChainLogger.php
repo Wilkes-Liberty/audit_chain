@@ -20,8 +20,9 @@ use Symfony\Component\HttpFoundation\RequestStack;
 /**
  * Hash-chained implementation of the audit chain.
  *
- * row_hash = HMAC-SHA256(prev_hash | canonical, key), or SHA-256 of the same
- * message when no Key entity is configured. The canonical form has a fixed key
+ * Each row's hash is HMAC-SHA256 over `prev_hash | canonical` with the
+ * configured key, or SHA-256 of the same message when no Key entity is
+ * configured. The canonical form has a fixed key
  * order so the hash is reproducible regardless of insertion order, and includes
  * the forensic columns (label, IP, user agent) so editing those breaks the
  * chain too.

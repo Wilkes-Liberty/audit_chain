@@ -1,0 +1,7 @@
+audit_chain.settings:
+  path: '/admin/config/system/audit-chain'
+  defaults:
+    _form: '\Drupal\audit_chain\Form\AuditChainSettingsForm'
+    _title: 'Audit Chain'
+  requirements:
+    _permission: 'administer site configuration'

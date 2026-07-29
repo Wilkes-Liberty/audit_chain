@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<ruleset name="audit_chain">
+  <description>Drupal coding standards for Audit Chain.</description>
+  <file>.</file>
+  <arg name="extensions" value="php,module,inc,install,test,profile,theme,yml"/>
+  <rule ref="Drupal"/>
+  <rule ref="DrupalPractice"/>
+</ruleset>

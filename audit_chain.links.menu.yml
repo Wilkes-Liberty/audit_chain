@@ -1,0 +1,5 @@
+audit_chain.settings:
+  title: 'Audit Chain'
+  description: 'Signing key, at-rest encryption, and SIEM streaming for the tamper-evident audit chain.'
+  parent: system.admin_config_system
+  route_name: audit_chain.settings

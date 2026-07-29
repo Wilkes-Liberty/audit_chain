@@ -1,0 +1,13 @@
+audit_chain.settings:
+  type: config_object
+  label: 'Audit Chain settings'
+  mapping:
+    hash_key:
+      type: string
+      label: 'HMAC signing key — Key entity ID (empty = unkeyed SHA-256)'
+    encryption_profile:
+      type: string
+      label: 'Encryption profile for metadata at rest — Encryption Profile entity ID'
+    stream_enabled:
+      type: boolean
+      label: 'Emit each entry to the audit_chain logger channel (SIEM streaming)'

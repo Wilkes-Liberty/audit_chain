@@ -1,0 +1,28 @@
+{
+  "name": "drupal/audit_chain",
+  "description": "Tamper-evident, hash-chained audit logging for any Drupal module — optional HMAC signing, at-rest encryption, and independent verification.",
+  "type": "drupal-module",
+  "license": "GPL-2.0-or-later",
+  "homepage": "https://www.drupal.org/project/audit_chain",
+  "authors": [
+    {
+      "name": "Jeremy Michael Cerda",
+      "email": "jmcerda@wilkesliberty.com",
+      "role": "Maintainer"
+    },
+    {
+      "name": "Wilkes & Liberty, LLC",
+      "homepage": "https://github.com/wilkes-liberty",
+      "role": "Maintainer"
+    }
+  ],
+  "support": {
+    "issues": "https://www.drupal.org/project/issues/audit_chain",
+    "source": "https://git.drupalcode.org/project/audit_chain"
+  },
+  "require": {
+    "drupal/core": "^10.6 || ^11.3",
+    "drupal/key": "^1.20",
+    "drupal/encrypt": "^3.2"
+  }
+}

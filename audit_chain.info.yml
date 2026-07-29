@@ -1,0 +1,13 @@
+name: 'Audit Chain'
+type: module
+description: 'Tamper-evident, hash-chained audit logging for any Drupal module — optional HMAC signing, at-rest encryption, and independent verification.'
+package: 'Security'
+core_version_requirement: ^10.6 || ^11.3
+
+# Hard dependencies — modules whose APIs are called directly in PHP.
+dependencies:
+  - drupal:user
+  - key:key
+  - encrypt:encrypt
+
+configure: audit_chain.settings

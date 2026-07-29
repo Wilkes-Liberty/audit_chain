@@ -1,0 +1,52 @@
+<?php
+
+/**
+ * @file
+ * Install and schema functions for Audit Chain.
+ */
+
+/**
+ * Implements hook_schema().
+ *
+ * One append-only table. prev_hash/row_hash form the chain: row_hash covers
+ * this row's content plus the previous row's hash, so any insertion, deletion
+ * or edit breaks it and is detectable by AuditChainLogger::verify().
+ *
+ * The chain is global rather than per-channel. Interleaving is itself evidence
+ * — a per-channel chain would let an attacker delete one channel's rows
+ * without disturbing the others.
+ */
+function audit_chain_schema(): array {
+  $schema['audit_chain_log'] = [
+    'description' => 'Tamper-evident, hash-chained audit entries.',
+    'fields' => [
+      'id'           => ['type' => 'serial', 'unsigned' => TRUE, 'not null' => TRUE],
+      'channel'      => ['type' => 'varchar', 'length' => 64, 'not null' => TRUE, 'default' => ''],
+      'timestamp'    => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE],
+      'uid'          => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE, 'default' => 0],
+      'operation'    => ['type' => 'varchar', 'length' => 64, 'not null' => TRUE],
+      'entity_type'  => ['type' => 'varchar', 'length' => 128, 'not null' => FALSE],
+      'bundle'       => ['type' => 'varchar', 'length' => 128, 'not null' => FALSE],
+      'entity_id'    => ['type' => 'varchar', 'length' => 255, 'not null' => FALSE],
+      'entity_label' => ['type' => 'varchar', 'length' => 255, 'not null' => FALSE],
+      'ip_address'   => ['type' => 'varchar', 'length' => 45, 'not null' => FALSE],
+      'user_agent'   => ['type' => 'varchar', 'length' => 512, 'not null' => FALSE],
+      'metadata'     => ['type' => 'text', 'size' => 'medium', 'not null' => FALSE],
+      'prev_hash'    => ['type' => 'varchar', 'length' => 64, 'not null' => FALSE],
+      'row_hash'     => ['type' => 'varchar', 'length' => 64, 'not null' => FALSE],
+    ],
+    'primary key' => ['id'],
+    // Back the usual filters (channel, time window, actor, operation, type)
+    // and the verifier's hash lookups.
+    'indexes' => [
+      'channel'     => ['channel'],
+      'timestamp'   => ['timestamp'],
+      'uid'         => ['uid'],
+      'operation'   => ['operation'],
+      'entity_type' => ['entity_type'],
+      'row_hash'    => ['row_hash'],
+    ],
+  ];
+
+  return $schema;
+}

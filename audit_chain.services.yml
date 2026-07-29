@@ -1,0 +1,21 @@
+services:
+  logger.channel.audit_chain:
+    parent: logger.channel_base
+    arguments:
+      - 'audit_chain'
+
+  audit_chain.logger:
+    class: Drupal\audit_chain\AuditChainLogger
+    arguments:
+      - '@database'
+      - '@current_user'
+      - '@request_stack'
+      - '@config.factory'
+      - '@datetime.time'
+      - '@key.repository'
+      - '@lock'
+      - '@logger.channel.audit_chain'
+      - '@encryption'
+      - '@entity_type.manager'
+
+  Drupal\audit_chain\AuditChainLoggerInterface: '@audit_chain.logger'

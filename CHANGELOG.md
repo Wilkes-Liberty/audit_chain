@@ -4,7 +4,9 @@ All notable changes to Audit Chain are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0] - 2026-07-29
+
+First stable release.
 
 ### Added
 - **Tamper-evident audit logging as a standalone capability.** Extracted from
@@ -24,3 +26,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   written without a channel keep the pre-extraction canonical form exactly, so
   rows migrated from a consumer's own table verify against their original
   hashes instead of being re-chained by the migration.
+
+  The public contract is `AuditChainLoggerInterface`: `log()`, `verify()`,
+  `decodeMetadata()` and `prune()`. `verify()` deliberately takes no channel
+  argument — the chain is global, entries from every consumer are interleaved
+  in one sequence, and a per-channel walk could not tell a deletion from a gap.
+  A break anywhere is a break.

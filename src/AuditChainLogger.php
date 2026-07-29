@@ -146,7 +146,7 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
   /**
    * {@inheritdoc}
    */
-  public function verify(?string $channel = NULL): array {
+  public function verify(): array {
     $keyValue = $this->resolveHashKey(
       $this->configFactory->get('audit_chain.settings')->get('hash_key')
     );

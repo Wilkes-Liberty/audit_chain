@@ -47,17 +47,18 @@ interface AuditChainLoggerInterface {
   /**
    * Walks the chain in insertion order and verifies every link.
    *
-   * @param string|null $channel
-   *   Ignored for verification: the chain is global, so a single channel cannot
-   *   be verified in isolation without the rows between its entries. Present so
-   *   callers can express intent; pass NULL.
+   * Deliberately takes no channel argument. The chain is global — entries from
+   * every consumer are interleaved in one sequence — so a single channel cannot
+   * be verified in isolation without the entries between its own, and a
+   * per-channel walk could not tell a deletion from a gap. A break anywhere is
+   * a break.
    *
    * @return array{ok: bool, broken_at: int|null}
    *   'ok' is FALSE from the first row whose stored hash does not match a
    *   recomputation, or whose prev_hash does not match the preceding row;
    *   'broken_at' is that row's id.
    */
-  public function verify(?string $channel = NULL): array;
+  public function verify(): array;
 
   /**
    * Decodes a stored metadata value, decrypting it when necessary.

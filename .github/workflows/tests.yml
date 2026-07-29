@@ -1,0 +1,184 @@
+name: Tests
+
+# Runs the PHPUnit suite on every PR and on push to 1.x.
+#
+# The matrix mirrors mcp_sentinel's, and for the same reason: the support floor
+# is the oldest branch upstream still supports, not the one we happen to run —
+# and a support claim CI does not exercise is not a claim. Per endoflife.date on
+# 2026-07-28 the live core branches are 10.6 and 11.3 (both EOL 2026-12-16) and
+# 11.4 (EOL 2027-07-07), so the floors are 10.6 and 11.3, plus the ceiling.
+#
+# `constraint` is spelled out per leg rather than derived from `drupal`: ^11.3
+# means ">=11.3 <12" and resolves to 11.4, so a leg built that way silently
+# retests the ceiling. A floor leg pins its minor (~11.3.0); the ceiling floats.
+#
+# phpunit is pinned per leg because Drupal 10's core-dev hard-requires ^9.6,
+# which predates PHP 8 attributes — it ignores an attribute it cannot read
+# rather than erroring. That is why the suite carries annotations alongside its
+# attributes, and why both legs must report the same test count.
+#
+# Note on injection safety: every ${{ }} below is a matrix value or a workflow
+# identifier, never event-controlled text, and none is interpolated into a
+# `run:` script — the values reach the shell through `env:` instead.
+on:
+  pull_request: { branches: ['**'] }
+  push: { branches: ['1.x'] }
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  phpunit:
+    name: PHPUnit (Drupal ${{ matrix.drupal }}, PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+    strategy:
+      # Report every combination: a failure on one core version is a real
+      # result, not a reason to hide the others.
+      fail-fast: false
+      matrix:
+        include:
+          - drupal: '10.6'
+            constraint: '~10.6.0'
+            php: '8.3'
+            phpunit: '^9.6'
+          - drupal: '11.3'
+            constraint: '~11.3.0'
+            php: '8.3'
+            phpunit: '^11.5'
+          - drupal: '11'
+            constraint: '^11'
+            php: '8.4'
+            phpunit: '^11.5'
+
+    steps:
+      - name: Checkout the module
+        uses: actions/checkout@v7
+        with:
+          path: module
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          # pdo_sqlite/sqlite3: the kernel-test database. gd: pulled in by
+          # core's test bootstrap.
+          extensions: gd, pdo_sqlite, sqlite3
+          coverage: none
+
+      - name: Scaffold a Drupal site
+        env:
+          DRUPAL_CONSTRAINT: ${{ matrix.constraint }}
+        run: |
+          composer create-project "drupal/recommended-project:${DRUPAL_CONSTRAINT}" drupal \
+            --no-interaction --no-install --no-progress
+          cd drupal
+          composer config --no-plugins allow-plugins.composer/installers true
+          composer config --no-plugins allow-plugins.drupal/core-composer-scaffold true
+          composer config --no-plugins allow-plugins.drupal/core-project-message true
+          composer config --no-plugins allow-plugins.dealerdirect/phpcodesniffer-composer-installer true
+          # Install the working copy, not a released package.
+          composer config repositories.audit_chain path ../module
+
+      - name: Install dependencies
+        working-directory: drupal
+        env:
+          DRUPAL_CONSTRAINT: ${{ matrix.constraint }}
+          PHPUNIT_VERSION: ${{ matrix.phpunit }}
+        run: |
+          # -W on both: recommended-project ships a lock file, so each require
+          # is a partial update and composer refuses to move the transitive
+          # packages core-dev needs.
+          composer require -W --no-interaction --no-progress "drupal/audit_chain:*@dev"
+          composer require -W --dev --no-interaction --no-progress \
+            "drupal/core-dev:${DRUPAL_CONSTRAINT}" \
+            "phpunit/phpunit:${PHPUNIT_VERSION}" \
+            "drush/drush:^13"
+
+      - name: Assert the versions actually under test
+        working-directory: drupal
+        env:
+          EXPECTED_DRUPAL: ${{ matrix.drupal }}
+        run: |
+          set -euo pipefail
+          # Require the autoloader inline: php ignores auto_prepend_file for -r
+          # code, so loading it any other way leaves InstalledVersions undefined
+          # and the line fatals after printing its label.
+          core="$(php -r 'require "vendor/autoload.php"; echo \Composer\InstalledVersions::getPrettyVersion("drupal/core");')"
+          echo "Drupal core: ${core}"
+          vendor/bin/phpunit --version
+
+          # Assert, do not merely print. A leg named for a floor that silently
+          # resolved the ceiling is covered by nothing while looking green.
+          case "${core}" in
+            "${EXPECTED_DRUPAL}".*) ;;
+            *) echo "::error::Leg claims Drupal ${EXPECTED_DRUPAL} but resolved ${core}. Fix matrix.constraint rather than this check."; exit 1 ;;
+          esac
+
+      - name: Confirm the working copy is what is under test
+        working-directory: drupal
+        run: |
+          # A path repo can silently fall back to a registry package; if that
+          # happened the suite would pass against code nobody changed.
+          test -L web/modules/contrib/audit_chain \
+            || { echo "::error::audit_chain is not symlinked to the working copy — the path repo did not apply"; exit 1; }
+          readlink web/modules/contrib/audit_chain
+
+      - name: PHPUnit — Kernel (blocking)
+        working-directory: drupal
+        env:
+          # Quoted: the value ends in a colon, which YAML would otherwise read
+          # as a mapping key and refuse to parse the file at all.
+          SIMPLETEST_DB: 'sqlite://localhost/:memory:'
+          BROWSERTEST_OUTPUT_DIRECTORY: /tmp
+          SYMFONY_DEPRECATIONS_HELPER: weak
+          MIN_TESTS: '8'
+        run: |
+          set -euo pipefail
+          # Absolute -c path: the kernel tests declare
+          # @runTestsInSeparateProcesses, and a child process does not inherit
+          # this working directory. PHPUnit 9.6 passes a relative path straight
+          # through, so every child dies on "Could not read phpunit.xml.dist".
+          config="${PWD}/web/core/phpunit.xml.dist"
+          vendor/bin/phpunit -c "${config}" \
+            --log-junit "${PWD}/junit-Kernel.xml" \
+            "${PWD}/web/modules/contrib/audit_chain/tests/src/Kernel"
+
+          # Assert the count, not just the exit status: an exit code only says
+          # the tests that ran passed, never which ran. A runner that collects
+          # nothing exits 0.
+          total="$(grep -ho '<testcase ' junit-Kernel.xml | wc -l | tr -d ' ')"
+          echo "Collected ${total} tests (floor ${MIN_TESTS})."
+          if [ "${total}" -lt "${MIN_TESTS}" ]; then
+            echo "::error::Collected only ${total} tests, below the floor of ${MIN_TESTS}. The suite was dropped, not fixed."
+            exit 1
+          fi
+
+  phpcs:
+    name: Drupal coding standards
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: module
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+
+      - name: Install PHPCS + the Drupal standard
+        run: |
+          composer global config --no-plugins allow-plugins.dealerdirect/phpcodesniffer-composer-installer true
+          composer global require --no-interaction --no-progress \
+            squizlabs/php_codesniffer drupal/coder
+
+      - name: phpcs (Drupal, DrupalPractice)
+        working-directory: module
+        run: |
+          ~/.composer/vendor/bin/phpcs --standard=Drupal,DrupalPractice \
+            --extensions=php,module,inc,install,test,profile,theme,yml \
+            .

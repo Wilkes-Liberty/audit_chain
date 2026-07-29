@@ -130,6 +130,11 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
           'operation' => $row['operation'],
           'uid' => $row['uid'],
           'entity_type' => $row['entity_type'],
+          // Included because the implementation this was extracted from emitted
+          // it, and a SIEM rule keyed on bundle would silently stop matching
+          // otherwise. Dropping a field from a stream is a regression nobody
+          // gets an error for.
+          'bundle' => $row['bundle'],
           'entity_id' => $row['entity_id'],
           'timestamp' => $row['timestamp'],
           'row_hash' => $rowHash,

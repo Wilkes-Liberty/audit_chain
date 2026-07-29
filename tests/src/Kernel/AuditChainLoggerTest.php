@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\audit_chain\Kernel;
 
+use Psr\Log\AbstractLogger;
 use Drupal\audit_chain\AuditChainLoggerInterface;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\key\Entity\Key;
@@ -196,6 +197,56 @@ final class AuditChainLoggerTest extends KernelTestBase {
 
     $this->config('audit_chain.settings')->set('hash_key', '')->save();
     $this->assertFalse($this->chain->verify()['ok'], 'Does not verify unkeyed either.');
+  }
+
+  /**
+   * The streamed record carries every field a SIEM rule may key on.
+   *
+   * Asserted field by field rather than by shape: 1.0.0 shipped without
+   * `bundle`, which the implementation this was extracted from had always
+   * emitted. Nothing failed — a SIEM rule keyed on bundle would simply have
+   * stopped matching, silently, which is the worst way for an audit stream to
+   * regress.
+   */
+  public function testStreamedRecordCarriesEveryField(): void {
+    $this->config('audit_chain.settings')->set('stream_enabled', TRUE)->save();
+
+    $spy = new class() extends AbstractLogger {
+      /**
+       * Captured log records.
+       *
+       * @var array<int, array{message: string, context: array}>
+       */
+      public array $records = [];
+
+      /**
+       * {@inheritdoc}
+       */
+      public function log($level, string|\Stringable $message, array $context = []): void {
+        $this->records[] = ['message' => (string) $message, 'context' => $context];
+      }
+
+    };
+    $this->container->set('logger.channel.audit_chain', $spy);
+    $this->container->set('audit_chain.logger', NULL);
+
+    $this->container->get('audit_chain.logger')->log('personnel', 'field_read', [
+      'entity_type' => 'node',
+      'bundle' => 'person',
+      'id' => '9',
+      'label' => 'A. Person',
+    ]);
+
+    $this->assertCount(1, $spy->records);
+    $this->assertSame('audit_chain_event', $spy->records[0]['message']);
+
+    $ctx = $spy->records[0]['context'];
+    foreach (['channel', 'operation', 'uid', 'entity_type', 'bundle', 'entity_id', 'timestamp', 'row_hash'] as $key) {
+      $this->assertArrayHasKey($key, $ctx, "Streamed context must carry '{$key}'.");
+    }
+    $this->assertSame('personnel', $ctx['channel']);
+    $this->assertSame('person', $ctx['bundle']);
+    $this->assertNotEmpty($ctx['row_hash']);
   }
 
   /**

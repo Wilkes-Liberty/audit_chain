@@ -4,6 +4,16 @@ All notable changes to Audit Chain are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-07-29
+
+### Fixed
+- **The streamed SIEM record carries `bundle` again.** 1.0.0 dropped it in the
+  move out of MCP Sentinel, where it had always been emitted. Nothing failed
+  and nothing warned — a SIEM rule keyed on `bundle` would simply have stopped
+  matching, which is the worst way for an audit stream to regress. The field is
+  restored and now asserted field by field in the test suite rather than by
+  shape, so a future omission fails loudly.
+
 ## [1.0.0] - 2026-07-29
 
 First stable release.

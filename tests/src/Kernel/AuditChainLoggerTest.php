@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\Tests\audit_chain\Kernel;
 
 use Psr\Log\AbstractLogger;
+use Drupal\audit_chain\AuditChainLogger;
 use Drupal\audit_chain\AuditChainLoggerInterface;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\key\Entity\Key;
@@ -95,7 +96,11 @@ final class AuditChainLoggerTest extends KernelTestBase {
     $this->chain->log('personnel', 'field_read', ['id' => '2']);
     $this->chain->log('mcp_sentinel', 'entity_delete', ['id' => '3']);
 
-    $this->assertSame(['ok' => TRUE, 'broken_at' => NULL], $this->chain->verify());
+    $result = $this->chain->verify();
+    $this->assertTrue($result['ok']);
+    $this->assertNull($result['broken_at']);
+    $this->assertNull($result['reason']);
+    $this->assertSame(0, $result['unkeyed_rows']);
   }
 
   /**
@@ -197,6 +202,239 @@ final class AuditChainLoggerTest extends KernelTestBase {
 
     $this->config('audit_chain.settings')->set('hash_key', '')->save();
     $this->assertFalse($this->chain->verify()['ok'], 'Does not verify unkeyed either.');
+  }
+
+  /**
+   * Creates a Key entity.
+   *
+   * @param string $id
+   *   The entity ID.
+   * @param string $value
+   *   The secret value.
+   */
+  private function makeKey(string $id, string $value): void {
+    Key::create([
+      'id' => $id,
+      'label' => $id,
+      'key_type' => 'authentication',
+      'key_provider' => 'config',
+      'key_provider_settings' => ['key_value' => $value],
+    ])->save();
+  }
+
+  /**
+   * A configured key that will not resolve is reported, not silently dropped.
+   *
+   * The chain still records the entry — dropping an audit row is a worse
+   * failure than an unsigned one — but it must say so. Until this fix the
+   * fallback to unkeyed SHA-256 was completely silent, which is how a real
+   * deployment wrote 1,997 unsigned rows while believing they were signed.
+   */
+  public function testUnresolvableKeyIsReportedAndRowIsWrittenUnkeyed(): void {
+    $this->config('audit_chain.settings')->set('hash_key', 'no_such_key')->save();
+
+    $spy = new class() extends AbstractLogger {
+      /**
+       * Captured log records.
+       *
+       * @var array<int, array{level: mixed, message: string, context: array}>
+       */
+      public array $records = [];
+
+      /**
+       * {@inheritdoc}
+       */
+      public function log($level, string|\Stringable $message, array $context = []): void {
+        $this->records[] = [
+          'level' => $level,
+          'message' => (string) $message,
+          'context' => $context,
+        ];
+      }
+
+    };
+    $this->container->set('logger.channel.audit_chain', $spy);
+    $this->container->set('audit_chain.logger', NULL);
+
+    $this->container->get('audit_chain.logger')->log('personnel', 'field_read', ['id' => '1']);
+
+    $rows = $this->rows();
+    $this->assertCount(1, $rows, 'The entry is still recorded.');
+    $this->assertSame('', (string) $rows[0]->key_id, 'The row records that it was hashed unkeyed.');
+
+    $errors = array_filter($spy->records, static fn(array $r): bool => $r['level'] === 'error');
+    $this->assertNotEmpty($errors, 'An unresolvable signing key must be logged as an error.');
+
+    // Asserted on the template and its context separately, because that is what
+    // Drupal actually stores: a stable message with the variable data beside
+    // it, so aggregators can group by template.
+    $error = reset($errors);
+    $this->assertStringContainsString('cannot be resolved', $error['message']);
+    $this->assertSame('no_such_key', $error['context']['@key'] ?? NULL);
+  }
+
+  /**
+   * Rows written unkeyed are reported as unsigned, not as tampering.
+   *
+   * This is the diagnosis that sent someone hunting for an intruder: with the
+   * key present, verification recomputed historical unkeyed rows under HMAC and
+   * announced "BROKEN at row 1 — an entry has been inserted or edited".
+   * Nothing had been edited.
+   */
+  public function testRowsWrittenUnkeyedAreNotReportedAsTampering(): void {
+    // Two rows written with no key configured.
+    $this->chain->log('personnel', 'field_read', ['id' => '1']);
+    $this->chain->log('personnel', 'field_read', ['id' => '2']);
+
+    // The key now resolves, as it would after the environment is fixed.
+    $this->makeKey('chain_key', 'correct-horse-battery-staple');
+    $this->config('audit_chain.settings')->set('hash_key', 'chain_key')->save();
+
+    $result = $this->chain->verify();
+    $this->assertFalse($result['ok'], 'An unsigned chain is still a finding.');
+    $this->assertSame(AuditChainLogger::REASON_WRITTEN_UNKEYED, $result['reason']);
+    $this->assertNull($result['broken_at'], 'Nothing was tampered with, so no row is named as broken.');
+    $this->assertSame(2, $result['unkeyed_rows']);
+    $this->assertSame(2, $result['unkeyed_through']);
+  }
+
+  /**
+   * Editing a row is still tampering even when earlier rows are unsigned.
+   *
+   * The unkeyed diagnosis must not become a hiding place: a chain that contains
+   * unsigned rows still has to report a genuine edit as an edit.
+   */
+  public function testTamperingIsStillDetectedAlongsideUnkeyedRows(): void {
+    $this->chain->log('personnel', 'field_read', ['id' => '1']);
+    $this->chain->log('personnel', 'field_read', ['id' => '2']);
+
+    $this->makeKey('chain_key', 'correct-horse-battery-staple');
+    $this->config('audit_chain.settings')->set('hash_key', 'chain_key')->save();
+
+    $this->container->get('database')->update('audit_chain_log')
+      ->fields(['operation' => 'something_else'])
+      ->condition('id', 2)
+      ->execute();
+
+    $result = $this->chain->verify();
+    $this->assertFalse($result['ok']);
+    $this->assertSame(AuditChainLogger::REASON_TAMPERED, $result['reason']);
+    $this->assertSame(2, $result['broken_at']);
+  }
+
+  /**
+   * A retired key listed in configuration keeps its rows verifying.
+   *
+   * Without this, rotating the signing key — ordinary hygiene, and something a
+   * compliance regime may mandate on a schedule — makes every previously
+   * written row indistinguishable from tampering.
+   */
+  public function testRotatedKeyStillVerifiesEarlierRows(): void {
+    $this->makeKey('old_key', 'the-first-secret');
+    $this->makeKey('new_key', 'the-second-secret');
+
+    $this->config('audit_chain.settings')->set('hash_key', 'old_key')->save();
+    $this->chain->log('personnel', 'field_read', ['id' => '1']);
+
+    // Rotate without recording the old key: the old row now looks tampered.
+    $this->config('audit_chain.settings')->set('hash_key', 'new_key')->save();
+    $this->chain->log('personnel', 'field_read', ['id' => '2']);
+    $this->assertFalse($this->chain->verify()['ok'], 'A bare rotation orphans the earlier rows.');
+
+    // Recording the retired key restores verification of its segment.
+    $this->config('audit_chain.settings')->set('previous_hash_keys', ['old_key'])->save();
+    $result = $this->chain->verify();
+    $this->assertTrue($result['ok'], 'Each row verifies under the key that produced it.');
+    $this->assertSame(0, $result['unkeyed_rows']);
+  }
+
+  /**
+   * The recorded key_id is a hint, never authority.
+   *
+   * The key_id column cannot be covered by the row hash without invalidating
+   * rows written before it existed, so it sits in the table unprotected. If
+   * verification trusted it, anyone able to write to the log could blank it,
+   * recompute the row with plain SHA-256, and have their edit accepted —
+   * handing back precisely the forgery resistance the HMAC exists to provide.
+   */
+  public function testBlankingKeyIdCannotLaunderAnEditedRow(): void {
+    $this->makeKey('chain_key', 'correct-horse-battery-staple');
+    $this->config('audit_chain.settings')->set('hash_key', 'chain_key')->save();
+    $this->chain->log('personnel', 'field_read', ['id' => '1']);
+    $this->assertTrue($this->chain->verify()['ok']);
+
+    $database = $this->container->get('database');
+
+    // Forge exactly as an attacker with database access would: rewrite the
+    // content, recompute the hash with plain SHA-256, and blank key_id so the
+    // row claims it was never signed in the first place. The canonical payload
+    // is rebuilt from the row's own stored columns so the forgery is a correct
+    // one — a sloppy forgery would fail for the wrong reason and prove nothing.
+    $database->update('audit_chain_log')
+      ->fields(['operation' => 'something_else'])
+      ->condition('id', 1)
+      ->execute();
+
+    $row = (array) $this->rows()[0];
+    $canonical = [
+      'bundle' => $row['bundle'],
+      'entity_id' => (string) ($row['entity_id'] ?? ''),
+      'entity_label' => $row['entity_label'],
+      'entity_type' => $row['entity_type'],
+      'ip_address' => $row['ip_address'],
+      'metadata' => $this->chain->decodeMetadata((string) ($row['metadata'] ?? '')),
+      'operation' => (string) $row['operation'],
+      'timestamp' => (int) $row['timestamp'],
+      'uid' => (int) $row['uid'],
+      'user_agent' => $row['user_agent'],
+      'channel' => (string) $row['channel'],
+    ];
+    ksort($canonical);
+    $encoded = (string) json_encode($canonical, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+    $database->update('audit_chain_log')
+      ->fields([
+        'key_id' => '',
+        'row_hash' => hash('sha256', '|' . $encoded),
+      ])
+      ->condition('id', 1)
+      ->execute();
+
+    $result = $this->chain->verify();
+    $this->assertFalse($result['ok'], 'A forged row must never verify.');
+    $this->assertSame(
+      AuditChainLogger::REASON_WRITTEN_UNKEYED,
+      $result['reason'],
+      'It is reported as unsigned rather than accepted — the operator still gets a non-zero verdict.',
+    );
+  }
+
+  /**
+   * Metadata that is not valid UTF-8 still produces a verifiable row.
+   *
+   * Found on a real chain: five rows verified under no key at all while the
+   * other 1,997 verified unkeyed, and every one of the five had an empty
+   * metadata column. json_encode() returns FALSE on a single malformed byte,
+   * the (string) cast turned that into '', and both the stored metadata and the
+   * canonical payload became empty — so the row was hashed over nothing and
+   * could never verify again. A truncated multibyte character in one field
+   * value was enough, and nothing reported it.
+   */
+  public function testInvalidUtf8MetadataStillVerifies(): void {
+    // A lone continuation byte: what a truncated multibyte value looks like.
+    $this->chain->log('personnel', 'field_read', ['id' => '1', 'note' => "caf\xE9"]);
+    $this->chain->log('personnel', 'field_read', ['id' => '2']);
+
+    $rows = $this->rows();
+    $this->assertNotSame(
+      '',
+      (string) $rows[0]->metadata,
+      'Unencodable metadata must not collapse to an empty column.',
+    );
+
+    $result = $this->chain->verify();
+    $this->assertTrue($result['ok'], 'A row carrying invalid UTF-8 must still verify.');
+    $this->assertSame(0, $result['unkeyed_rows']);
   }
 
   /**
@@ -311,9 +549,8 @@ final class AuditChainLoggerTest extends KernelTestBase {
       'row_hash' => hash('sha256', '|' . $canonical),
     ])->execute();
 
-    $this->assertSame(
-      ['ok' => TRUE, 'broken_at' => NULL],
-      $this->chain->verify(),
+    $this->assertTrue(
+      $this->chain->verify()['ok'],
       'A legacy, channelless row verifies without being re-chained.',
     );
 

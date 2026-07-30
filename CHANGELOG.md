@@ -52,6 +52,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   verification treats it as a hint about which key to try first and never as proof.
   Trusting it would let anyone able to write to the log blank it, recompute the row
   unkeyed, and have the edit accepted.
+- **`verify()` returns three more keys** — `reason`, `unkeyed_rows` and `unkeyed_through` —
+  alongside the existing `ok` and `broken_at`. Purely additive, so code reading the keys it
+  needs is unaffected. Code comparing the **whole array** (`assertSame(['ok' => TRUE,
+  'broken_at' => NULL], …)`) will need updating; `mcp_sentinel` had exactly one such
+  assertion and it is the reason this note exists.
 - **Retired signing keys (`previous_hash_keys`).** Verification accepts a row signed by
   the current key or any retired one, so rotating the signing key no longer makes every
   earlier row indistinguishable from tampering. Retired keys are trusted because they

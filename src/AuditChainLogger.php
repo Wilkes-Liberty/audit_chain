@@ -40,6 +40,39 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
   private const CHAIN_LOCK = 'audit_chain_append';
 
   /**
+   * JSON flags for the canonical payload and the stored metadata.
+   *
+   * JSON_INVALID_UTF8_SUBSTITUTE is load-bearing, not tidiness. Without it
+   * json_encode() returns FALSE on a single malformed byte, the `(string)` cast
+   * turns that into '', and the row is hashed over an empty canonical — so it
+   * can never verify again, and nothing anywhere says why. Five rows on a real
+   * site were lost that way, all of them entity_save on nodes whose field
+   * values carried a truncated multibyte character; they show up as
+   * `metadata = ''` and verify under no key at all.
+   *
+   * Adding the flag is safe for existing rows: a payload that was already
+   * valid UTF-8 encodes to exactly the same bytes with or without it, so no
+   * historical hash changes. Only payloads that previously failed outright are
+   * affected, and those did not verify to begin with.
+   */
+  private const JSON_FLAGS = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE;
+
+  /**
+   * Verify() reason: a row's content or ordering no longer matches its hash.
+   */
+  public const REASON_TAMPERED = 'tampered';
+
+  /**
+   * Verify() reason: rows are intact but were hashed without the signing key.
+   *
+   * A distinct verdict because the remedy is distinct. Reporting this as
+   * tampering — which is what this module did until now — sends an operator
+   * hunting for an intruder when what actually happened is that a Key entity
+   * did not resolve in the environment those rows were written in.
+   */
+  public const REASON_WRITTEN_UNKEYED = 'written_unkeyed';
+
+  /**
    * Constructs an AuditChainLogger.
    *
    * @param \Drupal\Core\Database\Connection $database
@@ -103,7 +136,21 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
     ];
     $extra = array_diff_key($metadata, array_flip(['entity_type', 'bundle', 'id', 'label']));
 
-    $keyValue = $this->resolveHashKey($config->get('hash_key'));
+    $key = $this->resolveHashKey($config->get('hash_key'));
+
+    // A configured key that will not resolve is not a reason to fall through to
+    // an unkeyed hash quietly. The row is still written — dropping an audit
+    // entry is its own failure, and worse than an unsigned one — but every such
+    // write says so, and hook_requirements() reports it on the status report.
+    // The alternative is what this module shipped until now: a site believing
+    // it has a signed chain while every row goes in unsigned, with nothing
+    // anywhere to notice it.
+    if ($key['unresolvable']) {
+      $this->logger->error(
+        "Audit chain signing key '@key' is configured but cannot be resolved; this entry was written with unkeyed SHA-256 and the chain is not signed. Fix the Key entity — entries written meanwhile cannot be signed retrospectively.",
+        ['@key' => $key['id']],
+      );
+    }
 
     // Serialise read-latest-then-insert. If the lock cannot be taken the entry
     // is still written — never drop an audit record — but the ordering
@@ -112,13 +159,18 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
     try {
       $canonical = $this->buildCanonical($row, $extra);
       $prevHash = $this->latestRowHash();
-      $rowHash = $this->hashRow($prevHash ?? '', $canonical, $keyValue);
+      $rowHash = $this->hashRow($prevHash ?? '', $canonical, $key['value']);
 
       $this->database->insert('audit_chain_log')
         ->fields($row + [
           'metadata' => $this->encodeMetadata($extra, $config),
           'prev_hash' => $prevHash,
           'row_hash' => $rowHash,
+          // Which key material actually produced this hash — empty when the row
+          // was hashed unkeyed, including when a configured key was
+          // unresolvable. Advisory only; see verify() on why it is never
+          // trusted.
+          'key_id' => $key['value'] !== '' ? $key['id'] : '',
         ])
         ->execute();
 
@@ -152,9 +204,7 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
    * {@inheritdoc}
    */
   public function verify(): array {
-    $keyValue = $this->resolveHashKey(
-      $this->configFactory->get('audit_chain.settings')->get('hash_key')
-    );
+    $keys = $this->verificationKeys();
 
     $result = $this->database->select('audit_chain_log', 'l')
       ->fields('l')
@@ -162,6 +212,8 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
       ->execute();
 
     $prevRowHash = '';
+    $unkeyedRows = 0;
+    $unkeyedThrough = NULL;
     foreach ($result as $record) {
       $record = (array) $record;
 
@@ -192,17 +244,42 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
 
       // Continuity: this row must point at the previous chained row.
       if ($storedPrev !== $prevRowHash) {
-        return ['ok' => FALSE, 'broken_at' => (int) $record['id']];
-      }
-      // Integrity: the stored hash must match a recomputation of the content.
-      if ((string) $record['row_hash'] !== $this->hashRow($storedPrev, $canonical, $keyValue)) {
-        return ['ok' => FALSE, 'broken_at' => (int) $record['id']];
+        return $this->verdict(FALSE, (int) $record['id'], self::REASON_TAMPERED, $unkeyedRows, $unkeyedThrough);
       }
 
-      $prevRowHash = (string) $record['row_hash'];
+      // Integrity: the stored hash must match a recomputation of the content
+      // under some key the site actually has.
+      $stored = (string) $record['row_hash'];
+      if ($this->matchesAnyKey($stored, $storedPrev, $canonical, $keys, (string) ($record['key_id'] ?? ''))) {
+        $prevRowHash = $stored;
+        continue;
+      }
+
+      // It matches with no key at all. When keys are configured that is not
+      // tampering — it is a row written while the signing key was missing or
+      // unresolvable, which is a completely different diagnosis and a
+      // completely different remedy. Keep walking: the chain's continuity is
+      // intact, it simply is not signed through here.
+      if (hash_equals($this->hashRow($storedPrev, $canonical, ''), $stored)) {
+        if ($keys === []) {
+          // No key configured, so unkeyed *is* the configured mode.
+          $prevRowHash = $stored;
+          continue;
+        }
+        $unkeyedRows++;
+        $unkeyedThrough = (int) $record['id'];
+        $prevRowHash = $stored;
+        continue;
+      }
+
+      return $this->verdict(FALSE, (int) $record['id'], self::REASON_TAMPERED, $unkeyedRows, $unkeyedThrough);
     }
 
-    return ['ok' => TRUE, 'broken_at' => NULL];
+    if ($unkeyedRows > 0) {
+      return $this->verdict(FALSE, NULL, self::REASON_WRITTEN_UNKEYED, $unkeyedRows, $unkeyedThrough);
+    }
+
+    return $this->verdict(TRUE, NULL, NULL, 0, NULL);
   }
 
   /**
@@ -289,24 +366,125 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
   }
 
   /**
+   * Builds the verify() return value in one place.
+   *
+   * @param bool $ok
+   *   Whether the chain verifies under a key the site holds.
+   * @param int|null $brokenAt
+   *   The row id that failed, for REASON_TAMPERED only.
+   * @param string|null $reason
+   *   One of the REASON_* constants, or NULL when ok.
+   * @param int $unkeyedRows
+   *   How many rows verified only without a key.
+   * @param int|null $unkeyedThrough
+   *   The highest row id that verified only without a key.
+   *
+   * @return array{ok: bool, broken_at: int|null, reason: string|null, unkeyed_rows: int, unkeyed_through: int|null}
+   *   The verdict.
+   */
+  private function verdict(bool $ok, ?int $brokenAt, ?string $reason, int $unkeyedRows, ?int $unkeyedThrough): array {
+    return [
+      'ok' => $ok,
+      'broken_at' => $brokenAt,
+      'reason' => $reason,
+      'unkeyed_rows' => $unkeyedRows,
+      'unkeyed_through' => $unkeyedThrough,
+    ];
+  }
+
+  /**
+   * Tests a stored hash against every key the site actually holds.
+   *
+   * The row's own `key_id` only decides which key is *tried first*. It is
+   * deliberately not treated as authority: the column is not covered by the row
+   * hash — it could not be added to the canonical payload without invalidating
+   * every row written before it existed — so a writer with database access
+   * could otherwise blank it, recompute the row unkeyed, and have verification
+   * accept the result. Trusting it would hand back exactly the forgery
+   * resistance the HMAC is there to provide.
+   *
+   * @param string $stored
+   *   The stored row hash.
+   * @param string $storedPrev
+   *   The stored prev_hash.
+   * @param string $canonical
+   *   The recomputed canonical payload.
+   * @param array<string, string> $keys
+   *   Resolvable key values, keyed by Key entity ID.
+   * @param string $hint
+   *   The row's recorded key_id, used only for ordering.
+   *
+   * @return bool
+   *   TRUE when some configured key reproduces the stored hash.
+   */
+  private function matchesAnyKey(string $stored, string $storedPrev, string $canonical, array $keys, string $hint): bool {
+    if ($hint !== '' && isset($keys[$hint])) {
+      $keys = [$hint => $keys[$hint]] + $keys;
+    }
+    foreach ($keys as $value) {
+      if (hash_equals($this->hashRow($storedPrev, $canonical, $value), $stored)) {
+        return TRUE;
+      }
+    }
+    return FALSE;
+  }
+
+  /**
+   * Returns every signing key verification may accept, keyed by entity ID.
+   *
+   * The current key plus any retired ones listed in `previous_hash_keys`, so a
+   * chain survives ordinary key rotation: rows written under the old key go on
+   * verifying under it instead of becoming indistinguishable from tampering the
+   * moment the key changes. Retired keys are trusted because they come from
+   * configuration, which an attacker editing the log table does not control.
+   *
+   * Unresolvable IDs are skipped rather than treated as an empty key, so a
+   * broken retired-key reference cannot silently turn into "accepts unkeyed".
+   *
+   * @return array<string, string>
+   *   Key values by Key entity ID. Empty when the chain is unkeyed by design.
+   */
+  private function verificationKeys(): array {
+    $config = $this->configFactory->get('audit_chain.settings');
+    $ids = array_merge(
+      [(string) ($config->get('hash_key') ?? '')],
+      array_map('strval', (array) ($config->get('previous_hash_keys') ?? [])),
+    );
+
+    $keys = [];
+    foreach (array_unique(array_filter($ids)) as $id) {
+      $value = $this->resolveHashKey($id)['value'];
+      if ($value !== '') {
+        $keys[$id] = $value;
+      }
+    }
+    return $keys;
+  }
+
+  /**
    * Resolves the HMAC key value from the configured Key entity.
+   *
+   * Distinguishes the two states the previous implementation collapsed into a
+   * bare '': no key configured (unkeyed by design) and a configured key that
+   * will not resolve (a fault). They produce the same hash and mean opposite
+   * things, and merging them is what let a site run unsigned for 1,997 rows
+   * without a single signal.
    *
    * @param mixed $keyId
    *   The hash_key setting: a Key entity ID, or NULL.
    *
-   * @return string
-   *   The key value, or '' when unavailable — in which case the chain still
-   *   works, unkeyed. An unkeyed chain detects accidental corruption and
-   *   careless edits; it does not stop someone with database access from
-   *   recomputing it.
+   * @return array{id: string, value: string, unresolvable: bool}
+   *   'value' is '' when hashing will be unkeyed. 'unresolvable' is TRUE only
+   *   when an ID was configured and no key value came back from it.
    */
-  private function resolveHashKey(mixed $keyId): string {
+  private function resolveHashKey(mixed $keyId): array {
     $id = (string) ($keyId ?? '');
     if ($id === '') {
-      return '';
+      return ['id' => '', 'value' => '', 'unresolvable' => FALSE];
     }
     $key = $this->keyRepository->getKey($id);
-    return $key ? (string) $key->getKeyValue() : '';
+    $value = $key ? (string) $key->getKeyValue() : '';
+    return ['id' => $id, 'value' => $value, 'unresolvable' => $value === ''];
   }
 
   /**
@@ -353,7 +531,15 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
       ksort($payload);
     }
 
-    return (string) json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $encoded = json_encode($payload, self::JSON_FLAGS);
+    if ($encoded === FALSE) {
+      // Nothing left but recursion or INF/NAN, neither of which reaches here
+      // from a column value. Return a deterministic marker rather than '': the
+      // write and verify paths must agree, and '' is the value that silently
+      // produced five permanently unverifiable rows.
+      return '{"canonical_encoding_failed":' . json_last_error() . '}';
+    }
+    return $encoded;
   }
 
   /**
@@ -368,7 +554,15 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
    *   The encoded value.
    */
   private function encodeMetadata(array $metadata, ImmutableConfig $config): string {
-    $json = (string) json_encode($metadata);
+    $encoded = json_encode($metadata, self::JSON_FLAGS);
+    if ($encoded === FALSE) {
+      $this->logger->error(
+        'Audit metadata could not be JSON-encoded (@error); stored as an empty object. The entry is still recorded and still verifies, but its context is lost.',
+        ['@error' => json_last_error_msg()],
+      );
+      $encoded = '{}';
+    }
+    $json = $encoded;
 
     $profileId = (string) ($config->get('encryption_profile') ?? '');
     if ($profileId === '') {

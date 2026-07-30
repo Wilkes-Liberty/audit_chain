@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\audit_chain\Drush\Commands;
 
+use Drupal\audit_chain\AuditChainLogger;
 use Drupal\audit_chain\AuditChainLoggerInterface;
 use Drupal\Core\Database\Connection;
 use Drush\Attributes as CLI;
@@ -50,6 +51,25 @@ final class AuditChainCommands extends DrushCommands {
     if ($result['ok']) {
       $this->logger()->success(sprintf('Audit chain OK — %d entries verified.', $rows));
       return self::EXIT_SUCCESS;
+    }
+
+    // Still a non-zero exit: a chain the site believes is signed and is not is
+    // a real finding, and the exit code is the documented contract that
+    // monitoring keys on. What changes is the diagnosis — telling an operator
+    // their audit log has been edited when in fact their signing key was
+    // missing sends them hunting for an intruder who does not exist.
+    if ($result['reason'] === AuditChainLogger::REASON_WRITTEN_UNKEYED) {
+      $this->logger()->error(sprintf(
+        'Audit chain UNSIGNED — %d of %d entries (through row id %d) were hashed without the configured signing key. '
+        . 'The chain is internally consistent and nothing has been edited; it simply is not signed through there, '
+        . 'so those rows can be rewritten by anyone with database access. '
+        . 'This usually means the Key entity did not resolve in the environment that wrote them. '
+        . 'Entries already written cannot be signed retrospectively.',
+        (int) $result['unkeyed_rows'],
+        $rows,
+        (int) $result['unkeyed_through'],
+      ));
+      return self::EXIT_FAILURE;
     }
 
     $this->logger()->error(sprintf(

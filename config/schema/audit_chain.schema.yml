@@ -5,6 +5,12 @@ audit_chain.settings:
     hash_key:
       type: string
       label: 'HMAC signing key — Key entity ID (empty = unkeyed SHA-256)'
+    previous_hash_keys:
+      type: sequence
+      label: 'Retired signing keys still accepted when verifying older rows'
+      sequence:
+        type: string
+        label: 'Key entity ID'
     encryption_profile:
       type: string
       label: 'Encryption profile for metadata at rest — Encryption Profile entity ID'

@@ -6,6 +6,73 @@
  */
 
 /**
+ * Implements hook_requirements().
+ *
+ * Reports the one condition that otherwise has no signal anywhere: a signing
+ * key that is configured but will not resolve. The chain keeps working when
+ * that happens — it falls back to unkeyed SHA-256 — so nothing errors, nothing
+ * is missing, and the site goes on believing its audit trail is signed. A real
+ * deployment ran that way for 1,997 of 2,002 rows before anyone noticed, and
+ * noticed only because verification then reported the whole chain as tampered.
+ *
+ * Reported at ERROR rather than WARNING: the module's single headline claim is
+ * that forging a repair requires the key. While this condition holds, it does
+ * not.
+ */
+function audit_chain_requirements(string $phase): array {
+  $requirements = [];
+  if ($phase !== 'runtime') {
+    return $requirements;
+  }
+
+  $keyId = (string) (\Drupal::config('audit_chain.settings')->get('hash_key') ?? '');
+  if ($keyId === '') {
+    // Unkeyed by choice. Documented behaviour, not a fault.
+    return $requirements;
+  }
+
+  $key = \Drupal::service('key.repository')->getKey($keyId);
+  if ($key !== NULL && (string) $key->getKeyValue() !== '') {
+    return $requirements;
+  }
+
+  $requirements['audit_chain_hash_key'] = [
+    'title' => t('Audit Chain: signing key unresolvable'),
+    'value' => t("Key '@key' is configured but resolves to nothing", ['@key' => $keyId]),
+    'severity' => REQUIREMENT_ERROR,
+    'description' => t("Every entry written while this holds is hashed with unkeyed SHA-256, so anyone with database access can edit a row and recompute the chain over it. Entries already written this way cannot be signed retrospectively — fix the Key entity, then run <code>drush audit-chain:verify</code>, which reports rows written unkeyed separately from tampering."),
+  ];
+
+  return $requirements;
+}
+
+/**
+ * Record which signing key hashed each row.
+ */
+function audit_chain_update_10001(): string {
+  $schema = \Drupal::database()->schema();
+  if ($schema->fieldExists('audit_chain_log', 'key_id')) {
+    return 'The key_id column already exists.';
+  }
+
+  // Deliberately left NULL for existing rows rather than backfilled from the
+  // current setting. Which key hashed a historical row is not knowable from
+  // configuration — the whole defect this column addresses is that the
+  // configured key and the key actually used can differ — and writing today's
+  // answer onto yesterday's rows would manufacture a fact. NULL reads as
+  // "unrecorded", which is true, and verification handles it by trying every
+  // key the site holds.
+  $schema->addField('audit_chain_log', 'key_id', [
+    'type' => 'varchar',
+    'length' => 64,
+    'not null' => FALSE,
+    'description' => "Key entity ID whose material produced row_hash; '' when hashed unkeyed.",
+  ]);
+
+  return 'Added audit_chain_log.key_id. Existing rows are left unrecorded; verification tries every configured key.';
+}
+
+/**
  * Implements hook_schema().
  *
  * One append-only table. prev_hash/row_hash form the chain: row_hash covers
@@ -34,6 +101,13 @@ function audit_chain_schema(): array {
       'metadata'     => ['type' => 'text', 'size' => 'medium', 'not null' => FALSE],
       'prev_hash'    => ['type' => 'varchar', 'length' => 64, 'not null' => FALSE],
       'row_hash'     => ['type' => 'varchar', 'length' => 64, 'not null' => FALSE],
+      // Which Key entity's material produced row_hash; '' when hashed unkeyed.
+      // Advisory only — it is not covered by the row hash (adding it to the
+      // canonical payload would invalidate every row written before it
+      // existed), so verification treats it as a hint about which key to try
+      // first and never as proof of which key was used. See
+      // AuditChainLogger::matchesAnyKey().
+      'key_id'       => ['type' => 'varchar', 'length' => 64, 'not null' => FALSE],
     ],
     'primary key' => ['id'],
     // Back the usual filters (channel, time window, actor, operation, type)

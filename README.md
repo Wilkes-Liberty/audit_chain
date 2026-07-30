@@ -67,6 +67,31 @@ drush audit-chain:verify
 Exit code is the contract: non-zero means the chain does not verify. Wire it
 into monitoring or a deploy gate without parsing the output.
 
+Two different failures are reported differently, because they call for different
+responses:
+
+- **BROKEN at row N** — a row's content or ordering no longer matches its hash.
+  Something was inserted, deleted or edited.
+- **UNSIGNED — N of M entries** — the rows are intact and in order, but were
+  hashed without the configured signing key, so anyone with database access can
+  rewrite them. Nothing was edited. This almost always means the Key entity did
+  not resolve in the environment that wrote them; the status report flags that
+  condition while it is still happening.
+
+Both exit non-zero. Entries already written unsigned cannot be signed
+retrospectively.
+
+### Rotating the signing key
+
+Verification accepts a row signed by the current key **or** by any key listed
+under *Retired signing keys*. Add the old key there before changing the signing
+key, or every row written under it becomes indistinguishable from tampering.
+
+Retired keys are trusted because they come from configuration. The `key_id`
+recorded on each row is only a hint about which key to try first — it is not
+covered by the row hash, so treating it as proof would let anyone who can write
+to the table blank it, recompute the row unkeyed, and have the edit accepted.
+
 ## Two constraints every consumer must respect
 
 **1. Do not log per access check.** A hook like `hook_entity_field_access()`
@@ -97,7 +122,8 @@ you.
 
 | Setting | Effect |
 |---------|--------|
-| Signing key | A Key entity. Empty means plain SHA-256 — enough to detect accidental corruption and careless edits, not enough to stop someone with database access recomputing the chain. Store the key outside the database (File or Environment provider). |
+| Signing key | A Key entity. Empty means plain SHA-256 — enough to detect accidental corruption and careless edits, not enough to stop someone with database access recomputing the chain. Store the key outside the database (File or Environment provider). A key that is set but will not resolve is reported as an error on the status report, and every entry written meanwhile is unsigned. |
+| Retired signing keys | Keys this chain was signed with previously. Verification accepts a row signed by any of them, so rotating does not make earlier rows look tampered with. Removing one makes the rows it signed unverifiable. |
 | Encryption profile | Encrypts `metadata` at rest. See the rotation caveat above. |
 | Stream entries | Emits each entry to the `audit_chain` logger channel as a structured record, so syslog or Monolog can forward to a SIEM without polling. |
 

@@ -53,10 +53,20 @@ interface AuditChainLoggerInterface {
    * per-channel walk could not tell a deletion from a gap. A break anywhere is
    * a break.
    *
-   * @return array{ok: bool, broken_at: int|null}
-   *   'ok' is FALSE from the first row whose stored hash does not match a
-   *   recomputation, or whose prev_hash does not match the preceding row;
-   *   'broken_at' is that row's id.
+   * Two different failures are reported differently, because they call for
+   * different responses. A row whose content or ordering no longer matches its
+   * hash is tampering (`REASON_TAMPERED`, with `broken_at` naming the row). A
+   * row that is internally consistent but was hashed without the configured
+   * signing key is not (`REASON_WRITTEN_UNKEYED`) — that is a chain which ran
+   * unsigned, usually because a Key entity did not resolve in the environment
+   * those rows were written in. Both are failures; only one means someone
+   * edited the log.
+   *
+   * @return array{ok: bool, broken_at: int|null, reason: string|null, unkeyed_rows: int, unkeyed_through: int|null}
+   *   'ok' is FALSE on either failure. 'reason' is an AuditChainLogger REASON_*
+   *   constant, or NULL when ok. 'broken_at' is the offending row id for
+   *   tampering and NULL otherwise. 'unkeyed_rows' counts rows that verified
+   *   only without a key, and 'unkeyed_through' is the highest such row id.
    */
   public function verify(): array;
 

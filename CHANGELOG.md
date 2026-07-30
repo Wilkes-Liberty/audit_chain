@@ -6,6 +6,62 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **A signing key that is configured but will not resolve no longer downgrades the
+  chain in silence.** `resolveHashKey()` returned an empty string both when no key was
+  configured and when a configured key could not be resolved. The two produce the same
+  hash and mean opposite things, so a site could believe it had a signed, tamper-evident
+  chain while every row went in unsigned, with nothing anywhere to notice.
+
+  Found on a real deployment: 1,997 of 2,002 rows verified under plain SHA-256 and none
+  under HMAC. The key resolved fine by the time anyone looked, which made the diagnosis
+  worse rather than better — see below.
+
+  Now every write with an unresolvable key logs an error naming the key, and
+  `hook_requirements()` reports the condition on the status report at ERROR. The entry
+  is still written: dropping an audit record is a worse failure than an unsigned one.
+
+- **`drush audit-chain:verify` no longer reports unsigned rows as tampering.** Once the
+  key resolved, verification recomputed those historical rows under HMAC and announced
+  *"BROKEN at row 1 — an entry has been inserted, deleted or edited"*. Nothing had been
+  edited. `verify()` now distinguishes a row whose content or ordering no longer matches
+  its hash (`tampered`) from one that is intact but was hashed without the key
+  (`written_unkeyed`), and reports how many rows and through which id.
+
+  Both still exit non-zero — a chain the site believes is signed and is not is a real
+  finding — so the documented exit-code contract is unchanged. Only the diagnosis is,
+  and with it whether an operator goes looking for an intruder who does not exist.
+
+- **Metadata that is not valid UTF-8 no longer produces a permanently unverifiable
+  row.** `json_encode()` returns `FALSE` on a single malformed byte and the `(string)`
+  cast turned that into `''`, so both the stored metadata and the canonical payload
+  became empty and the row was hashed over nothing. It could never verify again, and
+  nothing reported it. Five rows on the same real deployment were lost this way — all
+  `entity_save` on nodes whose field values carried a truncated multibyte character.
+
+  The canonical payload and the stored metadata now use `JSON_INVALID_UTF8_SUBSTITUTE`.
+  Existing rows are unaffected: a payload that was already valid UTF-8 encodes to
+  exactly the same bytes with or without the flag, so no historical hash changes. Rows
+  already written this way cannot be recovered — their content is gone, not merely
+  unreadable.
+
+### Added
+- **`key_id` on each row**, recording which Key entity's material produced the hash
+  (empty when hashed unkeyed). Advisory only: it is not covered by the row hash — it
+  could not be, without invalidating every row written before it existed — so
+  verification treats it as a hint about which key to try first and never as proof.
+  Trusting it would let anyone able to write to the log blank it, recompute the row
+  unkeyed, and have the edit accepted.
+- **`verify()` returns three more keys** — `reason`, `unkeyed_rows` and `unkeyed_through` —
+  alongside the existing `ok` and `broken_at`. Purely additive, so code reading the keys it
+  needs is unaffected. Code comparing the **whole array** (`assertSame(['ok' => TRUE,
+  'broken_at' => NULL], …)`) will need updating; `mcp_sentinel` had exactly one such
+  assertion and it is the reason this note exists.
+- **Retired signing keys (`previous_hash_keys`).** Verification accepts a row signed by
+  the current key or any retired one, so rotating the signing key no longer makes every
+  earlier row indistinguishable from tampering. Retired keys are trusted because they
+  come from configuration, which an attacker editing the log table does not control.
+
 ## [1.0.2] - 2026-07-30
 
 ### Changed

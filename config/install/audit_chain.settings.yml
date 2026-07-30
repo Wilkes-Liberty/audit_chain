@@ -1,3 +1,4 @@
 hash_key: ''
+previous_hash_keys: {  }
 encryption_profile: ''
 stream_enabled: false

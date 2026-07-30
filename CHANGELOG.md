@@ -4,6 +4,27 @@ All notable changes to Audit Chain are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [1.0.2] - 2026-07-30
+
+### Changed
+- **`composer.json` now declares `"php": ">=8.1"`.** It previously specified no PHP
+  constraint at all, so the effective floor came only from whatever core happened to
+  require — the supported surface was implied rather than stated, and a reader had to
+  trace Drupal's own requirements to find it.
+
+  8.1 is the real floor, checked rather than assumed: PHPCompatibility reports the
+  codebase clean from 8.1 upward, Drupal 10.6 requires `>=8.1.0`, and neither
+  `drupal/key` nor `drupal/encrypt` declares a PHP constraint of its own. It is also
+  already verified — the drupal.org previous-major lane runs this suite on PHP 8.1.34
+  and passes, so this is a claim CI exercises rather than one it merely tolerates.
+
+  This does not change which sites can install today: `^10.6 || ^11.3` already implies
+  the same floor. What it changes is that the claim is stated where Composer and a
+  human both read it, and it stops moving silently if core's floor moves or this
+  module adopts newer syntax.
+
 ## [1.0.1] - 2026-07-29
 
 ### Fixed

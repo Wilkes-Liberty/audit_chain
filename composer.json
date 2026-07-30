@@ -21,6 +21,7 @@
     "source": "https://git.drupalcode.org/project/audit_chain"
   },
   "require": {
+    "php": ">=8.1",
     "drupal/core": "^10.6 || ^11.3",
     "drupal/key": "^1.20",
     "drupal/encrypt": "^3.2"

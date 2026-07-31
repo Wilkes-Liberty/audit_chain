@@ -7,6 +7,7 @@ namespace Drupal\Tests\audit_chain\Kernel;
 use Psr\Log\AbstractLogger;
 use Drupal\audit_chain\AuditChainLogger;
 use Drupal\audit_chain\AuditChainLoggerInterface;
+use Drupal\encrypt\Entity\EncryptionProfile;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\key\Entity\Key;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -29,7 +30,14 @@ final class AuditChainLoggerTest extends KernelTestBase {
   /**
    * {@inheritdoc}
    */
-  protected static $modules = ['system', 'user', 'key', 'encrypt', 'audit_chain'];
+  protected static $modules = [
+    'system',
+    'user',
+    'key',
+    'encrypt',
+    'encrypt_test',
+    'audit_chain',
+  ];
 
   /**
    * The logger under test.
@@ -484,6 +492,93 @@ final class AuditChainLoggerTest extends KernelTestBase {
       (string) $requirements['audit_chain_encryption_rotated']['value'],
       'The finding must name the profile the operator has to restore.',
     );
+  }
+
+  /**
+   * Creates a test encryption profile (encrypt_test method, 128-bit key).
+   *
+   * @param string $id
+   *   Profile (and key) machine name prefix.
+   *
+   * @return string
+   *   The encryption profile entity id.
+   */
+  private function createTestEncryptionProfile(string $id): string {
+    // Distinct 16-byte keys per profile (encrypt_test method requires 128-bit).
+    static $n = 0;
+    $n++;
+    $keyValue = sprintf('testkey%08d!!', $n);
+
+    Key::create([
+      'id' => $id . '_key',
+      'label' => $id . ' key',
+      'key_type' => 'encryption',
+      'key_type_settings' => ['key_size' => '128'],
+      'key_provider' => 'config',
+      'key_provider_settings' => ['key_value' => $keyValue],
+    ])->save();
+
+    EncryptionProfile::create([
+      'id' => $id,
+      'label' => $id,
+      'encryption_method' => 'test_encryption_method',
+      'encryption_key' => $id . '_key',
+    ])->save();
+
+    return $id;
+  }
+
+  /**
+   * Re-encrypt rewrites ciphertext without invalidating the hash chain.
+   *
+   * @covers ::reencrypt
+   * @covers ::decodeMetadata
+   */
+  public function testReencryptMovesRowsBetweenProfilesWithoutBreakingVerify(): void {
+    $from = $this->createTestEncryptionProfile('ac_from');
+    $to = $this->createTestEncryptionProfile('ac_to');
+
+    $this->config('audit_chain.settings')->set('encryption_profile', $from)->save();
+    $this->chain->log('personnel', 'field_read', [
+      'id' => '7',
+      'secret' => 'need-to-read-after-rotation',
+    ]);
+
+    $before = $this->rows()[0];
+    $this->assertSame($from, (string) $before->encryption_profile);
+    $cipherBefore = (string) $before->metadata;
+    $hashBefore = (string) $before->row_hash;
+
+    // Rotate config first (operator hygiene) then re-encrypt historical rows.
+    $this->config('audit_chain.settings')->set('encryption_profile', $to)->save();
+
+    $result = $this->chain->reencrypt($from, $to);
+    $this->assertNull($result['refused']);
+    $this->assertSame(1, $result['updated']);
+    $this->assertSame(0, $result['failed']);
+    $this->assertSame(0, $result['remaining']);
+
+    $after = $this->rows()[0];
+    $this->assertSame($to, (string) $after->encryption_profile);
+    $this->assertNotSame($cipherBefore, (string) $after->metadata, 'Ciphertext must change.');
+    $this->assertSame($hashBefore, (string) $after->row_hash, 'Hash must not be rewritten.');
+
+    $meta = $this->chain->decodeMetadata((string) $after->metadata, (string) $after->encryption_profile);
+    $this->assertSame('need-to-read-after-rotation', $meta['secret'] ?? NULL);
+
+    $verify = $this->chain->verify();
+    $this->assertTrue($verify['ok'], 'Chain must still verify after re-encrypt.');
+  }
+
+  /**
+   * Re-encrypt refuses when a profile cannot be loaded.
+   *
+   * @covers ::reencrypt
+   */
+  public function testReencryptRefusesMissingProfile(): void {
+    $result = $this->chain->reencrypt('missing_a', 'missing_b');
+    $this->assertNotNull($result['refused']);
+    $this->assertSame(0, $result['updated']);
   }
 
   /**

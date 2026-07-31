@@ -249,7 +249,12 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
         'user_agent' => isset($record['user_agent']) ? (string) $record['user_agent'] : NULL,
         'timestamp' => (int) $record['timestamp'],
         'uid' => (int) $record['uid'],
-      ], $this->decodeMetadata((string) ($record['metadata'] ?? '')));
+      ], $this->decodeMetadata(
+        (string) ($record['metadata'] ?? ''),
+        // Prefer the profile that produced this row's bytes — after a rotation
+        // the configured profile is the wrong key for historical ciphertext.
+        (string) ($record['encryption_profile'] ?? ''),
+      ));
 
       $storedPrev = (string) ($record['prev_hash'] ?? '');
 
@@ -296,31 +301,131 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
   /**
    * {@inheritdoc}
    */
-  public function decodeMetadata(string $stored): array {
+  public function decodeMetadata(string $stored, string $encryptionProfile = ''): array {
     if ($stored === '') {
       return [];
     }
 
-    $profileId = (string) ($this->configFactory->get('audit_chain.settings')->get('encryption_profile') ?? '');
-    if ($profileId !== '') {
+    // Try the profile that wrote the row first, then the currently configured
+    // one (for rows written before encryption_profile was recorded).
+    $candidates = array_values(array_unique(array_filter([
+      $encryptionProfile,
+      (string) ($this->configFactory->get('audit_chain.settings')->get('encryption_profile') ?? ''),
+    ], static fn (string $id): bool => $id !== '')));
+
+    foreach ($candidates as $profileId) {
       $profile = $this->loadEncryptionProfile($profileId);
-      if ($profile !== NULL) {
-        try {
-          $decoded = json_decode($this->encryptService->decrypt($stored, $profile), TRUE);
-          if (is_array($decoded)) {
-            return $decoded;
-          }
+      if ($profile === NULL) {
+        continue;
+      }
+      try {
+        $decoded = json_decode($this->encryptService->decrypt($stored, $profile), TRUE);
+        if (is_array($decoded)) {
+          return $decoded;
         }
-        catch (\Throwable) {
-          // Fall through: rows written before encryption was enabled, or under
-          // a different profile, are still plain JSON (or unreadable, which
-          // verification will surface rather than hide).
-        }
+      }
+      catch (\Throwable) {
+        // Wrong profile or corrupted ciphertext — try the next candidate.
       }
     }
 
     $decoded = json_decode($stored, TRUE);
     return is_array($decoded) ? $decoded : [];
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function reencrypt(string $fromProfile, string $toProfile, int $limit = 0): array {
+    $from = $this->loadEncryptionProfile($fromProfile);
+    $to = $this->loadEncryptionProfile($toProfile);
+    if ($from === NULL) {
+      return [
+        'updated' => 0,
+        'failed' => 0,
+        'remaining' => 0,
+        'refused' => sprintf('Source encryption profile "%s" cannot be loaded.', $fromProfile),
+      ];
+    }
+    if ($to === NULL) {
+      return [
+        'updated' => 0,
+        'failed' => 0,
+        'remaining' => 0,
+        'refused' => sprintf('Destination encryption profile "%s" cannot be loaded.', $toProfile),
+      ];
+    }
+    if ($fromProfile === $toProfile) {
+      return [
+        'updated' => 0,
+        'failed' => 0,
+        'remaining' => 0,
+        'refused' => 'Source and destination profiles are the same.',
+      ];
+    }
+
+    $query = $this->database->select('audit_chain_log', 'l')
+      ->fields('l', ['id', 'metadata'])
+      ->condition('encryption_profile', $fromProfile)
+      ->orderBy('id', 'ASC');
+    if ($limit > 0) {
+      $query->range(0, $limit);
+    }
+
+    $updated = 0;
+    $failed = 0;
+    foreach ($query->execute() as $record) {
+      $stored = (string) ($record->metadata ?? '');
+      try {
+        $plain = $this->encryptService->decrypt($stored, $from);
+        // Round-trip through JSON to match encodeMetadata's stored shape.
+        $decoded = json_decode($plain, TRUE);
+        if (!is_array($decoded)) {
+          throw new \RuntimeException('Decrypted metadata is not a JSON object.');
+        }
+        $json = json_encode($decoded, self::JSON_FLAGS);
+        if ($json === FALSE) {
+          throw new \RuntimeException(json_last_error_msg());
+        }
+        $cipher = $this->encryptService->encrypt($json, $to);
+      }
+      catch (\Throwable $e) {
+        $failed++;
+        $this->logger->error(
+          'Re-encrypt failed for audit row @id (from @from to @to): @message',
+          [
+            '@id' => $record->id,
+            '@from' => $fromProfile,
+            '@to' => $toProfile,
+            '@message' => $e->getMessage(),
+          ],
+        );
+        continue;
+      }
+
+      // Only metadata storage columns — never the hash or prev_hash.
+      $this->database->update('audit_chain_log')
+        ->fields([
+          'metadata' => $cipher,
+          'encryption_profile' => $toProfile,
+        ])
+        ->condition('id', $record->id)
+        ->execute();
+      $updated++;
+    }
+
+    $remaining = (int) $this->database->select('audit_chain_log', 'l')
+      ->condition('encryption_profile', $fromProfile)
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+
+    return [
+      'updated' => $updated,
+      'failed' => $failed,
+      'remaining' => $remaining,
+      'refused' => NULL,
+    ];
   }
 
   /**

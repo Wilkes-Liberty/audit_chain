@@ -101,7 +101,7 @@ function _audit_chain_requirements_encryption(array &$requirements): void {
       ? t("Rows were encrypted with '@old'; encryption is now off", ['@old' => $stale])
       : t("Rows were encrypted with '@old'; the configured profile is '@new'", ['@old' => $stale, '@new' => $configured]),
     'severity' => REQUIREMENT_WARNING,
-    'description' => t("The metadata on those entries cannot be decrypted with the profile configured now, so it reads as empty. The entries themselves are intact and the chain still verifies — the chain covers the plaintext, not the ciphertext — but their context is unreadable until the old profile is restored. There is no re-encrypt command yet; if you still hold the previous profile, restoring it makes those entries readable again."),
+    'description' => t("The metadata on those entries cannot be decrypted with the profile configured now. The entries themselves are intact and the chain still verifies when the old profile entity is still loadable (each row records which profile produced its bytes). Run <code>drush audit-chain:reencrypt --from=PROFILE --to=PROFILE</code> to rewrite ciphertext to the current profile without touching hashes. Keep the previous EncryptionProfile until that finishes."),
   ];
 }
 

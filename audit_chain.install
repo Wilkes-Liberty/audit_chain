@@ -25,6 +25,12 @@ function audit_chain_requirements(string $phase): array {
     return $requirements;
   }
 
+  // Runs on every path, including the two early returns below: a retired
+  // encryption profile is independent of whether the chain is signed, and
+  // hanging it off the key check would hide it on exactly the sites that
+  // configured signing correctly.
+  _audit_chain_requirements_encryption($requirements);
+
   $keyId = (string) (\Drupal::config('audit_chain.settings')->get('hash_key') ?? '');
   if ($keyId === '') {
     // Unkeyed by choice. Documented behaviour, not a fault.
@@ -44,6 +50,59 @@ function audit_chain_requirements(string $phase): array {
   ];
 
   return $requirements;
+}
+
+/**
+ * Reports entries encrypted under a profile the site no longer uses.
+ *
+ * Rotating an encryption profile is ordinary key hygiene — a compliance regime
+ * may require it on a schedule — and it silently orphans every row written
+ * under the previous profile. Nothing looks broken: the rows are still there
+ * and the hash chain still verifies, because the chain covers the plaintext and
+ * not the ciphertext. The loss only surfaces when someone opens an old entry,
+ * which is exactly the moment an audit trail is supposed to work.
+ *
+ * Reported at WARNING rather than ERROR: the entries are intact and the chain's
+ * integrity guarantee is unaffected. What is lost is readability of their
+ * metadata, and there is no re-encrypt path yet (see the project issue queue),
+ * so this converts a silent trap into a visible one rather than implying a fix
+ * exists.
+ *
+ * @param array $requirements
+ *   The requirements array, added to by reference.
+ */
+function _audit_chain_requirements_encryption(array &$requirements): void {
+  $database = \Drupal::database();
+  if (!$database->schema()->tableExists('audit_chain_log')
+    || !$database->schema()->fieldExists('audit_chain_log', 'encryption_profile')) {
+    // Mid-install, mid-uninstall, or before update 10002. A status check must
+    // never itself crash.
+    return;
+  }
+
+  $configured = (string) (\Drupal::config('audit_chain.settings')->get('encryption_profile') ?? '');
+
+  // Existence, not a count: the index makes this cheap on a large table, and
+  // the operator needs to know *that* it happened, not how many times.
+  $query = $database->select('audit_chain_log', 'l');
+  $query->fields('l', ['encryption_profile']);
+  $query->isNotNull('l.encryption_profile');
+  $query->condition('l.encryption_profile', '', '<>');
+  $query->condition('l.encryption_profile', $configured, '<>');
+  $stale = $query->range(0, 1)->execute()->fetchField();
+
+  if ($stale === FALSE || $stale === NULL) {
+    return;
+  }
+
+  $requirements['audit_chain_encryption_rotated'] = [
+    'title' => t('Audit Chain: entries encrypted under a retired profile'),
+    'value' => $configured === ''
+      ? t("Rows were encrypted with '@old'; encryption is now off", ['@old' => $stale])
+      : t("Rows were encrypted with '@old'; the configured profile is '@new'", ['@old' => $stale, '@new' => $configured]),
+    'severity' => REQUIREMENT_WARNING,
+    'description' => t("The metadata on those entries cannot be decrypted with the profile configured now, so it reads as empty. The entries themselves are intact and the chain still verifies — the chain covers the plaintext, not the ciphertext — but their context is unreadable until the old profile is restored. There is no re-encrypt command yet; if you still hold the previous profile, restoring it makes those entries readable again."),
+  ];
 }
 
 /**
@@ -108,6 +167,12 @@ function audit_chain_schema(): array {
       // first and never as proof of which key was used. See
       // AuditChainLogger::matchesAnyKey().
       'key_id'       => ['type' => 'varchar', 'length' => 64, 'not null' => FALSE],
+      // Which encryption profile encrypted this row's metadata; '' when stored
+      // as plaintext. Not covered by the row hash — the chain covers the
+      // plaintext, so enabling or changing encryption does not invalidate
+      // history. Recorded so a profile rotation is detectable before an
+      // operator discovers old entries unreadable.
+      'encryption_profile' => ['type' => 'varchar', 'length' => 64, 'not null' => FALSE],
     ],
     'primary key' => ['id'],
     // Back the usual filters (channel, time window, actor, operation, type)
@@ -119,8 +184,34 @@ function audit_chain_schema(): array {
       'operation'   => ['operation'],
       'entity_type' => ['entity_type'],
       'row_hash'    => ['row_hash'],
+      // Backs the status-report check for rows written under a retired profile.
+      'encryption_profile' => ['encryption_profile'],
     ],
   ];
 
   return $schema;
+}
+
+/**
+ * Record which encryption profile encrypted each row's metadata.
+ */
+function audit_chain_update_10002(): string {
+  $schema = \Drupal::database()->schema();
+  if ($schema->fieldExists('audit_chain_log', 'encryption_profile')) {
+    return 'The encryption_profile column already exists.';
+  }
+
+  // Left NULL for existing rows rather than backfilled from the current
+  // setting, for the same reason as key_id: which profile encrypted a
+  // historical row is not knowable from configuration, and the whole point of
+  // the column is that the configured profile and the one actually used can
+  // differ. NULL reads as "unrecorded", which is true.
+  $schema->addField('audit_chain_log', 'encryption_profile', [
+    'type' => 'varchar',
+    'length' => 64,
+    'not null' => FALSE,
+    'description' => "Encryption profile that encrypted metadata; '' when plaintext.",
+  ], ['indexes' => ['encryption_profile' => ['encryption_profile']]]);
+
+  return 'Added audit_chain_log.encryption_profile. Existing rows are left unrecorded.';
 }

@@ -29,6 +29,27 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
   The README's "Two constraints every consumer must respect" now leads with this rather than
   with a warning.
+- **The status report now warns when entries were encrypted under a profile the site no
+  longer uses.** Rotating an encryption profile is ordinary key hygiene — a compliance
+  regime may require it on a schedule — and it silently orphans everything written under the
+  previous one. Nothing looks broken: the rows are still there and the chain still verifies,
+  because the chain covers the plaintext and not the ciphertext. The loss surfaced only when
+  someone opened an old entry, which is exactly the moment an audit trail is supposed to
+  work.
+
+  Each row now records the profile that actually encrypted it (`encryption_profile`, empty
+  when stored as plaintext), so the check names the profile to restore rather than guessing.
+  It records what produced the stored bytes, not what was configured: a row whose encryption
+  threw and fell back to plaintext is recorded as plaintext, so a future re-encrypt pass is
+  not sent looking for ciphertext that was never written.
+
+  Reported at WARNING, not ERROR — the entries are intact and chain integrity is unaffected;
+  what is lost is readability. Existing rows are left unrecorded rather than backfilled from
+  the current setting, because which profile encrypted a historical row is not knowable from
+  configuration, and that gap is the entire point of the column.
+
+  There is still no re-encrypt command, so this converts a silent trap into a visible one
+  rather than implying a fix exists.
 
 ### Fixed
 - **A signing key that is configured but will not resolve no longer downgrades the

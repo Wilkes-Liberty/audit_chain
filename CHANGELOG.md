@@ -7,6 +7,28 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **A request-scoped collector, so the obvious integration is the correct one.** The driver
+  for extracting this module was a consumer recording reads of access-controlled fields —
+  the single worst case for naive logging, because `hook_entity_field_access()` fires per
+  field, per entity, per render. A per-call `log()` turns one human action into dozens of
+  entries, and a flooded hash chain cannot be un-flooded: you cannot remove rows without
+  breaking it.
+
+  Documentation saying "do not do the obvious thing" is weaker than an API where the obvious
+  thing is safe, so `audit_chain.collector` buffers per request, deduplicates, and writes
+  once at `kernel.terminate`.
+
+  Deduplication is by channel, operation and the promoted entity keys, overridable per call.
+  The first occurrence wins rather than the last, and metadata is **not** merged: a read that
+  happened forty times is still one read, and a synthesised union would describe an action
+  nobody took.
+
+  Writing after the response also keeps the chain's append lock off the request's critical
+  path — it serialises across the whole site, so holding it mid-request makes concurrent
+  requests wait on work none of them needs.
+
+  The README's "Two constraints every consumer must respect" now leads with this rather than
+  with a warning.
 - **The status report now warns when entries were encrypted under a profile the site no
   longer uses.** Rotating an encryption profile is ordinary key hygiene — a compliance
   regime may require it on a schedule — and it silently orphans everything written under the

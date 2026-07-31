@@ -18,4 +18,20 @@ services:
       - '@encryption'
       - '@entity_type.manager'
 
+  # Request-scoped buffer for consumers that would otherwise log per access
+  # check. Deduplicates and writes once at kernel.terminate — see the README
+  # section "Writing to the chain".
+  audit_chain.collector:
+    class: Drupal\audit_chain\AuditChainCollector
+    arguments:
+      - '@audit_chain.logger'
+
+  audit_chain.flush_subscriber:
+    class: Drupal\audit_chain\EventSubscriber\AuditChainFlushSubscriber
+    arguments:
+      - '@audit_chain.collector'
+    tags:
+      - { name: event_subscriber }
+
   Drupal\audit_chain\AuditChainLoggerInterface: '@audit_chain.logger'
+  Drupal\audit_chain\AuditChainCollector: '@audit_chain.collector'

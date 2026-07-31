@@ -97,17 +97,29 @@ to the table blank it, recompute the row unkeyed, and have the edit accepted.
 **1. Do not log per access check.** A hook like `hook_entity_field_access()`
 fires per field, per entity, per render. Writing an entry each time produces a
 chain nobody can read and a write-amplified request — the log stops being
-evidence and becomes noise. Dedupe per request and flush once:
+evidence and becomes noise. The damage is not reversible: you cannot un-flood a
+hash chain without breaking it.
+
+Use the collector rather than hand-rolling this. It deduplicates per request and
+flushes once at `kernel.terminate`, so the obvious call is the correct one:
 
 ```php
-// Collect during the request…
-$this->pending[$entityType . ':' . $id . ':' . $field] = TRUE;
-
-// …and write once, on kernel.terminate.
-public static function getSubscribedEvents(): array {
-  return [KernelEvents::TERMINATE => ['flush', 0]];
-}
+// Anywhere during the request — call it as often as the hook fires.
+\Drupal::service('audit_chain.collector')->collect('personnel', 'field_read', [
+  'entity_type' => 'node',
+  'id' => $entity->id(),
+  'field' => $field_name,
+]);
 ```
+
+Deduplication is by channel, operation and the promoted entity keys, so forty
+field checks on one node become one entry. Pass a fourth argument to widen or
+narrow that key. The first occurrence wins — its metadata is kept and later ones
+are discarded rather than merged, because a read that happened forty times is
+still one read, and merging would invent a record of something nobody did.
+
+Writing happens after the response is sent, which also keeps the chain lock off
+the user's critical path.
 
 **2. Rotating the encryption profile orphans existing entries.** Metadata
 encrypted under profile A cannot be decrypted after switching to profile B, and

@@ -121,12 +121,13 @@ still one read, and merging would invent a record of something nobody did.
 Writing happens after the response is sent, which also keeps the chain lock off
 the user's critical path.
 
-**2. Rotating the encryption profile orphans existing entries.** Metadata
-encrypted under profile A cannot be decrypted after switching to profile B, and
-the chain is computed over the *plaintext* — so those entries stop verifying,
-and the failure looks exactly like tampering. Export or re-encrypt before
-rotating. The settings form says so at the point of change, but it cannot stop
-you.
+**2. Rotating the encryption profile orphans existing entries until you re-encrypt.**
+Metadata encrypted under profile A cannot be read with profile B alone. The
+chain is computed over the *plaintext*, so verification needs that plaintext —
+each row records which profile produced its ciphertext, the status report
+WARNs when any row still names a retired profile, and
+`drush audit-chain:reencrypt --from=A --to=B` rewrites those rows in place
+without touching hashes. Keep profile A loadable until re-encrypt finishes.
 
 ## Configuration
 

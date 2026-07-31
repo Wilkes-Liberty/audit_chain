@@ -6,6 +6,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **`drush audit-chain:reencrypt --from=… --to=…` (#2 / d.o #3613978).** Re-encrypts
+  stored metadata from one EncryptionProfile to another without touching
+  `row_hash` or any column covered by the hash. Batched via `--limit` for
+  resumable runs; refuses to start unless both profiles load. Completes the
+  rotation story started in 1.1.0 (status-report WARNING when rows lag behind
+  the configured profile).
+
+### Fixed
+- **`decodeMetadata()` / `verify()` use each row's recorded encryption profile.**
+  After a rotation, ciphertext written under the previous profile is decrypted
+  with that profile first, not only the currently configured one — so keeping
+  the old EncryptionProfile entity available is enough to keep historical
+  rows readable and verifiable until re-encrypt finishes.
+
 ## [1.1.0] - 2026-07-30
 
 ### Added

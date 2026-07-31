@@ -21,10 +21,13 @@ namespace Drupal\audit_chain;
  *   fires per field, per entity, per render; writing a row each time produces a
  *   chain nobody can read and a write-amplified request. Dedupe per request and
  *   flush once, at `kernel.terminate`.
- * - **Rotating the encryption profile orphans prior rows.** Metadata encrypted
- *   under profile A cannot be read after switching to profile B; those rows
- *   then fail verification, because the chain is computed over the plaintext.
- *   Export or re-encrypt before rotating.
+ * - **Rotating the encryption profile orphans prior rows until they are
+ *   re-encrypted.** Metadata encrypted under profile A cannot be read after
+ *   switching to profile B if A is gone. The chain covers the plaintext, so
+ *   verification still needs that plaintext — `drush audit-chain:reencrypt`
+ *   rewrites ciphertext in place without touching hashes. Each row records
+ *   which profile produced its bytes; the status report WARNs when any
+ *   differ from the configured profile.
  */
 interface AuditChainLoggerInterface {
 
@@ -75,11 +78,36 @@ interface AuditChainLoggerInterface {
    *
    * @param string $stored
    *   The raw value from the metadata column.
+   * @param string $encryptionProfile
+   *   The profile that produced $stored (from the row's encryption_profile
+   *   column). Tried first. Empty falls through to the currently configured
+   *   profile, then plaintext JSON.
    *
    * @return array
    *   The decoded metadata, or an empty array when it cannot be read.
    */
-  public function decodeMetadata(string $stored): array;
+  public function decodeMetadata(string $stored, string $encryptionProfile = ''): array;
+
+  /**
+   * Re-encrypts rows from one encryption profile to another.
+   *
+   * Updates only `metadata` and `encryption_profile`. Never touches `row_hash`
+   * or any column covered by the hash — re-encryption is a storage transform,
+   * not a rewrite of history. Rows already on $toProfile or plaintext are
+   * skipped. Refuses to start when either profile cannot be loaded.
+   *
+   * @param string $fromProfile
+   *   Source EncryptionProfile id (must match rows' encryption_profile).
+   * @param string $toProfile
+   *   Destination EncryptionProfile id.
+   * @param int $limit
+   *   Max rows to process this call (for resumable batches). Zero or less
+   *   means no limit.
+   *
+   * @return array{updated: int, failed: int, remaining: int, refused: string|null}
+   *   Counts and optional refusal reason when profiles will not load.
+   */
+  public function reencrypt(string $fromProfile, string $toProfile, int $limit = 0): array;
 
   /**
    * Deletes a channel's entries older than a retention period.

@@ -79,4 +79,46 @@ final class AuditChainCommands extends DrushCommands {
     return self::EXIT_FAILURE;
   }
 
+  /**
+   * Re-encrypt audit metadata from one EncryptionProfile to another.
+   *
+   * Does not touch row hashes. Safe to re-run: only rows still on --from are
+   * rewritten. Run until remaining is 0 when using --limit batches.
+   */
+  #[CLI\Command(name: 'audit-chain:reencrypt', aliases: ['acre'])]
+  #[CLI\Option(name: 'from', description: 'Source encryption profile id (rows with this encryption_profile).')]
+  #[CLI\Option(name: 'to', description: 'Destination encryption profile id.')]
+  #[CLI\Option(name: 'limit', description: 'Max rows per run (0 = all). Use for resumable batches.')]
+  #[CLI\Usage(name: 'drush audit-chain:reencrypt --from=old_profile --to=new_profile', description: 'Re-encrypt every row still on old_profile.')]
+  #[CLI\Usage(name: 'drush audit-chain:reencrypt --from=old_profile --to=new_profile --limit=500', description: 'Re-encrypt the next 500 rows.')]
+  public function reencrypt(
+    array $options = ['from' => '', 'to' => '', 'limit' => 0],
+  ): int {
+    $from = (string) ($options['from'] ?? '');
+    $to = (string) ($options['to'] ?? '');
+    $limit = (int) ($options['limit'] ?? 0);
+    if ($from === '' || $to === '') {
+      $this->logger()->error('Both --from and --to encryption profile ids are required.');
+      return self::EXIT_FAILURE;
+    }
+
+    $result = $this->auditChain->reencrypt($from, $to, $limit);
+    if ($result['refused'] !== NULL) {
+      $this->logger()->error($result['refused']);
+      return self::EXIT_FAILURE;
+    }
+
+    $this->logger()->success(sprintf(
+      'Re-encrypted %d row(s); %d failed; %d still on source profile "%s".',
+      $result['updated'],
+      $result['failed'],
+      $result['remaining'],
+      $from,
+    ));
+    if ($result['failed'] > 0) {
+      return self::EXIT_FAILURE;
+    }
+    return self::EXIT_SUCCESS;
+  }
+
 }

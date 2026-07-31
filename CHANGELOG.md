@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-07-31
+
 ### Added
 - **`drush audit-chain:reencrypt --from=… --to=…` (#2 / d.o #3613978).** Re-encrypts
   stored metadata from one EncryptionProfile to another without touching

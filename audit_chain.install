@@ -64,9 +64,8 @@ function audit_chain_requirements(string $phase): array {
  *
  * Reported at WARNING rather than ERROR: the entries are intact and the chain's
  * integrity guarantee is unaffected. What is lost is readability of their
- * metadata, and there is no re-encrypt path yet (see the project issue queue),
- * so this converts a silent trap into a visible one rather than implying a fix
- * exists.
+ * metadata until <code>drush audit-chain:reencrypt</code> rewrites those rows
+ * to the current profile (without touching hashes).
  *
  * @param array $requirements
  *   The requirements array, added to by reference.

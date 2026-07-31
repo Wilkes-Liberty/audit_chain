@@ -152,6 +152,10 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
       );
     }
 
+    // Encoded outside the lock: encryption can be slow and holds nothing the
+    // chain ordering depends on.
+    $metadataStore = $this->encodeMetadata($extra, $config);
+
     // Serialise read-latest-then-insert. If the lock cannot be taken the entry
     // is still written — never drop an audit record — but the ordering
     // guarantee is best-effort for that request.
@@ -163,7 +167,7 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
 
       $this->database->insert('audit_chain_log')
         ->fields($row + [
-          'metadata' => $this->encodeMetadata($extra, $config),
+          'metadata' => $metadataStore['value'],
           'prev_hash' => $prevHash,
           'row_hash' => $rowHash,
           // Which key material actually produced this hash — empty when the row
@@ -171,6 +175,13 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
           // unresolvable. Advisory only; see verify() on why it is never
           // trusted.
           'key_id' => $key['value'] !== '' ? $key['id'] : '',
+          // Which encryption profile actually encrypted this row's metadata,
+          // empty when it was stored as plaintext. Recorded so a later profile
+          // rotation can be *detected* rather than discovered by an operator
+          // finding old entries unreadable. Not covered by the hash — the chain
+          // covers the plaintext, so encryption can be enabled or changed
+          // without invalidating history.
+          'encryption_profile' => $metadataStore['profile'],
         ])
         ->execute();
 
@@ -550,10 +561,13 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
    * @param \Drupal\Core\Config\ImmutableConfig $config
    *   The audit_chain settings.
    *
-   * @return string
-   *   The encoded value.
+   * @return array{value: string, profile: string}
+   *   'value' is what to store. 'profile' is the encryption profile that
+   *   actually produced it, or '' when the value is plaintext — including when
+   *   a profile is configured but could not be loaded or threw, so the recorded
+   *   profile always describes the bytes rather than the intent.
    */
-  private function encodeMetadata(array $metadata, ImmutableConfig $config): string {
+  private function encodeMetadata(array $metadata, ImmutableConfig $config): array {
     $encoded = json_encode($metadata, self::JSON_FLAGS);
     if ($encoded === FALSE) {
       $this->logger->error(
@@ -566,24 +580,27 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
 
     $profileId = (string) ($config->get('encryption_profile') ?? '');
     if ($profileId === '') {
-      return $json;
+      return ['value' => $json, 'profile' => ''];
     }
     $profile = $this->loadEncryptionProfile($profileId);
     if ($profile === NULL) {
-      return $json;
+      return ['value' => $json, 'profile' => ''];
     }
 
     try {
-      return $this->encryptService->encrypt($json, $profile);
+      return ['value' => $this->encryptService->encrypt($json, $profile), 'profile' => $profileId];
     }
     catch (\Throwable $e) {
       // Storing plaintext beats dropping the entry: an unencrypted record of
       // what happened is still a record, and the warning names the failure.
+      // Reported as plaintext, because that is what was actually stored — a row
+      // labelled with a profile that did not encrypt it would send a later
+      // re-encrypt pass looking for ciphertext that is not there.
       $this->logger->warning(
         'Audit metadata encryption failed; stored as plaintext for this row: @message',
         ['@message' => $e->getMessage()],
       );
-      return $json;
+      return ['value' => $json, 'profile' => ''];
     }
   }
 

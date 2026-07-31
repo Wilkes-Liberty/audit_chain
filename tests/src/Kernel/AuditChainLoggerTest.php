@@ -438,6 +438,55 @@ final class AuditChainLoggerTest extends KernelTestBase {
   }
 
   /**
+   * A retired encryption profile is reported, not left to be discovered.
+   *
+   * Rotating a profile is ordinary key hygiene and silently orphans everything
+   * written under the previous one. Nothing looks broken — the rows are there
+   * and the chain still verifies, because the chain covers the plaintext — so
+   * the loss surfaces only when someone opens an old entry. Which is exactly
+   * the moment an audit trail is supposed to work.
+   */
+  public function testRotatedEncryptionProfileIsReportedOnTheStatusReport(): void {
+    $this->container->get('module_handler')->loadInclude('audit_chain', 'install');
+
+    // Nothing written yet: no finding.
+    $requirements = audit_chain_requirements('runtime');
+    $this->assertArrayNotHasKey('audit_chain_encryption_rotated', $requirements);
+
+    // A row written under no profile is plaintext, not a rotation.
+    $this->chain->log('personnel', 'field_read', ['id' => '1', 'note' => 'plain']);
+    $this->assertSame('', (string) $this->rows()[0]->encryption_profile);
+    $requirements = audit_chain_requirements('runtime');
+    $this->assertArrayNotHasKey(
+      'audit_chain_encryption_rotated',
+      $requirements,
+      'Plaintext rows are not a retired profile.',
+    );
+
+    // Simulate a row written under a profile that is no longer configured.
+    // Written directly rather than by configuring a real EncryptionProfile and
+    // deleting it: the column is what the check reads, and this keeps the test
+    // about the detection rather than about the encrypt module's fixtures.
+    $this->container->get('database')->update('audit_chain_log')
+      ->fields(['encryption_profile' => 'retired_profile'])
+      ->condition('id', 1)
+      ->execute();
+
+    $requirements = audit_chain_requirements('runtime');
+    $this->assertArrayHasKey('audit_chain_encryption_rotated', $requirements);
+    $this->assertSame(
+      REQUIREMENT_WARNING,
+      $requirements['audit_chain_encryption_rotated']['severity'],
+      'The entries are intact and the chain still verifies, so this is not an error.',
+    );
+    $this->assertStringContainsString(
+      'retired_profile',
+      (string) $requirements['audit_chain_encryption_rotated']['value'],
+      'The finding must name the profile the operator has to restore.',
+    );
+  }
+
+  /**
    * The streamed record carries every field a SIEM rule may key on.
    *
    * Asserted field by field rather than by shape: 1.0.0 shipped without

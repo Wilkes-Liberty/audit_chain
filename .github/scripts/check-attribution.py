@@ -20,8 +20,8 @@ Usage:
 
 Exits 0 when clean, 1 when an attribution is found, 2 on a usage error.
 
-PATTERNS is the single source of truth for the forbidden attribution shapes.
-If you later add a local commit hook/guard, keep its patterns in sync with this list.
+PATTERNS is kept identical to the local commit guard's list. Edit one, edit
+both, or the two controls start disagreeing about what is forbidden.
 """
 
 import argparse
@@ -72,7 +72,7 @@ PATTERNS = [
         re.compile(r"\bAI[-\s]?(?:generated|authored|assisted|written)\b", re.I),
         'an "AI-generated" authorship marker',
     ),
-    (re.compile("\U0001F916"), "the robot emoji attribution marker"),
+    (re.compile(r"\U0001F916"), "the robot emoji attribution marker"),
 ]
 
 # --- END SHARED PATTERNS ---
@@ -163,7 +163,7 @@ def short(rev: str) -> str:
 
 
 def read_optional(path):
-    """Read a title/body file. Returns (text, error); if path is falsy, returns ("", None).
+    """Read a title/body file. Returns (text, error); exactly one is set.
 
     An unreadable file is a wiring bug in the workflow, not a clean PR. Warning
     and returning "" would mean the title/body check silently passes whenever

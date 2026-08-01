@@ -49,7 +49,17 @@ final class AuditChainCommands extends DrushCommands {
     $result = $this->auditChain->verify();
 
     if ($result['ok']) {
-      $this->logger()->success(sprintf('Audit chain OK — %d entries verified.', $rows));
+      if (!empty($result['sealed_through'])) {
+        $this->logger()->success(sprintf(
+          'Audit chain OK — sealed through row id %d; content verified from row id %s (%d total entries).',
+          (int) $result['sealed_through'],
+          $result['verified_from'] !== NULL ? (string) $result['verified_from'] : '(none post-seal)',
+          $rows,
+        ));
+      }
+      else {
+        $this->logger()->success(sprintf('Audit chain OK — %d entries verified.', $rows));
+      }
       return self::EXIT_SUCCESS;
     }
 
@@ -58,15 +68,27 @@ final class AuditChainCommands extends DrushCommands {
     // monitoring keys on. What changes is the diagnosis — telling an operator
     // their audit log has been edited when in fact their signing key was
     // missing sends them hunting for an intruder who does not exist.
+    if ($result['reason'] === AuditChainLogger::REASON_SEAL_BROKEN) {
+      $this->logger()->error(sprintf(
+        'Audit chain SEAL BROKEN — the sealed prefix through row id %d has changed since it was sealed '
+        . '(stored row_hash values no longer match the seal digest, or the seal MAC is invalid). '
+        . 'That is tampering of historical evidence, not an ordinary rotation.',
+        (int) ($result['sealed_through'] ?? 0),
+      ));
+      return self::EXIT_FAILURE;
+    }
+
     if ($result['reason'] === AuditChainLogger::REASON_WRITTEN_UNKEYED) {
       $this->logger()->error(sprintf(
         'Audit chain UNSIGNED — %d of %d entries (through row id %d) were hashed without the configured signing key. '
         . 'The chain is internally consistent and nothing has been edited; it simply is not signed through there, '
         . 'so those rows can be rewritten by anyone with database access. '
         . 'This usually means the Key entity did not resolve in the environment that wrote them. '
-        . 'Entries already written cannot be signed retrospectively.',
+        . 'Entries already written cannot be signed retrospectively. '
+        . 'To mark a historical unkeyed prefix without re-chaining, use: drush audit-chain:seal --through=%d --reason="…".',
         (int) $result['unkeyed_rows'],
         $rows,
+        (int) $result['unkeyed_through'],
         (int) $result['unkeyed_through'],
       ));
       return self::EXIT_FAILURE;
@@ -77,6 +99,47 @@ final class AuditChainCommands extends DrushCommands {
       (int) $result['broken_at'],
     ));
     return self::EXIT_FAILURE;
+  }
+
+  /**
+   * Seal an unverifiable prefix (do not re-chain).
+   *
+   * Only covers rows that do not verify under the configured signing keys.
+   * Records a keyed digest over stored hashes so future edits stay detectable.
+   */
+  #[CLI\Command(name: 'audit-chain:seal', aliases: ['acs'])]
+  #[CLI\Option(name: 'through', description: 'Highest row id to include in the seal (inclusive).')]
+  #[CLI\Option(name: 'reason', description: 'Operator reason (required; stored on the seal and in the audit entry).')]
+  #[CLI\Option(name: 'yes', description: 'Skip confirmation.')]
+  #[CLI\Usage(name: 'drush audit-chain:seal --through=1997 --reason="pre-key unkeyed production segment"', description: 'Seal rows 1..1997.')]
+  public function seal(
+    array $options = ['through' => 0, 'reason' => '', 'yes' => FALSE],
+  ): int {
+    $through = (int) ($options['through'] ?? 0);
+    $reason = (string) ($options['reason'] ?? '');
+    if ($through < 1 || $reason === '') {
+      $this->logger()->error('Both --through=<id> and --reason="…" are required.');
+      return self::EXIT_FAILURE;
+    }
+
+    if (empty($options['yes'])) {
+      $this->logger()->warning(sprintf(
+        'Sealing through row %d is permanent site state. Post-seal verification will not re-check that prefix\'s content — only that its stored hashes are unchanged. Continue only if you accept that history as frozen.',
+        $through,
+      ));
+      if (!$this->io()->confirm('Seal this prefix?', FALSE)) {
+        $this->logger()->notice('Aborted.');
+        return self::EXIT_FAILURE;
+      }
+    }
+
+    $result = $this->auditChain->sealPrefix($through, $reason);
+    if (!$result['sealed']) {
+      $this->logger()->error($result['message']);
+      return self::EXIT_FAILURE;
+    }
+    $this->logger()->success($result['message']);
+    return self::EXIT_SUCCESS;
   }
 
   /**

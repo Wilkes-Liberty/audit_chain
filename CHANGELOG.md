@@ -6,6 +6,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Prefix seal for unverifiable history (#5 / d.o #3614137).**
+  `drush audit-chain:seal --through=ID --reason="…"` records a keyed digest over
+  the *stored* `row_hash` values of a historical prefix that does not verify
+  under the configured signing keys (typically unkeyed production rows).
+  `verify()` then content-checks only post-seal rows, reports
+  `sealed_through` / `seal_intact` / `verified_from`, and exits 0 when the seal
+  is intact and the live segment verifies — without re-chaining. Editing a
+  sealed hash fails as `seal_broken`. Status report WARNING when a seal is
+  active. Sealing a still-verifiable row is refused.
+
 ## [1.2.0] - 2026-07-31
 
 ### Added

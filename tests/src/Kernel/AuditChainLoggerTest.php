@@ -582,6 +582,86 @@ final class AuditChainLoggerTest extends KernelTestBase {
   }
 
   /**
+   * Sealing an unkeyed prefix lets verify exit cleanly without re-chaining.
+   *
+   * @covers ::sealPrefix
+   * @covers ::verify
+   * @covers ::getSeal
+   */
+  public function testSealUnkeyedPrefixThenPostSealRowsVerify(): void {
+    // Historical segment written without a key.
+    $this->chain->log('personnel', 'field_read', ['id' => '1']);
+    $this->chain->log('personnel', 'field_read', ['id' => '2']);
+
+    $this->makeKey('chain_key', 'correct-horse-battery-staple');
+    $this->config('audit_chain.settings')->set('hash_key', 'chain_key')->save();
+
+    $before = $this->chain->verify();
+    $this->assertFalse($before['ok']);
+    $this->assertSame(AuditChainLogger::REASON_WRITTEN_UNKEYED, $before['reason']);
+    $this->assertSame(2, $before['unkeyed_through']);
+
+    $seal = $this->chain->sealPrefix(2, 'pre-key production segment');
+    $this->assertTrue($seal['sealed'], $seal['message']);
+    $this->assertNotNull($this->chain->getSeal());
+
+    // Seal writes its own audit row under the now-configured key.
+    $this->chain->log('personnel', 'field_read', ['id' => '3']);
+
+    $after = $this->chain->verify();
+    $this->assertTrue($after['ok'], 'Sealed prefix + keyed post-seal must verify.');
+    $this->assertTrue($after['seal_intact']);
+    $this->assertSame(2, $after['sealed_through']);
+    $this->assertNotNull($after['verified_from']);
+    $this->assertGreaterThan(2, $after['verified_from']);
+    $this->assertSame(0, $after['unkeyed_rows']);
+
+    $this->container->get('module_handler')->loadInclude('audit_chain', 'install');
+    $requirements = audit_chain_requirements('runtime');
+    $this->assertArrayHasKey('audit_chain_prefix_seal', $requirements);
+    $this->assertSame(REQUIREMENT_WARNING, $requirements['audit_chain_prefix_seal']['severity']);
+  }
+
+  /**
+   * Editing a sealed row is detected as a broken seal, not re-chained away.
+   *
+   * @covers ::sealPrefix
+   * @covers ::verify
+   */
+  public function testEditingSealedPrefixBreaksTheSeal(): void {
+    $this->chain->log('personnel', 'field_read', ['id' => '1']);
+    $this->chain->log('personnel', 'field_read', ['id' => '2']);
+    $this->makeKey('chain_key', 'correct-horse-battery-staple');
+    $this->config('audit_chain.settings')->set('hash_key', 'chain_key')->save();
+    $this->assertTrue($this->chain->sealPrefix(2, 'freeze')['sealed']);
+
+    $this->container->get('database')->update('audit_chain_log')
+      ->fields(['row_hash' => str_repeat('a', 64)])
+      ->condition('id', 1)
+      ->execute();
+
+    $result = $this->chain->verify();
+    $this->assertFalse($result['ok']);
+    $this->assertSame(AuditChainLogger::REASON_SEAL_BROKEN, $result['reason']);
+    $this->assertFalse($result['seal_intact']);
+  }
+
+  /**
+   * Sealing a row that still verifies under a key is refused.
+   *
+   * @covers ::sealPrefix
+   */
+  public function testSealRefusesVerifiableRows(): void {
+    $this->makeKey('chain_key', 'correct-horse-battery-staple');
+    $this->config('audit_chain.settings')->set('hash_key', 'chain_key')->save();
+    $this->chain->log('personnel', 'field_read', ['id' => '1']);
+
+    $result = $this->chain->sealPrefix(1, 'should fail');
+    $this->assertFalse($result['sealed']);
+    $this->assertStringContainsString('still verifies', $result['message']);
+  }
+
+  /**
    * The streamed record carries every field a SIEM rule may key on.
    *
    * Asserted field by field rather than by shape: 1.0.0 shipped without

@@ -140,6 +140,22 @@ without touching hashes. Keep profile A loadable until re-encrypt finishes.
 | Encryption profile | Encrypts `metadata` at rest. See the rotation caveat above. |
 | Stream entries | Emits each entry to the `audit_chain` logger channel as a structured record, so syslog or Monolog can forward to a SIEM without polling. |
 
+## Sealing an unverifiable prefix
+
+If history was written unkeyed (or is otherwise not verifiable under today's
+signing keys), **do not re-chain it**. Recomputed hashes would paper over
+tampering. Instead:
+
+```bash
+drush audit-chain:seal --through=1997 --reason="pre-key unkeyed production segment"
+drush audit-chain:verify
+```
+
+The seal is a site-local genesis anchor over stored hashes. It proves nothing
+about the past; it makes any *future* change to that prefix detectable and lets
+post-seal verification exit cleanly. Only rows that do **not** verify under the
+configured keys may be sealed.
+
 ## What it does not do
 
 - **It does not make deletion impossible.** Nothing at the application layer

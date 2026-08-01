@@ -700,7 +700,7 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
    *   verified_from: int|null,
    *   sealed_through: int|null,
    *   seal_intact: bool|null
-   * }
+   *   }
    *   The verdict.
    */
   private function verdict(
@@ -726,7 +726,9 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
   }
 
   /**
-   * Digest over stored row_hash values for ids 1..$throughId (chained rows only).
+   * Digest over stored row_hash values for ids 1..$throughId.
+   *
+   * Only chained rows (non-empty row_hash) contribute.
    */
   private function computePrefixDigest(int $throughId): string {
     $result = $this->database->select('audit_chain_log', 'l')

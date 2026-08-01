@@ -74,7 +74,7 @@ interface AuditChainLoggerInterface {
    *   verified_from: int|null,
    *   sealed_through: int|null,
    *   seal_intact: bool|null
-   * }
+   *   }
    *   Additive shape: read the keys you need. 'sealed_through' / 'seal_intact'
    *   describe an operator seal over a historical unverifiable prefix (#5).
    *   'verified_from' is the first post-seal row id that was content-checked,
@@ -115,7 +115,7 @@ interface AuditChainLoggerInterface {
    *   uid: int,
    *   reason: string,
    *   key_id: string
-   * }|null
+   *   }|null
    *   The seal, or NULL when none is stored.
    */
   public function getSeal(): ?array;

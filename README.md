@@ -151,8 +151,8 @@ drush audit-chain:seal --through=1997 --reason="pre-key unkeyed production segme
 drush audit-chain:verify
 ```
 
-The seal is a site-local genesis anchor over stored hashes. It proves nothing
-about the past; it makes any *future* change to that prefix detectable and lets
+The seal is a site-local genesis anchor over stored `row_hash` values. It proves nothing
+about the past; it makes any *future* change to that prefix’s stored hashes detectable and lets
 post-seal verification exit cleanly. Only rows that do **not** verify under the
 configured keys may be sealed.
 

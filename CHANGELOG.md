@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-07-31
+
 ### Added
 - **Prefix seal for unverifiable history (#5 / d.o #3614137).**
   `drush audit-chain:seal --through=ID --reason="…"` records a keyed digest over

@@ -72,7 +72,7 @@ PATTERNS = [
         re.compile(r"\bAI[-\s]?(?:generated|authored|assisted|written)\b", re.I),
         'an "AI-generated" authorship marker',
     ),
-    (re.compile(r"\U0001F916"), "the robot emoji attribution marker"),
+    (re.compile("\U0001F916"), "the robot emoji attribution marker"),
 ]
 
 # --- END SHARED PATTERNS ---

@@ -357,8 +357,14 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
    */
   public function getSeal(): ?array {
     $seal = $this->state->get(self::STATE_SEAL);
-    if (!is_array($seal) || !isset($seal['sealed_through_id'], $seal['prefix_digest'], $seal['seal_mac'])) {
+    $required = ['sealed_through_id', 'row_count', 'prefix_digest', 'seal_mac', 'timestamp', 'uid', 'reason', 'key_id'];
+    if (!is_array($seal)) {
       return NULL;
+    }
+    foreach ($required as $key) {
+      if (!array_key_exists($key, $seal)) {
+        return NULL;
+      }
     }
     return $seal;
   }

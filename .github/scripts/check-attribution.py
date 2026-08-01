@@ -20,8 +20,8 @@ Usage:
 
 Exits 0 when clean, 1 when an attribution is found, 2 on a usage error.
 
-PATTERNS is kept identical to the local commit guard's list. Edit one, edit
-both, or the two controls start disagreeing about what is forbidden.
+PATTERNS is the single source of truth for the forbidden attribution shapes.
+If you later add a local commit hook/guard, keep its patterns in sync with this list.
 """
 
 import argparse

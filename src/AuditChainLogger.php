@@ -11,6 +11,7 @@ use Drupal\Core\Database\Connection;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Lock\LockBackendInterface;
 use Drupal\Core\Session\AccountProxyInterface;
+use Drupal\Core\State\StateInterface;
 use Drupal\encrypt\EncryptionProfileInterface;
 use Drupal\encrypt\EncryptServiceInterface;
 use Drupal\key\KeyRepositoryInterface;
@@ -73,6 +74,16 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
   public const REASON_WRITTEN_UNKEYED = 'written_unkeyed';
 
   /**
+   * Verify() reason: the sealed prefix digest no longer matches stored hashes.
+   */
+  public const REASON_SEAL_BROKEN = 'seal_broken';
+
+  /**
+   * State key for the active prefix seal (site-local; not config export).
+   */
+  public const STATE_SEAL = 'audit_chain.seal';
+
+  /**
    * Constructs an AuditChainLogger.
    *
    * @param \Drupal\Core\Database\Connection $database
@@ -96,6 +107,8 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
    *   The Encrypt service, for at-rest metadata encryption.
    * @param \Drupal\Core\Entity\EntityTypeManagerInterface $entityTypeManager
    *   The entity type manager, loading EncryptionProfile entities.
+   * @param \Drupal\Core\State\StateInterface $state
+   *   State storage for the site-local prefix seal.
    */
   public function __construct(
     private readonly Connection $database,
@@ -108,6 +121,7 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
     private readonly LoggerInterface $logger,
     private readonly EncryptServiceInterface $encryptService,
     private readonly EntityTypeManagerInterface $entityTypeManager,
+    private readonly StateInterface $state,
   ) {}
 
   /**
@@ -216,17 +230,53 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
    */
   public function verify(): array {
     $keys = $this->verificationKeys();
+    $seal = $this->getSeal();
+    $sealedThrough = $seal !== NULL ? (int) $seal['sealed_through_id'] : NULL;
+    $sealIntact = NULL;
+    $verifiedFrom = NULL;
+
+    if ($seal !== NULL) {
+      $sealIntact = $this->sealIsIntact($seal);
+      if (!$sealIntact) {
+        return $this->verdict(
+          FALSE,
+          NULL,
+          self::REASON_SEAL_BROKEN,
+          0,
+          NULL,
+          NULL,
+          $sealedThrough,
+          FALSE,
+        );
+      }
+      // Accept stored hashes for the sealed prefix; content is not rechecked.
+      $prevRowHash = $this->lastStoredHashThrough($sealedThrough) ?? '';
+    }
+    else {
+      $prevRowHash = '';
+    }
 
     $result = $this->database->select('audit_chain_log', 'l')
       ->fields('l')
       ->orderBy('id', 'ASC')
       ->execute();
 
-    $prevRowHash = '';
     $unkeyedRows = 0;
     $unkeyedThrough = NULL;
     foreach ($result as $record) {
       $record = (array) $record;
+      $id = (int) $record['id'];
+
+      // Sealed prefix: skip content recompute (digest already checked).
+      if ($sealedThrough !== NULL && $id <= $sealedThrough) {
+        if ($record['row_hash'] !== NULL && $record['row_hash'] !== '') {
+          $prevRowHash = (string) $record['row_hash'];
+        }
+        else {
+          $prevRowHash = '';
+        }
+        continue;
+      }
 
       // Rows with no hash predate chaining (or were written by a migration
       // that could not chain them). Skip, and reset so the next chained row can
@@ -234,6 +284,10 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
       if ($record['row_hash'] === NULL || $record['row_hash'] === '') {
         $prevRowHash = '';
         continue;
+      }
+
+      if ($verifiedFrom === NULL) {
+        $verifiedFrom = $id;
       }
 
       $canonical = $this->buildCanonical([
@@ -260,7 +314,7 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
 
       // Continuity: this row must point at the previous chained row.
       if ($storedPrev !== $prevRowHash) {
-        return $this->verdict(FALSE, (int) $record['id'], self::REASON_TAMPERED, $unkeyedRows, $unkeyedThrough);
+        return $this->verdict(FALSE, $id, self::REASON_TAMPERED, $unkeyedRows, $unkeyedThrough, $verifiedFrom, $sealedThrough, $sealIntact);
       }
 
       // Integrity: the stored hash must match a recomputation of the content
@@ -283,19 +337,161 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
           continue;
         }
         $unkeyedRows++;
-        $unkeyedThrough = (int) $record['id'];
+        $unkeyedThrough = $id;
         $prevRowHash = $stored;
         continue;
       }
 
-      return $this->verdict(FALSE, (int) $record['id'], self::REASON_TAMPERED, $unkeyedRows, $unkeyedThrough);
+      return $this->verdict(FALSE, $id, self::REASON_TAMPERED, $unkeyedRows, $unkeyedThrough, $verifiedFrom, $sealedThrough, $sealIntact);
     }
 
     if ($unkeyedRows > 0) {
-      return $this->verdict(FALSE, NULL, self::REASON_WRITTEN_UNKEYED, $unkeyedRows, $unkeyedThrough);
+      return $this->verdict(FALSE, NULL, self::REASON_WRITTEN_UNKEYED, $unkeyedRows, $unkeyedThrough, $verifiedFrom, $sealedThrough, $sealIntact);
     }
 
-    return $this->verdict(TRUE, NULL, NULL, 0, NULL);
+    return $this->verdict(TRUE, NULL, NULL, 0, NULL, $verifiedFrom, $sealedThrough, $sealIntact);
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function getSeal(): ?array {
+    $seal = $this->state->get(self::STATE_SEAL);
+    $required = ['sealed_through_id', 'row_count', 'prefix_digest', 'seal_mac', 'timestamp', 'uid', 'reason', 'key_id'];
+    if (!is_array($seal)) {
+      return NULL;
+    }
+    foreach ($required as $key) {
+      if (!array_key_exists($key, $seal)) {
+        return NULL;
+      }
+    }
+    return $seal;
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function sealPrefix(int $throughId, string $reason): array {
+    $reason = trim($reason);
+    if ($throughId < 1) {
+      return ['sealed' => FALSE, 'message' => 'throughId must be a positive row id.', 'seal' => NULL];
+    }
+    if ($reason === '') {
+      return ['sealed' => FALSE, 'message' => 'A non-empty reason is required.', 'seal' => NULL];
+    }
+
+    $maxId = (int) $this->database->select('audit_chain_log', 'l')
+      ->orderBy('id', 'DESC')
+      ->range(0, 1)
+      ->fields('l', ['id'])
+      ->execute()
+      ->fetchField();
+    if ($maxId < 1) {
+      return ['sealed' => FALSE, 'message' => 'The chain is empty.', 'seal' => NULL];
+    }
+    if ($throughId > $maxId) {
+      return [
+        'sealed' => FALSE,
+        'message' => sprintf('throughId %d is past the last row id %d.', $throughId, $maxId),
+        'seal' => NULL,
+      ];
+    }
+
+    // May only seal rows that do not verify under the site's signing keys.
+    $keys = $this->verificationKeys();
+    if ($keys === []) {
+      return [
+        'sealed' => FALSE,
+        'message' => 'Refusing to seal: no signing key is configured. An unkeyed-by-design chain has nothing unverifiable to seal; configure a hash_key first if the history was written unsigned by accident.',
+        'seal' => NULL,
+      ];
+    }
+    $rows = $this->database->select('audit_chain_log', 'l')
+      ->fields('l')
+      ->condition('id', $throughId, '<=')
+      ->orderBy('id', 'ASC')
+      ->execute();
+    $chained = 0;
+    foreach ($rows as $record) {
+      $record = (array) $record;
+      if ($record['row_hash'] === NULL || $record['row_hash'] === '') {
+        continue;
+      }
+      $chained++;
+      $id = (int) $record['id'];
+      $canonical = $this->buildCanonical([
+        'channel' => (string) ($record['channel'] ?? ''),
+        'operation' => substr((string) $record['operation'], 0, 64),
+        'entity_type' => $record['entity_type'],
+        'bundle' => $record['bundle'],
+        'entity_id' => (string) ($record['entity_id'] ?? ''),
+        'entity_label' => isset($record['entity_label']) ? (string) $record['entity_label'] : NULL,
+        'ip_address' => isset($record['ip_address']) ? (string) $record['ip_address'] : NULL,
+        'user_agent' => isset($record['user_agent']) ? (string) $record['user_agent'] : NULL,
+        'timestamp' => (int) $record['timestamp'],
+        'uid' => (int) $record['uid'],
+      ], $this->decodeMetadata(
+        (string) ($record['metadata'] ?? ''),
+        (string) ($record['encryption_profile'] ?? ''),
+      ));
+      $storedPrev = (string) ($record['prev_hash'] ?? '');
+      $stored = (string) $record['row_hash'];
+      if ($this->matchesAnyKey($stored, $storedPrev, $canonical, $keys, (string) ($record['key_id'] ?? ''))) {
+        return [
+          'sealed' => FALSE,
+          'message' => sprintf(
+            'Refusing to seal: row %d still verifies under a configured signing key. Sealing would hide verifiable history.',
+            $id,
+          ),
+          'seal' => NULL,
+        ];
+      }
+    }
+    if ($chained < 1) {
+      return ['sealed' => FALSE, 'message' => 'No chained rows in the requested prefix.', 'seal' => NULL];
+    }
+
+    $prefixDigest = $this->computePrefixDigest($throughId);
+    $keyId = (string) ($this->configFactory->get('audit_chain.settings')->get('hash_key') ?? '');
+    $keyMaterial = $this->resolveHashKey($keyId);
+    $uid = (int) $this->currentUser->id();
+    $timestamp = $this->time->getRequestTime();
+    $macPayload = $this->sealMacPayload($throughId, $chained, $prefixDigest, $timestamp, $uid, $reason, $keyId);
+    $sealMac = $keyMaterial['value'] !== ''
+      ? hash_hmac('sha256', $macPayload, $keyMaterial['value'])
+      : hash('sha256', $macPayload);
+
+    $seal = [
+      'sealed_through_id' => $throughId,
+      'row_count' => $chained,
+      'prefix_digest' => $prefixDigest,
+      'seal_mac' => $sealMac,
+      'timestamp' => $timestamp,
+      'uid' => $uid,
+      'reason' => $reason,
+      'key_id' => $keyId,
+    ];
+    $this->state->set(self::STATE_SEAL, $seal);
+
+    // Never invisible: the seal itself is an audit row.
+    $this->log('audit_chain', 'prefix_sealed', [
+      'id' => (string) $throughId,
+      'sealed_through_id' => $throughId,
+      'row_count' => $chained,
+      'reason' => $reason,
+      'prefix_digest' => $prefixDigest,
+    ]);
+
+    return [
+      'sealed' => TRUE,
+      'message' => sprintf(
+        'Sealed rows through id %d (%d chained hashes). Post-seal verification starts after that id.',
+        $throughId,
+        $chained,
+      ),
+      'seal' => $seal,
+    ];
   }
 
   /**
@@ -491,21 +687,143 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
    * @param string|null $reason
    *   One of the REASON_* constants, or NULL when ok.
    * @param int $unkeyedRows
-   *   How many rows verified only without a key.
+   *   How many post-seal rows verified only without a key.
    * @param int|null $unkeyedThrough
-   *   The highest row id that verified only without a key.
+   *   The highest such row id.
+   * @param int|null $verifiedFrom
+   *   First post-seal row id content-checked, or NULL.
+   * @param int|null $sealedThrough
+   *   Active seal's sealed_through_id, or NULL.
+   * @param bool|null $sealIntact
+   *   Whether the seal digest matches; NULL when no seal.
    *
-   * @return array{ok: bool, broken_at: int|null, reason: string|null, unkeyed_rows: int, unkeyed_through: int|null}
+   * @return array{
+   *   ok: bool,
+   *   broken_at: int|null,
+   *   reason: string|null,
+   *   unkeyed_rows: int,
+   *   unkeyed_through: int|null,
+   *   verified_from: int|null,
+   *   sealed_through: int|null,
+   *   seal_intact: bool|null
+   *   }
    *   The verdict.
    */
-  private function verdict(bool $ok, ?int $brokenAt, ?string $reason, int $unkeyedRows, ?int $unkeyedThrough): array {
+  private function verdict(
+    bool $ok,
+    ?int $brokenAt,
+    ?string $reason,
+    int $unkeyedRows,
+    ?int $unkeyedThrough,
+    ?int $verifiedFrom = NULL,
+    ?int $sealedThrough = NULL,
+    ?bool $sealIntact = NULL,
+  ): array {
     return [
       'ok' => $ok,
       'broken_at' => $brokenAt,
       'reason' => $reason,
       'unkeyed_rows' => $unkeyedRows,
       'unkeyed_through' => $unkeyedThrough,
+      'verified_from' => $verifiedFrom,
+      'sealed_through' => $sealedThrough,
+      'seal_intact' => $sealIntact,
     ];
+  }
+
+  /**
+   * Digest over stored row_hash values for ids 1..$throughId.
+   *
+   * Only chained rows (non-empty row_hash) contribute.
+   */
+  private function computePrefixDigest(int $throughId): string {
+    $result = $this->database->select('audit_chain_log', 'l')
+      ->fields('l', ['id', 'row_hash'])
+      ->condition('id', $throughId, '<=')
+      ->orderBy('id', 'ASC')
+      ->execute();
+    $parts = [];
+    foreach ($result as $record) {
+      if ($record->row_hash === NULL || $record->row_hash === '') {
+        continue;
+      }
+      $parts[] = (int) $record->id . ':' . (string) $record->row_hash;
+    }
+    return hash('sha256', implode("\n", $parts));
+  }
+
+  /**
+   * Canonical string MAC'd into the seal (fixed field order).
+   */
+  private function sealMacPayload(
+    int $throughId,
+    int $rowCount,
+    string $prefixDigest,
+    int $timestamp,
+    int $uid,
+    string $reason,
+    string $keyId,
+  ): string {
+    $payload = [
+      'key_id' => $keyId,
+      'prefix_digest' => $prefixDigest,
+      'reason' => $reason,
+      'row_count' => $rowCount,
+      'sealed_through_id' => $throughId,
+      'timestamp' => $timestamp,
+      'uid' => $uid,
+    ];
+    ksort($payload);
+    $encoded = json_encode($payload, self::JSON_FLAGS);
+    return $encoded !== FALSE ? $encoded : '';
+  }
+
+  /**
+   * Whether the stored seal still matches the sealed prefix hashes and its MAC.
+   */
+  private function sealIsIntact(array $seal): bool {
+    $throughId = (int) $seal['sealed_through_id'];
+    $expectedDigest = $this->computePrefixDigest($throughId);
+    if (!hash_equals((string) $seal['prefix_digest'], $expectedDigest)) {
+      return FALSE;
+    }
+    $macPayload = $this->sealMacPayload(
+      $throughId,
+      (int) $seal['row_count'],
+      (string) $seal['prefix_digest'],
+      (int) $seal['timestamp'],
+      (int) $seal['uid'],
+      (string) $seal['reason'],
+      (string) ($seal['key_id'] ?? ''),
+    );
+    // Accept current key, retired keys, or unkeyed (as when sealed unkeyed).
+    $candidates = $this->verificationKeys();
+    $candidates['__empty'] = '';
+    foreach ($candidates as $value) {
+      $mac = $value !== ''
+        ? hash_hmac('sha256', $macPayload, $value)
+        : hash('sha256', $macPayload);
+      if (hash_equals((string) $seal['seal_mac'], $mac)) {
+        return TRUE;
+      }
+    }
+    return FALSE;
+  }
+
+  /**
+   * Last non-empty stored row_hash for ids <= $throughId.
+   */
+  private function lastStoredHashThrough(int $throughId): ?string {
+    $hash = $this->database->select('audit_chain_log', 'l')
+      ->fields('l', ['row_hash'])
+      ->condition('id', $throughId, '<=')
+      ->isNotNull('row_hash')
+      ->condition('row_hash', '', '<>')
+      ->orderBy('id', 'DESC')
+      ->range(0, 1)
+      ->execute()
+      ->fetchField();
+    return ($hash !== FALSE && $hash !== NULL && $hash !== '') ? (string) $hash : NULL;
   }
 
   /**

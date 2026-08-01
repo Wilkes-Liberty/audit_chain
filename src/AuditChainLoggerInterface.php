@@ -65,13 +65,61 @@ interface AuditChainLoggerInterface {
    * those rows were written in. Both are failures; only one means someone
    * edited the log.
    *
-   * @return array{ok: bool, broken_at: int|null, reason: string|null, unkeyed_rows: int, unkeyed_through: int|null}
-   *   'ok' is FALSE on either failure. 'reason' is an AuditChainLogger REASON_*
-   *   constant, or NULL when ok. 'broken_at' is the offending row id for
-   *   tampering and NULL otherwise. 'unkeyed_rows' counts rows that verified
-   *   only without a key, and 'unkeyed_through' is the highest such row id.
+   * @return array{
+   *   ok: bool,
+   *   broken_at: int|null,
+   *   reason: string|null,
+   *   unkeyed_rows: int,
+   *   unkeyed_through: int|null,
+   *   verified_from: int|null,
+   *   sealed_through: int|null,
+   *   seal_intact: bool|null
+   *   }
+   *   Additive shape: read the keys you need. 'sealed_through' / 'seal_intact'
+   *   describe an operator seal over a historical unverifiable prefix (#5).
+   *   'verified_from' is the first post-seal row id that was content-checked,
+   *   or NULL when the chain is empty / fully sealed.
    */
   public function verify(): array;
+
+  /**
+   * Seals an unverifiable prefix so it is not re-chained or silently repaired.
+   *
+   * Records a genesis anchor over the *stored* row_hash values of rows with
+   * id <= $throughId. Sealing proves nothing about the past; it makes any
+   * future change to that prefix's stored hashes detectable and lets
+   * post-seal verification exit cleanly. May only cover rows that do not
+   * currently verify under the site's signing keys — sealing a verifiable
+   * row would hide good history.
+   *
+   * Writes an audit entry (`channel=audit_chain`, `operation=prefix_sealed`).
+   *
+   * @param int $throughId
+   *   Highest row id included in the seal (inclusive).
+   * @param string $reason
+   *   Operator reason (required, non-empty).
+   *
+   * @return array{sealed: bool, message: string, seal: array|null}
+   *   Whether the seal was recorded, a human message, and the seal record.
+   */
+  public function sealPrefix(int $throughId, string $reason): array;
+
+  /**
+   * Returns the active prefix seal, if any.
+   *
+   * @return array{
+   *   sealed_through_id: int,
+   *   row_count: int,
+   *   prefix_digest: string,
+   *   seal_mac: string,
+   *   timestamp: int,
+   *   uid: int,
+   *   reason: string,
+   *   key_id: string
+   *   }|null
+   *   The seal, or NULL when none is stored.
+   */
+  public function getSeal(): ?array;
 
   /**
    * Decodes a stored metadata value, decrypting it when necessary.

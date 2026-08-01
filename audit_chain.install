@@ -30,6 +30,7 @@ function audit_chain_requirements(string $phase): array {
   // hanging it off the key check would hide it on exactly the sites that
   // configured signing correctly.
   _audit_chain_requirements_encryption($requirements);
+  _audit_chain_requirements_seal($requirements);
 
   $keyId = (string) (\Drupal::config('audit_chain.settings')->get('hash_key') ?? '');
   if ($keyId === '') {
@@ -53,19 +54,33 @@ function audit_chain_requirements(string $phase): array {
 }
 
 /**
+ * Reports an active prefix seal (historical, not a live-chain failure).
+ *
+ * @param array $requirements
+ *   The requirements array, added to by reference.
+ */
+function _audit_chain_requirements_seal(array &$requirements): void {
+  /** @var \Drupal\audit_chain\AuditChainLoggerInterface $logger */
+  $logger = \Drupal::service('audit_chain.logger');
+  $seal = $logger->getSeal();
+  if ($seal === NULL) {
+    return;
+  }
+  $requirements['audit_chain_prefix_seal'] = [
+    'title' => t('Audit Chain: historical prefix sealed'),
+    'value' => t('Sealed through row id @id (@count chained hashes)', [
+      '@id' => $seal['sealed_through_id'],
+      '@count' => $seal['row_count'],
+    ]),
+    'severity' => REQUIREMENT_WARNING,
+    'description' => t('A genesis seal freezes an unverifiable prefix so it is not re-chained. Content before that id is not re-checked; only that stored hashes are unchanged. Post-seal rows are still fully verified. Reason recorded: @reason. Run <code>drush audit-chain:verify</code> for the live verdict.', [
+      '@reason' => $seal['reason'],
+    ]),
+  ];
+}
+
+/**
  * Reports entries encrypted under a profile the site no longer uses.
- *
- * Rotating an encryption profile is ordinary key hygiene — a compliance regime
- * may require it on a schedule — and it silently orphans every row written
- * under the previous profile. Nothing looks broken: the rows are still there
- * and the hash chain still verifies, because the chain covers the plaintext and
- * not the ciphertext. The loss only surfaces when someone opens an old entry,
- * which is exactly the moment an audit trail is supposed to work.
- *
- * Reported at WARNING rather than ERROR: the entries are intact and the chain's
- * integrity guarantee is unaffected. What is lost is readability of their
- * metadata until <code>drush audit-chain:reencrypt</code> rewrites those rows
- * to the current profile (without touching hashes).
  *
  * @param array $requirements
  *   The requirements array, added to by reference.

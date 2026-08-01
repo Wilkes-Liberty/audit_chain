@@ -163,7 +163,7 @@ def short(rev: str) -> str:
 
 
 def read_optional(path):
-    """Read a title/body file. Returns (text, error); exactly one is set.
+    """Read a title/body file. Returns (text, error); if path is falsy, returns ("", None).
 
     An unreadable file is a wiring bug in the workflow, not a clean PR. Warning
     and returning "" would mean the title/body check silently passes whenever

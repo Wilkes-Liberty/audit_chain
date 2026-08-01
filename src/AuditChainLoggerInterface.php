@@ -87,9 +87,10 @@ interface AuditChainLoggerInterface {
    *
    * Records a genesis anchor over the *stored* row_hash values of rows with
    * id <= $throughId. Sealing proves nothing about the past; it makes any
-   * future change to that prefix’s stored hashes detectable and lets post-seal verification
-   * exit cleanly. May only cover rows that do not currently verify under the
-   * site's signing keys — sealing a verifiable row would hide good history.
+   * future change to that prefix's stored hashes detectable and lets
+   * post-seal verification exit cleanly. May only cover rows that do not
+   * currently verify under the site's signing keys — sealing a verifiable
+   * row would hide good history.
    *
    * Writes an audit entry (`channel=audit_chain`, `operation=prefix_sealed`).
    *

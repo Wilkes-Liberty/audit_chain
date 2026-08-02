@@ -73,7 +73,18 @@ jobs:
         env:
           DRUPAL_CONSTRAINT: ${{ matrix.constraint }}
         run: |
-          composer create-project "drupal/recommended-project:${DRUPAL_CONSTRAINT}" drupal \
+          retry() {
+            local n
+            for n in 1 2 3; do
+              "$@" && return 0
+              if [ "$n" -lt 3 ]; then
+                echo "::warning::attempt $n of 3 failed: $1 $2 - retrying"
+                sleep $((15 * n))
+              fi
+            done
+            return 1
+          }
+          retry composer create-project "drupal/recommended-project:${DRUPAL_CONSTRAINT}" drupal \
             --no-interaction --no-install --no-progress
           cd drupal
           composer config --no-plugins allow-plugins.composer/installers true
@@ -89,11 +100,22 @@ jobs:
           DRUPAL_CONSTRAINT: ${{ matrix.constraint }}
           PHPUNIT_VERSION: ${{ matrix.phpunit }}
         run: |
+          retry() {
+            local n
+            for n in 1 2 3; do
+              "$@" && return 0
+              if [ "$n" -lt 3 ]; then
+                echo "::warning::attempt $n of 3 failed: $1 $2 - retrying"
+                sleep $((15 * n))
+              fi
+            done
+            return 1
+          }
           # -W on both: recommended-project ships a lock file, so each require
           # is a partial update and composer refuses to move the transitive
           # packages core-dev needs.
-          composer require -W --no-interaction --no-progress "drupal/audit_chain:*@dev"
-          composer require -W --dev --no-interaction --no-progress \
+          retry composer require -W --no-interaction --no-progress "drupal/audit_chain:*@dev"
+          retry composer require -W --dev --no-interaction --no-progress \
             "drupal/core-dev:${DRUPAL_CONSTRAINT}" \
             "phpunit/phpunit:${PHPUNIT_VERSION}" \
             "drush/drush:^13"

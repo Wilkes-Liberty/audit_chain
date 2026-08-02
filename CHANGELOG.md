@@ -6,6 +6,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **CI: the attribution check is now the shared workflow.**
+  `.github/workflows/attribution.yml` becomes a thin caller pinned to
+  `Wilkes-Liberty/shared-ci@v1`, and the vendored `.github/scripts/` copies are
+  removed. One implementation for every repository makes copy drift structurally
+  impossible instead of merely detectable.
+
 ## [1.3.0] - 2026-07-31
 
 ### Added

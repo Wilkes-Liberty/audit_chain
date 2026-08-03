@@ -74,18 +74,23 @@ jobs:
           DRUPAL_CONSTRAINT: ${{ matrix.constraint }}
         run: |
           retry() {
-            local n
+            rc=0
             for n in 1 2 3; do
               "$@" && return 0
+              rc=$?
               if [ "$n" -lt 3 ]; then
-                echo "::warning::attempt $n of 3 failed: $1 $2 - retrying"
-                sleep $((15 * n))
+                echo "::warning::attempt $n of 3 failed (exit $rc): $* - retrying"
+                sleep "$((15 * n))"
               fi
             done
-            return 1
+            return "$rc"
           }
-          retry composer create-project "drupal/recommended-project:${DRUPAL_CONSTRAINT}" drupal \
-            --no-interaction --no-install --no-progress
+          scaffold() {
+            rm -rf drupal
+            composer create-project "drupal/recommended-project:${DRUPAL_CONSTRAINT}" drupal \
+              --no-interaction --no-install --no-progress
+          }
+          retry scaffold
           cd drupal
           composer config --no-plugins allow-plugins.composer/installers true
           composer config --no-plugins allow-plugins.drupal/core-composer-scaffold true
@@ -101,15 +106,16 @@ jobs:
           PHPUNIT_VERSION: ${{ matrix.phpunit }}
         run: |
           retry() {
-            local n
+            rc=0
             for n in 1 2 3; do
               "$@" && return 0
+              rc=$?
               if [ "$n" -lt 3 ]; then
-                echo "::warning::attempt $n of 3 failed: $1 $2 - retrying"
-                sleep $((15 * n))
+                echo "::warning::attempt $n of 3 failed (exit $rc): $* - retrying"
+                sleep "$((15 * n))"
               fi
             done
-            return 1
+            return "$rc"
           }
           # -W on both: recommended-project ships a lock file, so each require
           # is a partial update and composer refuses to move the transitive

@@ -17,3 +17,9 @@ audit_chain.settings:
     stream_enabled:
       type: boolean
       label: 'Emit each entry to the audit_chain logger channel (SIEM streaming)'
+    verify_interval:
+      type: integer
+      label: 'Scheduled verification interval in seconds (0 = disabled)'
+    verify_require_keyed:
+      type: boolean
+      label: 'Assurance profile: refuse unkeyed verification and unkeyed history'

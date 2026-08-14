@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-08-14
+
 ### Added
 
 - **Off-system evidence export (#18 / d.o. #3616535, part 2).** Chain rows can

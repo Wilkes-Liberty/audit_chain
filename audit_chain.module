@@ -18,7 +18,19 @@ declare(strict_types=1);
  * records its verdict in state, and a failure alerts through the
  * audit_chain logger channel and the verification-failed event without
  * ever rewriting the chain.
+ *
+ * Verification runs before the evidence export deliberately: the export is
+ * gated on the last recorded verification verdict, so ordering them this way
+ * means a failure discovered on this very cron run already blocks the push.
  */
 function audit_chain_cron(): void {
   \Drupal::service('audit_chain.scheduled_verifier')->runIfDue();
+
+  $config = \Drupal::config('audit_chain.settings');
+  $destination = (string) $config->get('export_destination');
+  if ($config->get('export_enabled') && $destination !== '') {
+    $channel = (string) $config->get('export_channel');
+    \Drupal::service('audit_chain.evidence_exporter')
+      ->exportTo($destination, NULL, $channel === '' ? NULL : $channel);
+  }
 }

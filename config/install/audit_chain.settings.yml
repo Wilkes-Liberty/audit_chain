@@ -4,3 +4,6 @@ encryption_profile: ''
 stream_enabled: false
 verify_interval: 0
 verify_require_keyed: false
+export_enabled: false
+export_destination: ''
+export_channel: ''

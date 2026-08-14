@@ -6,6 +6,28 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Off-system evidence export (#18 / d.o. #3616535, part 2).** Chain rows can
+  now leave the writer's trust boundary as versioned, data-minimized NDJSON —
+  identifiers and hash-chain columns only; `metadata`, IP addresses, user
+  agents and entity labels never leave the system. Destinations are an
+  `https://` ingest URL (one `application/x-ndjson` POST per batch) or a file
+  path (appended under an exclusive lock). Delivery is at-least-once with a
+  per-destination checkpoint that advances only after a successful delivery:
+  an outage leaves it for retry, `--limit` runs are resumable, and `--from-id`
+  replays history without ever moving the checkpoint backwards — consumers
+  deduplicate on the row `id`. Export refuses while the last scheduled
+  verification is failing, so unverified rows are never presented as
+  evidence. Run it with `drush audit-chain:export`, or enable the cron leg
+  (`export_enabled` + `export_destination`, optional `export_channel`
+  partition filter); cron verifies before it exports, so a failure discovered
+  on the same run already blocks the push. Plain `http://` destinations are
+  refused except to loopback, HTTP delivery is bounded by connect/read
+  timeouts, and ingest URLs are logged and checkpointed with credentials
+  stripped. This completes d.o. #3616535 — part 1 (scheduled keyed
+  verification) shipped in 1.4.0.
+
 ## [1.4.0] - 2026-08-14
 
 ### Added

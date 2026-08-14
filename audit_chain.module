@@ -1,0 +1,24 @@
+<?php
+
+/**
+ * @file
+ * Audit Chain companion hooks.
+ *
+ * The module's services do the work; this file only binds them to core's
+ * scheduling. See ScheduledVerifier for the scheduled-verification contract.
+ */
+
+declare(strict_types=1);
+
+/**
+ * Implements hook_cron().
+ *
+ * Runs the scheduled keyed chain verification when it is due
+ * (d.o #3616535). Disabled by default (`verify_interval: 0`); a due run
+ * records its verdict in state, and a failure alerts through the
+ * audit_chain logger channel and the verification-failed event without
+ * ever rewriting the chain.
+ */
+function audit_chain_cron(): void {
+  \Drupal::service('audit_chain.scheduled_verifier')->runIfDue();
+}

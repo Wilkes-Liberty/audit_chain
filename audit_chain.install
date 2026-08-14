@@ -5,6 +5,8 @@
  * Install and schema functions for Audit Chain.
  */
 
+use Drupal\audit_chain\ScheduledVerifier;
+
 /**
  * Implements hook_requirements().
  *
@@ -31,6 +33,7 @@ function audit_chain_requirements(string $phase): array {
   // configured signing correctly.
   _audit_chain_requirements_encryption($requirements);
   _audit_chain_requirements_seal($requirements);
+  _audit_chain_requirements_scheduled_verification($requirements);
 
   $keyId = (string) (\Drupal::config('audit_chain.settings')->get('hash_key') ?? '');
   if ($keyId === '') {
@@ -228,4 +231,78 @@ function audit_chain_update_10002(): string {
   ], ['indexes' => ['encryption_profile' => ['encryption_profile']]]);
 
   return 'Added audit_chain_log.encryption_profile. Existing rows are left unrecorded.';
+}
+
+/**
+ * Reports the scheduled-verification health (d.o #3616535).
+ *
+ * A failed run is an ERROR: the chain's integrity claim is currently
+ * unproven or disproven. A schedule that has gone quiet (no run within twice
+ * its interval) is a WARNING — silence is not health. Requiring keyed
+ * verification while never scheduling it is also a WARNING: the assurance
+ * profile is only as strong as its cadence.
+ *
+ * @param array $requirements
+ *   The requirements array, added to by reference.
+ */
+function _audit_chain_requirements_scheduled_verification(array &$requirements): void {
+  $settings = \Drupal::config('audit_chain.settings');
+  $interval = (int) $settings->get('verify_interval');
+  $require_keyed = (bool) $settings->get('verify_require_keyed');
+  $run = \Drupal::state()->get(ScheduledVerifier::STATE_KEY);
+
+  if ($interval <= 0) {
+    if ($require_keyed) {
+      $requirements['audit_chain_scheduled_verification'] = [
+        'title' => t('Audit Chain: scheduled verification'),
+        'value' => t('Assurance profile enabled, but no verification schedule'),
+        'severity' => REQUIREMENT_WARNING,
+        'description' => t('verify_require_keyed is on while verify_interval is 0: keyed verification is required but never runs. Set a verification interval so integrity is proven on a cadence rather than on demand.'),
+      ];
+    }
+    return;
+  }
+
+  if (!is_array($run)) {
+    $requirements['audit_chain_scheduled_verification'] = [
+      'title' => t('Audit Chain: scheduled verification'),
+      'value' => t('Enabled, but no run recorded yet'),
+      'severity' => REQUIREMENT_WARNING,
+      'description' => t('The schedule is configured but cron has not executed a verification yet. Run cron, then re-check this report.'),
+    ];
+    return;
+  }
+
+  if (!$run['ok']) {
+    $requirements['audit_chain_scheduled_verification'] = [
+      'title' => t('Audit Chain: scheduled verification'),
+      'value' => t('FAILED — @reason (last run @time)', [
+        '@reason' => (string) $run['reason'],
+        '@time' => \Drupal::service('date.formatter')->format((int) $run['time']),
+      ]),
+      'severity' => REQUIREMENT_ERROR,
+      'description' => t('The last scheduled verification did not pass. The chain was not modified by the check; investigate the reported reason with <code>drush audit-chain:verify</code> before trusting new entries.'),
+    ];
+    return;
+  }
+
+  if (\Drupal::time()->getRequestTime() > ((int) $run['time'] + 2 * $interval)) {
+    $requirements['audit_chain_scheduled_verification'] = [
+      'title' => t('Audit Chain: scheduled verification'),
+      'value' => t('Overdue — last successful run @time', [
+        '@time' => \Drupal::service('date.formatter')->format((int) $run['time']),
+      ]),
+      'severity' => REQUIREMENT_WARNING,
+      'description' => t('No verification has run within twice the configured interval. Confirm cron is executing; an unverified chain is an unproven one.'),
+    ];
+    return;
+  }
+
+  $requirements['audit_chain_scheduled_verification'] = [
+    'title' => t('Audit Chain: scheduled verification'),
+    'value' => t('Passing — last run @time', [
+      '@time' => \Drupal::service('date.formatter')->format((int) $run['time']),
+    ]),
+    'severity' => REQUIREMENT_OK,
+  ];
 }

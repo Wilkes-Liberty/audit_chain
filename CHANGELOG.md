@@ -6,6 +6,25 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Scheduled keyed verification with durable health and an alert contract
+  (#18 / d.o. #3616535, part 1).** Cron now runs a full chain verification on
+  a configurable interval (`verify_interval`, disabled by default). Each run
+  records its verdict in state and on the status report: a failure is a
+  REQUIREMENT_ERROR, a schedule gone quiet (no run within twice the interval)
+  or never-yet-run is a WARNING, and a pass reports its last-run time. A
+  failure also logs an error to the `audit_chain` channel (SIEM-forwardable)
+  and dispatches `AuditChainVerificationFailedEvent` so consumers bind their
+  own alerting — the chain itself is never modified by the check. The
+  enterprise assurance profile (`verify_require_keyed`) refuses unkeyed
+  operation outright: no signing key means a stable
+  `keyed_verification_unavailable` failure instead of an unkeyed fallback,
+  and unkeyed history fails it too. Rotated keys keep verifying through
+  `previous_hash_keys`. The off-system stream/export contract is part 2 of
+  the same issue.
+
+
 ### Changed
 
 - **CI: the attribution check is now the shared workflow.**

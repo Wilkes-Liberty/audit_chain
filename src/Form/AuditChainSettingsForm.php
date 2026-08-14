@@ -100,6 +100,21 @@ final class AuditChainSettingsForm extends ConfigFormBase {
       '#description' => $this->t('Emits each entry to the <code>audit_chain</code> channel as a structured record, so syslog or Monolog can forward it to a SIEM without polling the table.'),
     ];
 
+    $form['verify_interval'] = [
+      '#type' => 'number',
+      '#title' => $this->t('Scheduled verification interval (seconds)'),
+      '#min' => 0,
+      '#default_value' => (int) $config->get('verify_interval'),
+      '#description' => $this->t('Run a full chain verification on cron at most this often. <code>0</code> disables the schedule. A failed run is recorded on the status report, logged to the <code>audit_chain</code> channel, and dispatched as an event for alerting consumers — the chain itself is never modified.'),
+    ];
+
+    $form['verify_require_keyed'] = [
+      '#type' => 'checkbox',
+      '#title' => $this->t('Require keyed (HMAC) verification'),
+      '#default_value' => (bool) $config->get('verify_require_keyed'),
+      '#description' => $this->t('The enterprise assurance profile: scheduled verification fails — instead of falling back to unkeyed SHA-256 — when no signing key is configured or when rows were written unkeyed. Pair with a signing key and a verification interval.'),
+    ];
+
     return parent::buildForm($form, $form_state);
   }
 
@@ -112,6 +127,8 @@ final class AuditChainSettingsForm extends ConfigFormBase {
       ->set('previous_hash_keys', array_values(array_filter((array) $form_state->getValue('previous_hash_keys'))))
       ->set('encryption_profile', (string) $form_state->getValue('encryption_profile'))
       ->set('stream_enabled', (bool) $form_state->getValue('stream_enabled'))
+      ->set('verify_interval', (int) $form_state->getValue('verify_interval'))
+      ->set('verify_require_keyed', (bool) $form_state->getValue('verify_require_keyed'))
       ->save();
 
     parent::submitForm($form, $form_state);

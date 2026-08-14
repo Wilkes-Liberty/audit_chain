@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Drupal\Tests\audit_chain\Kernel;
 
 use Drupal\audit_chain\Event\AuditChainVerificationFailedEvent;
-use Drupal\Core\Database\Statement\FetchAs;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\key\Entity\Key;
 use Psr\Log\AbstractLogger;
@@ -118,6 +117,25 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
   }
 
   /**
+   * Snapshots the chain rows in a core-version-agnostic way.
+   *
+   * @return array<int, array{id: int, operation: string, row_hash: string}>
+   *   The rows, keyed and ordered by id.
+   */
+  private function chainSnapshot(): array {
+    $rows = [];
+    $result = \Drupal::database()->select('audit_chain_log', 'l')
+      ->fields('l', ['id', 'operation', 'row_hash'])
+      ->orderBy('id')
+      ->execute();
+    foreach ($result as $record) {
+      $record = (array) $record;
+      $rows[(int) $record['id']] = $record;
+    }
+    return $rows;
+  }
+
+  /**
    * With no interval configured, cron runs nothing and records nothing.
    */
   public function testDisabledByDefaultCronRunsNothing(): void {
@@ -200,10 +218,7 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
       ->fields(['operation' => 'tampered_operation'])
       ->condition('id', $firstId)
       ->execute();
-    $rowsBefore = \Drupal::database()->select('audit_chain_log', 'l')
-      ->fields('l', ['id', 'operation', 'row_hash'])
-      ->orderBy('id')
-      ->execute()->fetchAllAssoc('id', FetchAs::Associative);
+    $rowsBefore = $this->chainSnapshot();
 
     $captured = [];
     \Drupal::service('event_dispatcher')->addListener(
@@ -227,10 +242,7 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
       'The failure must alert through the logger channel.'
     );
 
-    $rowsAfter = \Drupal::database()->select('audit_chain_log', 'l')
-      ->fields('l', ['id', 'operation', 'row_hash'])
-      ->orderBy('id')
-      ->execute()->fetchAllAssoc('id', FetchAs::Associative);
+    $rowsAfter = $this->chainSnapshot();
     $this->assertSame($rowsBefore, $rowsAfter,
       'Verification must never rewrite the chain it inspected — tampered rows included.');
 

@@ -116,6 +116,38 @@ final class AuditChainSettingsForm extends ConfigFormBase {
       '#description' => $this->t('The enterprise assurance profile: scheduled verification fails — instead of falling back to unkeyed SHA-256 — when no signing key is configured or when rows were written unkeyed. Pair with a signing key and a verification interval.'),
     ];
 
+    $form['export_enabled'] = [
+      '#type' => 'checkbox',
+      '#title' => $this->t('Export evidence off-system on cron'),
+      '#default_value' => (bool) $config->get('export_enabled'),
+      '#description' => $this->t('Pushes new chain rows to the destination below after each cron run, as versioned NDJSON. Rows are data-minimized — identifiers and hash-chain columns only, never metadata, IP addresses, or user agents. Delivery is at-least-once (consumers deduplicate on the row id), and export refuses while the last scheduled verification is failing.'),
+    ];
+
+    $form['export_destination'] = [
+      '#type' => 'textfield',
+      '#title' => $this->t('Export destination'),
+      '#maxlength' => 512,
+      '#default_value' => (string) ($config->get('export_destination') ?? ''),
+      '#description' => $this->t('An <code>https://</code> ingest URL (the batch is POSTed as one <code>application/x-ndjson</code> body) or a server file path (appended under an exclusive lock). One-off exports and replays: <code>drush audit-chain:export</code>.'),
+      '#states' => [
+        'visible' => [
+          ':input[name="export_enabled"]' => ['checked' => TRUE],
+        ],
+      ],
+    ];
+
+    $form['export_channel'] = [
+      '#type' => 'textfield',
+      '#title' => $this->t('Export channel filter'),
+      '#default_value' => (string) ($config->get('export_channel') ?? ''),
+      '#description' => $this->t('Restrict the cron export to one channel partition. Leave empty to export all channels.'),
+      '#states' => [
+        'visible' => [
+          ':input[name="export_enabled"]' => ['checked' => TRUE],
+        ],
+      ],
+    ];
+
     return parent::buildForm($form, $form_state);
   }
 
@@ -130,6 +162,9 @@ final class AuditChainSettingsForm extends ConfigFormBase {
       ->set('stream_enabled', (bool) $form_state->getValue('stream_enabled'))
       ->set('verify_interval', (int) $form_state->getValue('verify_interval'))
       ->set('verify_require_keyed', (bool) $form_state->getValue('verify_require_keyed'))
+      ->set('export_enabled', (bool) $form_state->getValue('export_enabled'))
+      ->set('export_destination', trim((string) $form_state->getValue('export_destination')))
+      ->set('export_channel', trim((string) $form_state->getValue('export_channel')))
       ->save();
 
     parent::submitForm($form, $form_state);

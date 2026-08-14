@@ -81,6 +81,40 @@ responses:
 Both exit non-zero. Entries already written unsigned cannot be signed
 retrospectively.
 
+### Exporting evidence off-system
+
+Local-only evidence shares fate with the system it audits: whoever reaches the
+database reaches the record of the reach. The exporter moves the durable copy
+outside that trust boundary:
+
+```bash
+drush audit-chain:export --destination=https://evidence.example.com/ingest
+drush audit-chain:export --destination=/var/evidence/chain.ndjson --from-id=1
+```
+
+Or enable *Export evidence off-system on cron* and every cron run pushes rows
+written since the last successful delivery. Either way the contract is the
+same:
+
+- **Versioned NDJSON.** One JSON object per row, each stamped with
+  `contract_version` so a consumer can detect shape changes. An `https://`
+  destination receives the batch as a single `application/x-ndjson` POST; a
+  file path is appended under an exclusive lock.
+- **Data-minimized.** Exported rows carry identifiers and the hash-chain
+  columns only — `metadata`, IP addresses, user agents and entity labels never
+  leave the system. The trade is deliberate: the off-system copy cannot
+  recompute `row_hash` (the canonical payload includes metadata), so chain
+  verification stays an on-system duty.
+- **Verification-gated.** While the last scheduled verification is failing,
+  export refuses rather than presenting unverified rows as evidence. Resolve
+  the integrity failure first.
+- **At-least-once.** The per-destination checkpoint advances only after a
+  delivery succeeds. An outage leaves it in place and the next run retries the
+  same rows; a crash between delivery and checkpoint re-sends the overlap.
+  Consumers must deduplicate on the row `id` — a duplicate is expected, a gap
+  is not. `--limit` caps a run and stays resumable; `--from-id` replays
+  history without ever moving the checkpoint backwards.
+
 ### Rotating the signing key
 
 Verification accepts a row signed by the current key **or** by any key listed
@@ -139,6 +173,11 @@ without touching hashes. Keep profile A loadable until re-encrypt finishes.
 | Retired signing keys | Keys this chain was signed with previously. Verification accepts a row signed by any of them, so rotating does not make earlier rows look tampered with. Removing one makes the rows it signed unverifiable. |
 | Encryption profile | Encrypts `metadata` at rest. See the rotation caveat above. |
 | Stream entries | Emits each entry to the `audit_chain` logger channel as a structured record, so syslog or Monolog can forward to a SIEM without polling. |
+| Scheduled verification interval | Runs a full chain verification on cron at most this often (`0` disables). A failed run is an error on the status report, an alert on the `audit_chain` channel, and an `AuditChainVerificationFailedEvent` — the chain itself is never modified by the check. |
+| Require keyed verification | The enterprise assurance profile: scheduled verification fails — instead of falling back to unkeyed SHA-256 — when no signing key resolves or when rows were written unkeyed. |
+| Export evidence off-system on cron | Pushes new chain rows to the export destination after each cron run. See *Exporting evidence off-system* for the delivery contract. |
+| Export destination | An `https://` ingest URL or a server file path. |
+| Export channel filter | Restricts the cron export to one channel partition; empty exports all channels. |
 
 ## Sealing an unverifiable prefix
 

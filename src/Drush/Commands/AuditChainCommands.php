@@ -6,6 +6,8 @@ namespace Drupal\audit_chain\Drush\Commands;
 
 use Drupal\audit_chain\AuditChainLogger;
 use Drupal\audit_chain\AuditChainLoggerInterface;
+use Drupal\audit_chain\EvidenceExporter;
+use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Database\Connection;
 use Drush\Attributes as CLI;
 use Drush\Commands\AutowireTrait;
@@ -31,6 +33,10 @@ final class AuditChainCommands extends DrushCommands {
     private readonly AuditChainLoggerInterface $auditChain,
     #[Autowire(service: 'database')]
     private readonly Connection $database,
+    #[Autowire(service: 'audit_chain.evidence_exporter')]
+    private readonly EvidenceExporter $evidenceExporter,
+    #[Autowire(service: 'config.factory')]
+    private readonly ConfigFactoryInterface $configFactory,
   ) {
     parent::__construct();
   }
@@ -181,6 +187,60 @@ final class AuditChainCommands extends DrushCommands {
     if ($result['failed'] > 0) {
       return self::EXIT_FAILURE;
     }
+    return self::EXIT_SUCCESS;
+  }
+
+  /**
+   * Export chain rows to an off-system evidence destination.
+   *
+   * Delivery is at-least-once: the per-destination checkpoint advances only
+   * after a delivery succeeds, so re-running after a failure retries the same
+   * rows and consumers must deduplicate on the row id. Export refuses while
+   * the last scheduled verification is failing.
+   */
+  #[CLI\Command(name: 'audit-chain:export', aliases: ['ace'])]
+  #[CLI\Option(name: 'destination', description: 'http(s) ingest URL or file path. Defaults to the configured export_destination.')]
+  #[CLI\Option(name: 'from-id', description: 'Replay from this row id instead of the checkpoint (the checkpoint never moves backwards).')]
+  #[CLI\Option(name: 'channel', description: 'Restrict the export to one channel partition.')]
+  #[CLI\Option(name: 'limit', description: 'Max rows this run (0 = all). Checkpointing makes limited runs resumable.')]
+  #[CLI\Usage(name: 'drush audit-chain:export --destination=https://evidence.example.com/ingest', description: 'Push new rows since the checkpoint.')]
+  #[CLI\Usage(name: 'drush audit-chain:export --destination=/var/evidence/chain.ndjson --from-id=1', description: 'Replay the full history to a file.')]
+  public function export(
+    array $options = ['destination' => '', 'from-id' => 0, 'channel' => '', 'limit' => 0],
+  ): int {
+    $destination = (string) ($options['destination'] ?? '');
+    if ($destination === '') {
+      $destination = (string) $this->configFactory->get('audit_chain.settings')->get('export_destination');
+    }
+    if ($destination === '') {
+      $this->logger()->error('No destination: pass --destination or configure export_destination.');
+      return self::EXIT_FAILURE;
+    }
+    $fromId = (int) ($options['from-id'] ?? 0);
+    $channel = (string) ($options['channel'] ?? '');
+    $limit = (int) ($options['limit'] ?? 0);
+
+    $run = $this->evidenceExporter->exportTo(
+      $destination,
+      $fromId > 0 ? $fromId : NULL,
+      $channel === '' ? NULL : $channel,
+      $limit > 0 ? $limit : NULL,
+    );
+
+    if (!$run['ok']) {
+      $this->logger()->error(sprintf(
+        'Export failed (%s); the checkpoint is unchanged and a re-run retries the same rows.',
+        (string) $run['reason'],
+      ));
+      return self::EXIT_FAILURE;
+    }
+    $this->logger()->success(sprintf(
+      'Delivered %d row(s)%s to %s; %d remaining beyond the checkpoint.',
+      $run['delivered'],
+      $run['last_id'] !== NULL ? sprintf(' (through id %d)', $run['last_id']) : '',
+      $destination,
+      $run['remaining'],
+    ));
     return self::EXIT_SUCCESS;
   }
 

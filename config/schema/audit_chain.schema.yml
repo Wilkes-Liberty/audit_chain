@@ -23,3 +23,12 @@ audit_chain.settings:
     verify_require_keyed:
       type: boolean
       label: 'Assurance profile: refuse unkeyed verification and unkeyed history'
+    export_enabled:
+      type: boolean
+      label: 'Push new chain rows to the export destination on cron'
+    export_destination:
+      type: string
+      label: 'Evidence export destination — http(s) ingest URL or file path'
+    export_channel:
+      type: string
+      label: 'Restrict the cron export to one channel (empty = all channels)'

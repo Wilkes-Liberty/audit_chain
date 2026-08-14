@@ -288,6 +288,49 @@ final class AuditChainEvidenceExporterTest extends KernelTestBase {
   }
 
   /**
+   * Plain-HTTP destinations are refused except on loopback.
+   */
+  public function testInsecureHttpDestinationRefused(): void {
+    $this->writeRows(1);
+    $history = [];
+    $stack = HandlerStack::create(new MockHandler([new Response(200), new Response(200)]));
+    $stack->push(Middleware::history($history));
+    $this->container->set('http_client', new Client(['handler' => $stack]));
+    $exporter = \Drupal::service('audit_chain.evidence_exporter');
+
+    $run = $exporter->exportTo('http://collector.example.test/ingest');
+    $this->assertFalse($run['ok'], 'Evidence must not travel plain HTTP off-host.');
+    $this->assertSame('insecure_destination', $run['reason']);
+    $this->assertCount(0, $history, 'The refused batch is never sent.');
+
+    $run = $exporter->exportTo('http://127.0.0.1:8125/ingest');
+    $this->assertTrue($run['ok'], 'Loopback HTTP (an on-host collector) stays allowed.');
+  }
+
+  /**
+   * Persisted checkpoints and their labels never carry destination secrets.
+   */
+  public function testCheckpointCarriesNoDestinationSecrets(): void {
+    $this->writeRows(1);
+    $this->container->set('http_client', new Client([
+      'handler' => HandlerStack::create(new MockHandler([new Response(200)])),
+    ]));
+    $destination = 'https://collector.example.test/ingest?token=sekret-value';
+
+    $run = \Drupal::service('audit_chain.evidence_exporter')->exportTo($destination);
+    $this->assertTrue($run['ok']);
+
+    $key = 'audit_chain.export_checkpoint.' . sha1($destination);
+    $checkpoint = \Drupal::state()->get($key);
+    $this->assertIsArray($checkpoint, 'The checkpoint still keys on the full destination.');
+    $stored = json_encode($checkpoint);
+    $this->assertStringNotContainsString('sekret-value', $stored,
+      'Credentials embedded in an ingest URL must never be persisted in state.');
+    $this->assertStringContainsString('collector.example.test', $stored,
+      'The stored label still identifies the destination for operators.');
+  }
+
+  /**
    * A failing scheduled verification blocks export.
    */
   public function testFailingVerificationBlocksExport(): void {

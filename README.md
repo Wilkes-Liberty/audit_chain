@@ -99,7 +99,11 @@ same:
 - **Versioned NDJSON.** One JSON object per row, each stamped with
   `contract_version` so a consumer can detect shape changes. An `https://`
   destination receives the batch as a single `application/x-ndjson` POST; a
-  file path is appended under an exclusive lock.
+  file path is appended under an exclusive lock. Plain `http://` is refused
+  except to loopback (an on-host collector) — evidence does not travel
+  unencrypted off-host. Ingest URLs are logged and checkpointed with
+  credentials stripped, so a token embedded in the URL never reaches logs or
+  state.
 - **Data-minimized.** Exported rows carry identifiers and the hash-chain
   columns only — `metadata`, IP addresses, user agents and entity labels never
   leave the system. The trade is deliberate: the off-system copy cannot

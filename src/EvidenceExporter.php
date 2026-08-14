@@ -59,6 +59,16 @@ final class EvidenceExporter {
    */
   public const REASON_DELIVERY_FAILED = 'delivery_failed';
 
+  /**
+   * Refusal reason: plain HTTP to a non-loopback host.
+   */
+  public const REASON_INSECURE_DESTINATION = 'insecure_destination';
+
+  /**
+   * Failure reason: a row could not be JSON-encoded.
+   */
+  public const REASON_ENCODING_FAILED = 'encoding_failed';
+
   public function __construct(
     private readonly Connection $database,
     private readonly StateInterface $state,
@@ -90,10 +100,25 @@ final class EvidenceExporter {
    *   checkpoint after this run), 'reason' (string|null on failure).
    */
   public function exportTo(string $destination, ?int $fromId = NULL, ?string $channel = NULL, ?int $limit = NULL): array {
+    // Evidence must not travel plain HTTP off-host: refuse before reading a
+    // single row. Loopback stays allowed for on-host collector sidecars.
+    if (str_starts_with($destination, 'http://') && !$this->isLoopback($destination)) {
+      $this->logger->warning('Evidence export to @destination refused: plain HTTP off-host would expose evidence in transit. Use https:// or a loopback collector.', [
+        '@destination' => self::redactDestination($destination),
+      ]);
+      return [
+        'ok' => FALSE,
+        'delivered' => 0,
+        'last_id' => NULL,
+        'remaining' => $this->remainingAfter(0, $channel),
+        'reason' => self::REASON_INSECURE_DESTINATION,
+      ];
+    }
+
     $verification = $this->state->get(ScheduledVerifier::STATE_KEY);
     if (\is_array($verification) && empty($verification['ok'])) {
       $this->logger->warning('Evidence export to @destination refused: the last scheduled verification did not pass. Resolve the integrity failure before exporting.', [
-        '@destination' => $destination,
+        '@destination' => self::redactDestination($destination),
       ]);
       return [
         'ok' => FALSE,
@@ -136,20 +161,38 @@ final class EvidenceExporter {
     $count = 0;
     $lastId = $afterId;
     foreach ($query->execute() as $record) {
-      $payload .= json_encode([
-        'contract_version' => self::CONTRACT_VERSION,
-        'id' => (int) $record->id,
-        'channel' => (string) $record->channel,
-        'operation' => (string) $record->operation,
-        'timestamp' => (int) $record->timestamp,
-        'uid' => (int) $record->uid,
-        'entity_type' => $record->entity_type,
-        'bundle' => $record->bundle,
-        'entity_id' => $record->entity_id,
-        'prev_hash' => $record->prev_hash,
-        'row_hash' => $record->row_hash,
-        'key_id' => $record->key_id,
-      ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n";
+      // The throw is defensive: exported columns are machine data, but a
+      // storage backend that admits invalid UTF-8 could still poison one row,
+      // and that must fail the run with a structured reason — not fatal cron.
+      try {
+        $payload .= json_encode([
+          'contract_version' => self::CONTRACT_VERSION,
+          'id' => (int) $record->id,
+          'channel' => (string) $record->channel,
+          'operation' => (string) $record->operation,
+          'timestamp' => (int) $record->timestamp,
+          'uid' => (int) $record->uid,
+          'entity_type' => $record->entity_type,
+          'bundle' => $record->bundle,
+          'entity_id' => $record->entity_id,
+          'prev_hash' => $record->prev_hash,
+          'row_hash' => $record->row_hash,
+          'key_id' => $record->key_id,
+        ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n";
+      }
+      catch (\JsonException $e) {
+        $this->logger->error('Evidence export aborted: row @id could not be JSON-encoded (@message). The checkpoint is unchanged.', [
+          '@id' => (int) $record->id,
+          '@message' => $e->getMessage(),
+        ]);
+        return [
+          'ok' => FALSE,
+          'delivered' => 0,
+          'last_id' => NULL,
+          'remaining' => $this->remainingAfter($checkpointId, $channel),
+          'reason' => self::REASON_ENCODING_FAILED,
+        ];
+      }
       $lastId = (int) $record->id;
       $count++;
     }
@@ -166,7 +209,7 @@ final class EvidenceExporter {
 
     if (!$this->deliver($destination, $payload)) {
       $this->logger->error('Evidence export to @destination failed to deliver @count rows. The checkpoint is unchanged; the next run retries the same rows.', [
-        '@destination' => $destination,
+        '@destination' => self::redactDestination($destination),
         '@count' => $count,
       ]);
       return [
@@ -181,17 +224,20 @@ final class EvidenceExporter {
     // Advance-only: a replay of already-covered history must never pull the
     // checkpoint back behind rows that were delivered in normal runs.
     $newCheckpointId = max($lastId, $checkpointId);
+    // The label is redacted: ingest URLs can embed credentials (userinfo or a
+    // query-string token), and state rows outlive the secret's rotation. The
+    // sha1 key already identifies the destination exactly.
     $this->state->set($checkpointKey, [
       'last_id' => $newCheckpointId,
       'time' => $this->time->getRequestTime(),
-      'destination' => $destination,
+      'destination' => self::redactDestination($destination),
     ]);
 
     $remaining = $this->remainingAfter($newCheckpointId, $channel);
     $this->logger->info('Exported @count audit-chain rows (through id @last_id) to @destination; @remaining remaining.', [
       '@count' => $count,
       '@last_id' => $lastId,
-      '@destination' => $destination,
+      '@destination' => self::redactDestination($destination),
       '@remaining' => $remaining,
     ]);
     return [
@@ -216,6 +262,33 @@ final class EvidenceExporter {
   }
 
   /**
+   * Whether an http(s) destination's host is a loopback address.
+   */
+  private function isLoopback(string $destination): bool {
+    $host = parse_url($destination, PHP_URL_HOST);
+    return \in_array($host, ['127.0.0.1', '::1', '[::1]', 'localhost'], TRUE);
+  }
+
+  /**
+   * A destination label safe to log and persist.
+   *
+   * Ingest URLs can embed credentials — userinfo or a query-string token — so
+   * only scheme, host, port and path survive. File paths pass through.
+   */
+  public static function redactDestination(string $destination): string {
+    if (!str_starts_with($destination, 'http://') && !str_starts_with($destination, 'https://')) {
+      return $destination;
+    }
+    $parts = parse_url($destination);
+    if ($parts === FALSE || empty($parts['host'])) {
+      return '(unparseable URL)';
+    }
+    return ($parts['scheme'] ?? 'https') . '://' . $parts['host']
+      . (isset($parts['port']) ? ':' . $parts['port'] : '')
+      . ($parts['path'] ?? '');
+  }
+
+  /**
    * Delivers one NDJSON batch; FALSE on any failure (nothing checkpointed).
    */
   private function deliver(string $destination, string $payload): bool {
@@ -224,6 +297,10 @@ final class EvidenceExporter {
         $response = $this->httpClient->request('POST', $destination, [
           'headers' => ['Content-Type' => 'application/x-ndjson'],
           'body' => $payload,
+          // Bounded so cron and drush cannot hang on a stalled collector; a
+          // timeout is a delivery failure and retries from the checkpoint.
+          'connect_timeout' => 10,
+          'timeout' => 30,
         ]);
       }
       catch (GuzzleException) {

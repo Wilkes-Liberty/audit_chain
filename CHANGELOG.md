@@ -22,8 +22,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   evidence. Run it with `drush audit-chain:export`, or enable the cron leg
   (`export_enabled` + `export_destination`, optional `export_channel`
   partition filter); cron verifies before it exports, so a failure discovered
-  on the same run already blocks the push. This completes d.o. #3616535 —
-  part 1 (scheduled keyed verification) shipped in 1.4.0.
+  on the same run already blocks the push. Plain `http://` destinations are
+  refused except to loopback, HTTP delivery is bounded by connect/read
+  timeouts, and ingest URLs are logged and checkpointed with credentials
+  stripped. This completes d.o. #3616535 — part 1 (scheduled keyed
+  verification) shipped in 1.4.0.
 
 ## [1.4.0] - 2026-08-14
 

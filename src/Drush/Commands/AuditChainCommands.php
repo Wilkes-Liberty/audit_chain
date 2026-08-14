@@ -238,7 +238,7 @@ final class AuditChainCommands extends DrushCommands {
       'Delivered %d row(s)%s to %s; %d remaining beyond the checkpoint.',
       $run['delivered'],
       $run['last_id'] !== NULL ? sprintf(' (through id %d)', $run['last_id']) : '',
-      $destination,
+      EvidenceExporter::redactDestination($destination),
       $run['remaining'],
     ));
     return self::EXIT_SUCCESS;

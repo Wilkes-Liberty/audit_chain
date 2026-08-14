@@ -43,6 +43,7 @@ services:
       - '@datetime.time'
       - '@event_dispatcher'
       - '@logger.channel.audit_chain'
+      - '@key.repository'
 
   Drupal\audit_chain\AuditChainLoggerInterface: '@audit_chain.logger'
   Drupal\audit_chain\AuditChainCollector: '@audit_chain.collector'

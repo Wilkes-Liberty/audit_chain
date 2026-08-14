@@ -104,6 +104,7 @@ final class AuditChainSettingsForm extends ConfigFormBase {
       '#type' => 'number',
       '#title' => $this->t('Scheduled verification interval (seconds)'),
       '#min' => 0,
+      '#step' => 1,
       '#default_value' => (int) $config->get('verify_interval'),
       '#description' => $this->t('Run a full chain verification on cron at most this often. <code>0</code> disables the schedule. A failed run is recorded on the status report, logged to the <code>audit_chain</code> channel, and dispatched as an event for alerting consumers — the chain itself is never modified.'),
     ];

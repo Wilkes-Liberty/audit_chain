@@ -8,6 +8,7 @@ use Drupal\audit_chain\Event\AuditChainVerificationFailedEvent;
 use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\State\StateInterface;
+use Drupal\key\KeyRepositoryInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
@@ -46,6 +47,7 @@ final class ScheduledVerifier {
     private readonly TimeInterface $time,
     private readonly EventDispatcherInterface $eventDispatcher,
     private readonly LoggerInterface $logger,
+    private readonly KeyRepositoryInterface $keyRepository,
   ) {}
 
   /**
@@ -60,7 +62,7 @@ final class ScheduledVerifier {
       return NULL;
     }
     $last = $this->state->get(self::STATE_KEY);
-    if (is_array($last) && $this->time->getRequestTime() < ((int) $last['time'] + $interval)) {
+    if (is_array($last) && $this->time->getRequestTime() < ((int) ($last['time'] ?? 0) + $interval)) {
       return NULL;
     }
     return $this->runNow();
@@ -76,7 +78,12 @@ final class ScheduledVerifier {
   public function runNow(): array {
     $settings = $this->configFactory->get('audit_chain.settings');
     $requireKeyed = (bool) $settings->get('verify_require_keyed');
-    $keyConfigured = (string) ($settings->get('hash_key') ?? '') !== '';
+    // A key is only "configured" when it resolves to a non-empty secret: a
+    // hash_key naming a missing or empty Key entity means writes fall back to
+    // unkeyed SHA-256, and the assurance profile must treat that as unkeyed.
+    $keyId = (string) ($settings->get('hash_key') ?? '');
+    $key = $keyId !== '' ? $this->keyRepository->getKey($keyId) : NULL;
+    $keyConfigured = $key !== NULL && (string) $key->getKeyValue() !== '';
 
     if ($requireKeyed && !$keyConfigured) {
       // The assurance profile never falls back to unkeyed verification: an

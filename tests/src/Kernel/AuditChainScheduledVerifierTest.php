@@ -251,6 +251,27 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
   }
 
   /**
+   * An unresolvable signing key is not keyed operation: the profile fails.
+   */
+  public function testKeyedRequiredWithUnresolvableKeyFails(): void {
+    // hash_key names a Key entity that does not exist: writes fall back to
+    // unkeyed SHA-256, so the assurance profile must refuse — a config string
+    // alone is not a key.
+    $this->config('audit_chain.settings')
+      ->set('hash_key', 'no_such_key')
+      ->set('verify_interval', 3600)
+      ->set('verify_require_keyed', TRUE)
+      ->save();
+
+    $this->runCron();
+    $run = $this->lastRun();
+    $this->assertIsArray($run);
+    $this->assertFalse($run['ok'],
+      'An unresolvable key must fail the assurance profile, not pass as keyed.');
+    $this->assertSame('keyed_verification_unavailable', $run['reason']);
+  }
+
+  /**
    * Rows written unkeyed are rejected once the assurance profile is on.
    */
   public function testUnkeyedRowsRejectedUnderAssuranceProfile(): void {

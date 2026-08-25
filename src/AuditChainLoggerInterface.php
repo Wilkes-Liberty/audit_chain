@@ -63,7 +63,10 @@ interface AuditChainLoggerInterface {
    * signing key is not (`REASON_WRITTEN_UNKEYED`) — that is a chain which ran
    * unsigned, usually because a Key entity did not resolve in the environment
    * those rows were written in. Both are failures; only one means someone
-   * edited the log.
+   * edited the log. A seal whose stored prefix digest matches but whose MAC
+   * cannot be authenticated with a local key is `REASON_SEAL_FOREIGN`: still
+   * unverified and fail-closed, but not evidence that the copied hashes
+   * changed.
    *
    * @return array{
    *   ok: bool,
@@ -77,6 +80,8 @@ interface AuditChainLoggerInterface {
    *   }
    *   Additive shape: read the keys you need. 'sealed_through' / 'seal_intact'
    *   describe an operator seal over a historical unverifiable prefix (#5).
+   *   `seal_intact` is FALSE for both a changed prefix and a foreign seal;
+   *   inspect `reason` to distinguish them.
    *   'verified_from' is the first post-seal row id that was content-checked,
    *   or NULL when the chain is empty / fully sealed.
    */

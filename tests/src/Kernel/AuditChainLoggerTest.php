@@ -647,6 +647,89 @@ final class AuditChainLoggerTest extends KernelTestBase {
   }
 
   /**
+   * A copied seal signed by another environment is not reported as tampering.
+   *
+   * @covers ::sealPrefix
+   * @covers ::verify
+   */
+  public function testForeignSealIsDistinctFromBrokenSeal(): void {
+    // Model production history that was unsigned before a production-only key
+    // was configured and used to seal it.
+    $this->chain->log('personnel', 'field_read', ['id' => '1']);
+    $this->chain->log('personnel', 'field_read', ['id' => '2']);
+    $this->makeKey('production_key', 'production-secret');
+    $this->config('audit_chain.settings')->set('hash_key', 'production_key')->save();
+    $this->assertTrue($this->chain->sealPrefix(2, 'freeze')['sealed']);
+
+    // A database refresh carries the stored rows and site-local seal, while
+    // staging resolves only its own environment-specific signing key.
+    $this->makeKey('staging_key', 'staging-secret');
+    $this->config('audit_chain.settings')
+      ->set('hash_key', 'staging_key')
+      ->set('previous_hash_keys', ['production_key'])
+      ->save();
+    $this->assertTrue(
+      $this->chain->verify()['ok'],
+      'A source key explicitly retained for verification authenticates the copied seal.',
+    );
+
+    $this->config('audit_chain.settings')->set('previous_hash_keys', [])->save();
+    Key::load('production_key')?->delete();
+    $rowsBefore = $this->rows();
+
+    $result = $this->chain->verify();
+    $this->assertFalse($result['ok'], 'A seal that cannot be authenticated locally must remain fail-closed.');
+    $this->assertSame(AuditChainLogger::REASON_SEAL_FOREIGN, $result['reason']);
+    $this->assertNull($result['broken_at']);
+    $this->assertFalse($result['seal_intact']);
+    $this->assertSame(2, $result['sealed_through']);
+    $this->assertEquals($rowsBefore, $this->rows(), 'Classifying a foreign seal must be read-only.');
+  }
+
+  /**
+   * Replacing a keyed seal with an unsigned digest never authenticates it.
+   *
+   * @covers ::sealPrefix
+   * @covers ::verify
+   */
+  public function testSealMacCannotBeReplacedWithUnkeyedDigest(): void {
+    $this->chain->log('personnel', 'field_read', ['id' => '1']);
+    $this->makeKey('chain_key', 'correct-horse-battery-staple');
+    $this->config('audit_chain.settings')->set('hash_key', 'chain_key')->save();
+    $this->assertTrue($this->chain->sealPrefix(1, 'freeze')['sealed']);
+
+    // Model a database writer changing the prefix and replacing the seal with
+    // a plain SHA-256 digest it can compute without the trusted signing key.
+    $this->container->get('database')->update('audit_chain_log')
+      ->fields(['row_hash' => str_repeat('a', 64)])
+      ->condition('id', 1)
+      ->execute();
+    $seal = $this->chain->getSeal();
+    $this->assertIsArray($seal);
+    $seal['prefix_digest'] = hash('sha256', '1:' . str_repeat('a', 64));
+    $payload = [
+      'key_id' => $seal['key_id'],
+      'prefix_digest' => $seal['prefix_digest'],
+      'reason' => $seal['reason'],
+      'row_count' => $seal['row_count'],
+      'sealed_through_id' => $seal['sealed_through_id'],
+      'timestamp' => $seal['timestamp'],
+      'uid' => $seal['uid'],
+    ];
+    ksort($payload);
+    $seal['seal_mac'] = hash('sha256', (string) json_encode(
+      $payload,
+      JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE,
+    ));
+    $this->container->get('state')->set(AuditChainLogger::STATE_SEAL, $seal);
+
+    $result = $this->chain->verify();
+    $this->assertFalse($result['ok']);
+    $this->assertSame(AuditChainLogger::REASON_SEAL_FOREIGN, $result['reason']);
+    $this->assertFalse($result['seal_intact']);
+  }
+
+  /**
    * Sealing a row that still verifies under a key is refused.
    *
    * @covers ::sealPrefix
@@ -659,6 +742,26 @@ final class AuditChainLoggerTest extends KernelTestBase {
     $result = $this->chain->sealPrefix(1, 'should fail');
     $this->assertFalse($result['sealed']);
     $this->assertStringContainsString('still verifies', $result['message']);
+  }
+
+  /**
+   * Sealing requires the active signing key, not merely a retired key.
+   *
+   * @covers ::sealPrefix
+   */
+  public function testSealRefusesUnresolvableActiveKeyWithRetiredKey(): void {
+    $this->chain->log('personnel', 'field_read', ['id' => '1']);
+    $this->makeKey('retired_key', 'retired-secret');
+    $this->config('audit_chain.settings')
+      ->set('hash_key', 'missing_active_key')
+      ->set('previous_hash_keys', ['retired_key'])
+      ->save();
+
+    $result = $this->chain->sealPrefix(1, 'must not be unsigned');
+    $this->assertFalse($result['sealed']);
+    $this->assertNull($result['seal']);
+    $this->assertStringContainsString('cannot be resolved', $result['message']);
+    $this->assertNull($this->chain->getSeal());
   }
 
   /**

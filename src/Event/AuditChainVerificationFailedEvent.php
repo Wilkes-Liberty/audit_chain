@@ -7,13 +7,15 @@ namespace Drupal\audit_chain\Event;
 use Symfony\Contracts\EventDispatcher\Event;
 
 /**
- * Dispatched when a scheduled chain verification fails.
+ * Dispatched when scheduled verification finds an integrity failure.
  *
  * The alert contract for consumers (d.o #3616535): Audit Chain records the
  * durable failure state and logs the error itself; this event is how a
  * consumer binds its own alerting — webhooks, email, dashboards — to an
  * integrity failure without Audit Chain owning those channels. Dispatched
- * only on failure; a healthy run updates state silently.
+ * only for integrity or assurance failures. A foreign seal is recorded as an
+ * unverified, fail-closed run but is an advisory rather than evidence that the
+ * copied prefix changed, so it does not dispatch this event.
  */
 final class AuditChainVerificationFailedEvent extends Event {
 

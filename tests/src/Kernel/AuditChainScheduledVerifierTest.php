@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\audit_chain\Kernel;
 
+use Drupal\audit_chain\AuditChainLogger;
 use Drupal\audit_chain\Event\AuditChainVerificationFailedEvent;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\key\Entity\Key;
@@ -248,6 +249,59 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
 
     $requirements = $this->runtimeRequirements();
     $this->assertSame(REQUIREMENT_ERROR, $requirements['audit_chain_scheduled_verification']['severity']);
+  }
+
+  /**
+   * A foreign seal stays fail-closed without raising a tampering incident.
+   */
+  public function testForeignSealWarnsWithoutDispatchingFailureEvent(): void {
+    $logger = \Drupal::service('audit_chain.logger');
+    $logger->log('personnel', 'field_read', ['id' => '1']);
+    $logger->log('personnel', 'field_read', ['id' => '2']);
+    $this->makeKey('production_key', 'production-secret');
+    $this->config('audit_chain.settings')->set('hash_key', 'production_key')->save();
+    $this->assertTrue($logger->sealPrefix(2, 'production prefix')['sealed']);
+
+    // Model a database refresh into an environment that holds a different key.
+    $this->makeKey('staging_key', 'staging-secret');
+    $this->config('audit_chain.settings')
+      ->set('hash_key', 'staging_key')
+      ->set('previous_hash_keys', [])
+      ->set('verify_interval', 3600)
+      ->save();
+    Key::load('production_key')?->delete();
+    $rowsBefore = $this->chainSnapshot();
+    $spy = $this->spyChannel();
+
+    $captured = [];
+    \Drupal::service('event_dispatcher')->addListener(
+      AuditChainVerificationFailedEvent::EVENT_NAME,
+      function (AuditChainVerificationFailedEvent $event) use (&$captured): void {
+        $captured[] = $event->run;
+      }
+    );
+
+    $this->runCron();
+    $run = $this->lastRun();
+    $this->assertFalse($run['ok'], 'A foreign seal must not be treated as verified.');
+    $this->assertSame(AuditChainLogger::REASON_SEAL_FOREIGN, $run['reason']);
+    $this->assertSame([], $captured, 'A foreign seal is not a tampering event.');
+    $this->assertNotEmpty(
+      array_filter($spy->records, fn (array $record): bool => $record['level'] === 'warning'),
+      'The advisory must leave an operational signal.'
+    );
+    $this->assertEmpty(
+      array_filter($spy->records, fn (array $record): bool => $record['level'] === 'error'),
+      'An unchanged foreign prefix must not be logged as an integrity failure.'
+    );
+    $this->assertSame($rowsBefore, $this->chainSnapshot(), 'Verification must remain read-only.');
+
+    $requirements = $this->runtimeRequirements();
+    $this->assertSame(
+      REQUIREMENT_WARNING,
+      $requirements['audit_chain_scheduled_verification']['severity'],
+      'The status report must distinguish an unauthenticated copy from tampering.'
+    );
   }
 
   /**

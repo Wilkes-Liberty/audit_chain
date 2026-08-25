@@ -18,10 +18,12 @@ use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
  * Keyed chain integrity is valuable only when verification is routinely
  * executed and a failure leaves the writer's trust boundary (d.o #3616535).
  * Cron drives this service; each due run verifies the whole chain, stores the
- * verdict in state (the status report renders it as health), logs a failure
- * through the audit_chain channel (SIEM-forwardable), and dispatches
- * AuditChainVerificationFailedEvent so consumers can bind their own alerting.
- * Verification is strictly read-only: a failing chain is never rewritten.
+ * verdict in state (the status report renders it as health), and sends real
+ * integrity failures through the audit_chain channel and event contract.
+ * A foreign prefix seal remains a fail-closed, export-blocking result, but is
+ * logged as an advisory and does not dispatch the tampering-oriented failure
+ * event. Verification is strictly read-only: a failing chain is never
+ * rewritten.
  *
  * The enterprise assurance profile (`verify_require_keyed`) refuses unkeyed
  * operation outright: with no signing key configured the run fails with a
@@ -118,7 +120,12 @@ final class ScheduledVerifier {
 
     $this->state->set(self::STATE_KEY, $run);
 
-    if (!$run['ok']) {
+    if (!$run['ok'] && $run['reason'] === AuditChainLogger::REASON_SEAL_FOREIGN) {
+      $this->logger->warning(
+        'Scheduled audit-chain verification found a FOREIGN SEAL. The sealed prefix hashes are unchanged, but this environment cannot authenticate the seal MAC. The run remains unverified and evidence export stays blocked; verify on the source environment or configure its key as retired if policy permits.',
+      );
+    }
+    elseif (!$run['ok']) {
       $this->logger->error(
         'Scheduled audit-chain verification FAILED: @reason. The chain was not modified; investigate before trusting new entries. See the status report for details.',
         ['@reason' => (string) $run['reason']]

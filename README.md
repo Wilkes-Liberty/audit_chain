@@ -177,7 +177,7 @@ without touching hashes. Keep profile A loadable until re-encrypt finishes.
 | Retired signing keys | Keys this chain was signed with previously. Verification accepts a row signed by any of them, so rotating does not make earlier rows look tampered with. Removing one makes the rows it signed unverifiable. |
 | Encryption profile | Encrypts `metadata` at rest. See the rotation caveat above. |
 | Stream entries | Emits each entry to the `audit_chain` logger channel as a structured record, so syslog or Monolog can forward to a SIEM without polling. |
-| Scheduled verification interval | Runs a full chain verification on cron at most this often (`0` disables). A failed run is an error on the status report, an alert on the `audit_chain` channel, and an `AuditChainVerificationFailedEvent` — the chain itself is never modified by the check. |
+| Scheduled verification interval | Runs a full chain verification on cron at most this often (`0` disables). An integrity failure is an error on the status report, an alert on the `audit_chain` channel, and an `AuditChainVerificationFailedEvent` — the chain itself is never modified by the check. A foreign seal is a fail-closed warning; see below. |
 | Require keyed verification | The enterprise assurance profile: scheduled verification fails — instead of falling back to unkeyed SHA-256 — when no signing key resolves or when rows were written unkeyed. |
 | Export evidence off-system on cron | Pushes new chain rows to the export destination after each cron run. See *Exporting evidence off-system* for the delivery contract. |
 | Export destination | An `https://` ingest URL or a server file path. |
@@ -198,6 +198,30 @@ The seal is a site-local genesis anchor over stored `row_hash` values. It proves
 nothing about the past; it makes any *future* change to that prefix's stored
 hashes detectable and lets post-seal verification exit cleanly. Only rows that
 do **not** verify under the configured keys may be sealed.
+
+### Database refreshes and foreign seals
+
+A database refresh copies the seal in Drupal state, but a sound environment
+separation policy usually does not copy the production HMAC key. On the target,
+`drush audit-chain:verify` therefore reports `SEAL FOREIGN` when the stored
+prefix hashes still match the copied seal digest but no current or retired key
+can authenticate its MAC.
+
+This result stays fail-closed: `verify()` returns `ok: false` with reason
+`seal_foreign`, Drush exits non-zero, and evidence export remains blocked. It is
+reported as a warning and does not dispatch
+`AuditChainVerificationFailedEvent`, because unchanged copied hashes are not by
+themselves evidence of tampering. The seal is still unauthenticated on the
+target and could itself have been altered, so production remains the authority:
+verify there before relying on the prefix. If policy explicitly permits the
+target to hold the source signing material, adding that Key entity to *Retired
+signing keys* authenticates existing seals and rows without using it for new
+writes. Do not copy a production key merely to make a refreshed environment
+green.
+
+If any stored `row_hash` in the sealed prefix changes relative to the seal,
+verification instead reports `SEAL BROKEN`; scheduled verification keeps the
+error log and failure-event behavior for that integrity incident.
 
 ## What it does not do
 

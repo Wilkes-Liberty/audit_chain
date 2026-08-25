@@ -5,6 +5,7 @@
  * Install and schema functions for Audit Chain.
  */
 
+use Drupal\audit_chain\AuditChainLogger;
 use Drupal\audit_chain\ScheduledVerifier;
 
 /**
@@ -236,11 +237,11 @@ function audit_chain_update_10002(): string {
 /**
  * Reports the scheduled-verification health (d.o #3616535).
  *
- * A failed run is an ERROR: the chain's integrity claim is currently
- * unproven or disproven. A schedule that has gone quiet (no run within twice
- * its interval) is a WARNING — silence is not health. Requiring keyed
- * verification while never scheduling it is also a WARNING: the assurance
- * profile is only as strong as its cadence.
+ * An integrity or assurance failure is an ERROR. A foreign seal is a WARNING:
+ * it remains unverified, but its copied prefix hashes have not changed. A
+ * schedule that has gone quiet (no run within twice its interval) is a WARNING
+ * — silence is not health. Requiring keyed verification while never scheduling
+ * it is also a WARNING: the assurance profile is only as strong as its cadence.
  *
  * @param array $requirements
  *   The requirements array, added to by reference.
@@ -269,6 +270,18 @@ function _audit_chain_requirements_scheduled_verification(array &$requirements):
       'value' => t('Enabled, but no run recorded yet'),
       'severity' => REQUIREMENT_WARNING,
       'description' => t('The schedule is configured but cron has not executed a verification yet. Run cron, then re-check this report.'),
+    ];
+    return;
+  }
+
+  if (!$run['ok'] && ($run['reason'] ?? NULL) === AuditChainLogger::REASON_SEAL_FOREIGN) {
+    $requirements['audit_chain_scheduled_verification'] = [
+      'title' => t('Audit Chain: scheduled verification'),
+      'value' => t('FOREIGN SEAL — unverified copy (last run @time)', [
+        '@time' => \Drupal::service('date.formatter')->format((int) $run['time']),
+      ]),
+      'severity' => REQUIREMENT_WARNING,
+      'description' => t('The sealed prefix hashes are unchanged, but this environment cannot authenticate the copied seal with a current or retired signing key. No prefix-hash change was detected. Verification remains fail-closed and evidence export stays blocked. Verify on the source environment, or make its signing key available as a retired key only if your key-separation policy permits.'),
     ];
     return;
   }

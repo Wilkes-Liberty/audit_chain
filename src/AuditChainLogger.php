@@ -79,6 +79,30 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
   public const REASON_SEAL_BROKEN = 'seal_broken';
 
   /**
+   * Verify() reason: seal hashes match, but no local key authenticates its MAC.
+   *
+   * This is expected after refreshing a database into an environment that
+   * deliberately has different signing keys. The copied seal remains
+   * unverified, but unchanged prefix hashes are not evidence of tampering.
+   */
+  public const REASON_SEAL_FOREIGN = 'seal_foreign';
+
+  /**
+   * Internal seal status: digest and MAC both verify locally.
+   */
+  private const SEAL_INTACT = 'intact';
+
+  /**
+   * Internal seal status: digest matches, but its MAC is not verifiable here.
+   */
+  private const SEAL_FOREIGN = 'foreign';
+
+  /**
+   * Internal seal status: stored prefix hashes no longer match its digest.
+   */
+  private const SEAL_BROKEN = 'broken';
+
+  /**
    * State key for the active prefix seal (site-local; not config export).
    */
   public const STATE_SEAL = 'audit_chain.seal';
@@ -236,12 +260,15 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
     $verifiedFrom = NULL;
 
     if ($seal !== NULL) {
-      $sealIntact = $this->sealIsIntact($seal);
+      $sealStatus = $this->sealStatus($seal);
+      $sealIntact = $sealStatus === self::SEAL_INTACT;
       if (!$sealIntact) {
         return $this->verdict(
           FALSE,
           NULL,
-          self::REASON_SEAL_BROKEN,
+          $sealStatus === self::SEAL_BROKEN
+            ? self::REASON_SEAL_BROKEN
+            : self::REASON_SEAL_FOREIGN,
           0,
           NULL,
           NULL,
@@ -398,15 +425,33 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
       ];
     }
 
-    // May only seal rows that do not verify under the site's signing keys.
-    $keys = $this->verificationKeys();
-    if ($keys === []) {
+    // The active key must resolve before inspecting the prefix. Retired keys
+    // are valid verification candidates, but they must never make an
+    // unresolvable active key look sufficient to create a new seal.
+    $keyId = (string) ($this->configFactory->get('audit_chain.settings')->get('hash_key') ?? '');
+    if ($keyId === '') {
       return [
         'sealed' => FALSE,
         'message' => 'Refusing to seal: no signing key is configured. An unkeyed-by-design chain has nothing unverifiable to seal; configure a hash_key first if the history was written unsigned by accident.',
         'seal' => NULL,
       ];
     }
+    $keyMaterial = $this->resolveHashKey($keyId);
+    if ($keyMaterial['value'] === '') {
+      return [
+        'sealed' => FALSE,
+        'message' => sprintf(
+          "Refusing to seal: active signing key '%s' is configured but cannot be resolved. A seal must be authenticated with the active key; fix the Key entity before sealing.",
+          $keyId,
+        ),
+        'seal' => NULL,
+      ];
+    }
+
+    // May only seal rows that do not verify under the site's signing keys.
+    // Reuse the exact active material that will sign the seal so a dynamic key
+    // provider cannot change between the precondition and the write.
+    $keys = [$keyId => $keyMaterial['value']] + $this->verificationKeys();
     $rows = $this->database->select('audit_chain_log', 'l')
       ->fields('l')
       ->condition('id', $throughId, '<=')
@@ -453,14 +498,10 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
     }
 
     $prefixDigest = $this->computePrefixDigest($throughId);
-    $keyId = (string) ($this->configFactory->get('audit_chain.settings')->get('hash_key') ?? '');
-    $keyMaterial = $this->resolveHashKey($keyId);
     $uid = (int) $this->currentUser->id();
     $timestamp = $this->time->getRequestTime();
     $macPayload = $this->sealMacPayload($throughId, $chained, $prefixDigest, $timestamp, $uid, $reason, $keyId);
-    $sealMac = $keyMaterial['value'] !== ''
-      ? hash_hmac('sha256', $macPayload, $keyMaterial['value'])
-      : hash('sha256', $macPayload);
+    $sealMac = hash_hmac('sha256', $macPayload, $keyMaterial['value']);
 
     $seal = [
       'sealed_through_id' => $throughId,
@@ -695,7 +736,7 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
    * @param int|null $sealedThrough
    *   Active seal's sealed_through_id, or NULL.
    * @param bool|null $sealIntact
-   *   Whether the seal digest matches; NULL when no seal.
+   *   Whether both the seal digest and MAC verify; NULL when no seal.
    *
    * @return array{
    *   ok: bool,
@@ -779,13 +820,20 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
   }
 
   /**
-   * Whether the stored seal still matches the sealed prefix hashes and its MAC.
+   * Classifies the stored seal's prefix digest and MAC independently.
+   *
+   * A matching digest with an unknown MAC is a foreign seal, which commonly
+   * occurs after a database refresh across environments with separate keys.
+   * It remains unverified, but is distinct from changed historical hashes.
+   *
+   * @return string
+   *   One of the private SEAL_* status constants.
    */
-  private function sealIsIntact(array $seal): bool {
+  private function sealStatus(array $seal): string {
     $throughId = (int) $seal['sealed_through_id'];
     $expectedDigest = $this->computePrefixDigest($throughId);
     if (!hash_equals((string) $seal['prefix_digest'], $expectedDigest)) {
-      return FALSE;
+      return self::SEAL_BROKEN;
     }
     $macPayload = $this->sealMacPayload(
       $throughId,
@@ -796,18 +844,16 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
       (string) $seal['reason'],
       (string) ($seal['key_id'] ?? ''),
     );
-    // Accept current key, retired keys, or unkeyed (as when sealed unkeyed).
-    $candidates = $this->verificationKeys();
-    $candidates['__empty'] = '';
-    foreach ($candidates as $value) {
-      $mac = $value !== ''
-        ? hash_hmac('sha256', $macPayload, $value)
-        : hash('sha256', $macPayload);
+    // A prefix can only be sealed while a signing key resolves, so accepting
+    // an unkeyed digest here would let database access rewrite both the prefix
+    // and the seal without knowing any trusted key.
+    foreach ($this->verificationKeys() as $value) {
+      $mac = hash_hmac('sha256', $macPayload, $value);
       if (hash_equals((string) $seal['seal_mac'], $mac)) {
-        return TRUE;
+        return self::SEAL_INTACT;
       }
     }
-    return FALSE;
+    return self::SEAL_FOREIGN;
   }
 
   /**

@@ -74,10 +74,21 @@ final class AuditChainCommands extends DrushCommands {
     // monitoring keys on. What changes is the diagnosis — telling an operator
     // their audit log has been edited when in fact their signing key was
     // missing sends them hunting for an intruder who does not exist.
+    if ($result['reason'] === AuditChainLogger::REASON_SEAL_FOREIGN) {
+      $this->logger()->warning(sprintf(
+        'Audit chain SEAL FOREIGN — the stored hashes in the sealed prefix through row id %d still match its digest, '
+        . 'but this environment cannot authenticate the seal MAC with a current or retired signing key. '
+        . 'No sealed hash change was detected. Verify on the source environment, or configure its signing key as retired only if policy permits. '
+        . 'This copy remains unverified and evidence export stays blocked.',
+        (int) ($result['sealed_through'] ?? 0),
+      ));
+      return self::EXIT_FAILURE;
+    }
+
     if ($result['reason'] === AuditChainLogger::REASON_SEAL_BROKEN) {
       $this->logger()->error(sprintf(
         'Audit chain SEAL BROKEN — the sealed prefix through row id %d has changed since it was sealed '
-        . '(stored row_hash values no longer match the seal digest, or the seal MAC is invalid). '
+        . '(stored row_hash values no longer match the seal digest). '
         . 'That is tampering of historical evidence, not an ordinary rotation.',
         (int) ($result['sealed_through'] ?? 0),
       ));

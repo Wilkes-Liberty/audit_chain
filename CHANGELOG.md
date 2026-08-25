@@ -6,6 +6,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Cross-environment prefix seals no longer create false tampering alarms
+  (d.o. #3616792).** Verification now distinguishes a changed sealed-prefix
+  digest (`seal_broken`) from a digest that still matches but whose MAC cannot
+  be authenticated under the target environment's current or retired keys
+  (`seal_foreign`). Foreign seals remain fail-closed: the command exits
+  non-zero, scheduled state records `ok: false`, and evidence export stays
+  blocked. They surface as an operational warning without dispatching the
+  integrity-failure event; real prefix-hash changes remain errors and events.
+  Seal verification also no longer accepts an unkeyed MAC, because the sealing
+  API requires a resolvable signing key and accepting an unsigned substitute
+  would let database access rewrite the prefix and its anchor together.
+
 ## [1.5.0] - 2026-08-14
 
 ### Added

@@ -6,9 +6,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-09-02
+
 ### Added
 
-- **Strict keyed append and signing-status API (#25).**
+- **Strict keyed append and signing-status API (#25 / d.o. #3620484).**
   `AuditChainLoggerInterface::logKeyed()` appends only when the row will be
   HMAC-signed with the currently configured key; otherwise it throws
   `AuditChainSigningUnavailableException` and writes nothing. Ordinary

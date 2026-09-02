@@ -50,6 +50,13 @@ Inject `Drupal\audit_chain\AuditChainLoggerInterface` rather than calling
 `\Drupal::service()` in your own code; the interface is the supported contract
 and the service is autowirable by that name.
 
+Evidence-required consumers that must not accept an unsigned precommit should
+call `logKeyed()` instead of `log()`. It throws
+`AuditChainSigningUnavailableException` and writes nothing when the signing key
+will not resolve. `signingStatus()` returns `{keyed, key_id}` for cheap
+precondition checks. Ordinary auditing should keep using `log()`, which
+prefers an unsigned row over a dropped one.
+
 `entity_type`, `bundle`, `id` and `label` are promoted to their own indexed
 columns; every other key is serialised into `metadata`. All of it — plus the
 actor, timestamp, IP and user agent — is covered by the hash.

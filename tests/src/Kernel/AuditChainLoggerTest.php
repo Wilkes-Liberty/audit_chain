@@ -888,7 +888,7 @@ final class AuditChainLoggerTest extends KernelTestBase {
   }
 
   /**
-   * signingStatus reports whether an append would be HMAC-signed (#25).
+   * Signing status reports whether an append would be HMAC-signed (#25).
    */
   public function testSigningStatusReflectsKeyResolution(): void {
     $this->assertSame(
@@ -911,17 +911,17 @@ final class AuditChainLoggerTest extends KernelTestBase {
   }
 
   /**
-   * logKeyed refuses when unsigned and writes a keyed row when signed (#25).
+   * Keyed append refuses when unsigned (#25).
    */
-  public function testLogKeyedRequiresAResolvableSigningKey(): void {
+  public function testKeyedAppendRequiresResolvableSigningKey(): void {
     $this->expectException(AuditChainSigningUnavailableException::class);
     $this->chain->logKeyed('mcp_sentinel', 'evidence_precommit', ['id' => '1']);
   }
 
   /**
-   * logKeyed writes nothing when it refuses (#25).
+   * Keyed append writes nothing when it refuses (#25).
    */
-  public function testLogKeyedWritesNothingWhenUnsigned(): void {
+  public function testKeyedAppendWritesNothingWhenUnsigned(): void {
     try {
       $this->chain->logKeyed('mcp_sentinel', 'evidence_precommit', ['id' => '1']);
       $this->fail('Expected AuditChainSigningUnavailableException.');
@@ -933,9 +933,9 @@ final class AuditChainLoggerTest extends KernelTestBase {
   }
 
   /**
-   * logKeyed appends a keyed row when the signing key resolves (#25).
+   * Keyed append writes a keyed row when the signing key resolves (#25).
    */
-  public function testLogKeyedAppendsWhenKeyed(): void {
+  public function testKeyedAppendWritesWhenSigningKeyResolves(): void {
     $this->makeKey('chain_key', 'correct-horse-battery-staple');
     $this->config('audit_chain.settings')->set('hash_key', 'chain_key')->save();
 
@@ -948,9 +948,9 @@ final class AuditChainLoggerTest extends KernelTestBase {
   }
 
   /**
-   * logKeyed refuses an unresolvable configured key without writing (#25).
+   * Keyed append refuses an unresolvable configured key without writing (#25).
    */
-  public function testLogKeyedRefusesUnresolvableConfiguredKey(): void {
+  public function testKeyedAppendRefusesUnresolvableConfiguredKey(): void {
     $this->config('audit_chain.settings')->set('hash_key', 'no_such_key')->save();
     try {
       $this->chain->logKeyed('mcp_sentinel', 'evidence_precommit', ['id' => '1']);

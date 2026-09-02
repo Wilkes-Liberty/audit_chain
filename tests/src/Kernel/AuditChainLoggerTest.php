@@ -7,6 +7,7 @@ namespace Drupal\Tests\audit_chain\Kernel;
 use Psr\Log\AbstractLogger;
 use Drupal\audit_chain\AuditChainLogger;
 use Drupal\audit_chain\AuditChainLoggerInterface;
+use Drupal\audit_chain\Exception\AuditChainSigningUnavailableException;
 use Drupal\encrypt\Entity\EncryptionProfile;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\key\Entity\Key;
@@ -884,6 +885,81 @@ final class AuditChainLoggerTest extends KernelTestBase {
     // And the chain continues from it.
     $this->chain->log('mcp_sentinel', 'entity_save', ['id' => '8']);
     $this->assertTrue($this->chain->verify()['ok']);
+  }
+
+  /**
+   * signingStatus reports whether an append would be HMAC-signed (#25).
+   */
+  public function testSigningStatusReflectsKeyResolution(): void {
+    $this->assertSame(
+      ['keyed' => FALSE, 'key_id' => ''],
+      $this->chain->signingStatus(),
+    );
+
+    $this->makeKey('chain_key', 'correct-horse-battery-staple');
+    $this->config('audit_chain.settings')->set('hash_key', 'chain_key')->save();
+    $this->assertSame(
+      ['keyed' => TRUE, 'key_id' => 'chain_key'],
+      $this->chain->signingStatus(),
+    );
+
+    $this->config('audit_chain.settings')->set('hash_key', 'missing_key')->save();
+    $this->assertSame(
+      ['keyed' => FALSE, 'key_id' => 'missing_key'],
+      $this->chain->signingStatus(),
+    );
+  }
+
+  /**
+   * logKeyed refuses when unsigned and writes a keyed row when signed (#25).
+   */
+  public function testLogKeyedRequiresAResolvableSigningKey(): void {
+    $this->expectException(AuditChainSigningUnavailableException::class);
+    $this->chain->logKeyed('mcp_sentinel', 'evidence_precommit', ['id' => '1']);
+  }
+
+  /**
+   * logKeyed writes nothing when it refuses (#25).
+   */
+  public function testLogKeyedWritesNothingWhenUnsigned(): void {
+    try {
+      $this->chain->logKeyed('mcp_sentinel', 'evidence_precommit', ['id' => '1']);
+      $this->fail('Expected AuditChainSigningUnavailableException.');
+    }
+    catch (AuditChainSigningUnavailableException) {
+      // Expected.
+    }
+    $this->assertCount(0, $this->rows());
+  }
+
+  /**
+   * logKeyed appends a keyed row when the signing key resolves (#25).
+   */
+  public function testLogKeyedAppendsWhenKeyed(): void {
+    $this->makeKey('chain_key', 'correct-horse-battery-staple');
+    $this->config('audit_chain.settings')->set('hash_key', 'chain_key')->save();
+
+    $this->chain->logKeyed('mcp_sentinel', 'evidence_precommit', ['id' => '1']);
+
+    $rows = $this->rows();
+    $this->assertCount(1, $rows);
+    $this->assertSame('chain_key', (string) $rows[0]->key_id);
+    $this->assertTrue($this->chain->verify()['ok']);
+  }
+
+  /**
+   * logKeyed refuses an unresolvable configured key without writing (#25).
+   */
+  public function testLogKeyedRefusesUnresolvableConfiguredKey(): void {
+    $this->config('audit_chain.settings')->set('hash_key', 'no_such_key')->save();
+    try {
+      $this->chain->logKeyed('mcp_sentinel', 'evidence_precommit', ['id' => '1']);
+      $this->fail('Expected AuditChainSigningUnavailableException.');
+    }
+    catch (AuditChainSigningUnavailableException $e) {
+      $this->assertStringContainsString('no_such_key', $e->getMessage());
+    }
+    $this->assertCount(0, $this->rows());
   }
 
 }

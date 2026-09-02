@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\audit_chain;
 
+use Drupal\audit_chain\Exception\AuditChainSigningUnavailableException;
 use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Config\ImmutableConfig;
@@ -152,6 +153,45 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
    * {@inheritdoc}
    */
   public function log(string $channel, string $operation, array $metadata = []): void {
+    $this->append($channel, $operation, $metadata, FALSE);
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function logKeyed(string $channel, string $operation, array $metadata = []): void {
+    $this->append($channel, $operation, $metadata, TRUE);
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function signingStatus(): array {
+    $key = $this->resolveHashKey(
+      $this->configFactory->get('audit_chain.settings')->get('hash_key'),
+    );
+    return [
+      'keyed' => $key['value'] !== '',
+      'key_id' => $key['id'],
+    ];
+  }
+
+  /**
+   * Shared append path for log() and logKeyed().
+   *
+   * @param string $channel
+   *   Consumer machine name.
+   * @param string $operation
+   *   Operation identifier.
+   * @param array $metadata
+   *   Optional context.
+   * @param bool $requireKeyed
+   *   When TRUE, refuse (throw, write nothing) unless HMAC signing will apply.
+   *
+   * @throws \Drupal\audit_chain\Exception\AuditChainSigningUnavailableException
+   *   When $requireKeyed is TRUE and no signing key value is available.
+   */
+  private function append(string $channel, string $operation, array $metadata, bool $requireKeyed): void {
     $config = $this->configFactory->get('audit_chain.settings');
     $request = $this->requestStack->getCurrentRequest();
     $timestamp = $this->time->getRequestTime();
@@ -176,13 +216,22 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
 
     $key = $this->resolveHashKey($config->get('hash_key'));
 
+    if ($requireKeyed && $key['value'] === '') {
+      $detail = $key['id'] === ''
+        ? 'no signing key is configured'
+        : sprintf("signing key '%s' is configured but cannot be resolved", $key['id']);
+      throw new AuditChainSigningUnavailableException(
+        "Keyed audit append refused: {$detail}.",
+      );
+    }
+
     // A configured key that will not resolve is not a reason to fall through to
     // an unkeyed hash quietly. The row is still written — dropping an audit
     // entry is its own failure, and worse than an unsigned one — but every such
     // write says so, and hook_requirements() reports it on the status report.
     // The alternative is what this module shipped until now: a site believing
     // it has a signed chain while every row goes in unsigned, with nothing
-    // anywhere to notice it.
+    // anywhere to notice it. logKeyed() never reaches here: it throws above.
     if ($key['unresolvable']) {
       $this->logger->error(
         "Audit chain signing key '@key' is configured but cannot be resolved; this entry was written with unkeyed SHA-256 and the chain is not signed. Fix the Key entity — entries written meanwhile cannot be signed retrospectively.",
@@ -199,6 +248,21 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
     // guarantee is best-effort for that request.
     $locked = $this->lock->acquire(self::CHAIN_LOCK, 3.0);
     try {
+      // Re-resolve inside the lock so a key that vanished between the
+      // precondition and the insert cannot produce an unkeyed row under
+      // logKeyed(). Ordinary log() still prefers writing over dropping.
+      if ($requireKeyed) {
+        $key = $this->resolveHashKey($config->get('hash_key'));
+        if ($key['value'] === '') {
+          $detail = $key['id'] === ''
+            ? 'no signing key is configured'
+            : sprintf("signing key '%s' is configured but cannot be resolved", $key['id']);
+          throw new AuditChainSigningUnavailableException(
+            "Keyed audit append refused: {$detail}.",
+          );
+        }
+      }
+
       $canonical = $this->buildCanonical($row, $extra);
       $prevHash = $this->latestRowHash();
       $rowHash = $this->hashRow($prevHash ?? '', $canonical, $key['value']);

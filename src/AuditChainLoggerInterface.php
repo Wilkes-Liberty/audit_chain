@@ -48,6 +48,41 @@ interface AuditChainLoggerInterface {
   public function log(string $channel, string $operation, array $metadata = []): void;
 
   /**
+   * Appends an entry only when it will be HMAC-signed with the active key.
+   *
+   * Same row shape as log(). When no signing key is configured, or the
+   * configured Key entity will not resolve to a non-empty value, throws
+   * {@see \Drupal\audit_chain\Exception\AuditChainSigningUnavailableException}
+   * and writes nothing. Use this from evidence-required consumers that must
+   * not accept an unsigned precommit; ordinary auditing should keep calling
+   * log(), which prefers an unsigned row over a dropped one.
+   *
+   * @param string $channel
+   *   The consumer's machine name.
+   * @param string $operation
+   *   A short operation identifier.
+   * @param array $metadata
+   *   Optional context (same rules as log()).
+   *
+   * @throws \Drupal\audit_chain\Exception\AuditChainSigningUnavailableException
+   *   When the append would not be HMAC-signed.
+   */
+  public function logKeyed(string $channel, string $operation, array $metadata = []): void;
+
+  /**
+   * Reports whether an append right now would be HMAC-signed.
+   *
+   * Cheap precondition for status pages and evidence guards. Uses the same
+   * key resolution as log() / logKeyed() so consumers do not reimplement
+   * hash_key / Key-entity lookup.
+   *
+   * @return array{keyed: bool, key_id: string}
+   *   keyed is TRUE only when a non-empty HMAC key value is available.
+   *   key_id is the configured Key entity id, or '' when none is set.
+   */
+  public function signingStatus(): array;
+
+  /**
    * Walks the chain in insertion order and verifies every link.
    *
    * Deliberately takes no channel argument. The chain is global — entries from

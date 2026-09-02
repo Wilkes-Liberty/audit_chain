@@ -6,6 +6,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Strict keyed append and signing-status API (#25).**
+  `AuditChainLoggerInterface::logKeyed()` appends only when the row will be
+  HMAC-signed with the currently configured key; otherwise it throws
+  `AuditChainSigningUnavailableException` and writes nothing. Ordinary
+  `log()` is unchanged (unsigned row beats a lost one).
+  `signingStatus()` returns `{keyed, key_id}` from the chain's own key
+  resolution so evidence-required consumers (e.g. mcp_sentinel's
+  evidence-required veto) do not duplicate Key-entity lookup.
+
 ## [1.5.1] - 2026-08-25
 
 ### Fixed

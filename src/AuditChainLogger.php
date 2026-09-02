@@ -217,12 +217,7 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
     $key = $this->resolveHashKey($config->get('hash_key'));
 
     if ($requireKeyed && $key['value'] === '') {
-      $detail = $key['id'] === ''
-        ? 'no signing key is configured'
-        : sprintf("signing key '%s' is configured but cannot be resolved", $key['id']);
-      throw new AuditChainSigningUnavailableException(
-        "Keyed audit append refused: {$detail}.",
-      );
+      $this->throwSigningUnavailable($key);
     }
 
     // A configured key that will not resolve is not a reason to fall through to
@@ -254,12 +249,7 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
       if ($requireKeyed) {
         $key = $this->resolveHashKey($config->get('hash_key'));
         if ($key['value'] === '') {
-          $detail = $key['id'] === ''
-            ? 'no signing key is configured'
-            : sprintf("signing key '%s' is configured but cannot be resolved", $key['id']);
-          throw new AuditChainSigningUnavailableException(
-            "Keyed audit append refused: {$detail}.",
-          );
+          $this->throwSigningUnavailable($key);
         }
       }
 
@@ -1003,6 +993,26 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
       }
     }
     return $keys;
+  }
+
+  /**
+   * Refuse a keyed append when no signing key value is available.
+   *
+   * Shared by the pre-lock and in-lock checks so both failure sites keep the
+   * same message if the wording ever changes.
+   *
+   * @param array{id: string, value: string, unresolvable: bool} $key
+   *   Result of resolveHashKey().
+   *
+   * @throws \Drupal\audit_chain\Exception\AuditChainSigningUnavailableException
+   */
+  private function throwSigningUnavailable(array $key): never {
+    $detail = $key['id'] === ''
+      ? 'no signing key is configured'
+      : sprintf("signing key '%s' is configured but cannot be resolved", $key['id']);
+    throw new AuditChainSigningUnavailableException(
+      "Keyed audit append refused: {$detail}.",
+    );
   }
 
   /**

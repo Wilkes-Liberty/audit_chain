@@ -243,5 +243,5 @@ error log and failure-event behavior for that integrity incident.
 
 ## Maintainers
 
-- Jeremy Michael Cerda — <jmcerda@wilkesliberty.com>
+- [Jeremy Michael Cerda](https://www.drupal.org/u/jmcerda) — <jmcerda@wilkesliberty.com>
 - Wilkes & Liberty, LLC — [drupal.org/u/wilkes-liberty](https://www.drupal.org/u/wilkes-liberty)

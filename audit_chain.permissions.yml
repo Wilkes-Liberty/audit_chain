@@ -1,0 +1,4 @@
+view audit chain reports:
+  title: 'View Audit Chain reports'
+  description: 'View the tamper-evident chain reports dashboard. Does not grant access to metadata, IP addresses, entity labels, or settings.'
+  restrict access: true

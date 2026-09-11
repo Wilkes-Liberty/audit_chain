@@ -1,0 +1,208 @@
+/**
+ * @file
+ * Reports dashboard styling.
+ *
+ * Theme-neutral: generic selectors and fallback colors so Claro still
+ * renders. When Gin is the admin theme the --gin-* tokens restyle the
+ * dashboard without a module-specific theme override.
+ */
+
+.audit-chain-dashboard {
+  --ac-color-primary: var(--gin-color-primary, #0d6efd);
+  --ac-color-danger: var(--gin-color-danger, #dc3545);
+  --ac-color-warning: var(--gin-color-warning, #ffc107);
+  --ac-color-ok: var(--gin-color-green, #28a745);
+  --ac-color-muted: var(--gin-color-text-light, #6c757d);
+  --ac-color-on-primary: var(--gin-color-button-text, #fff);
+  --ac-bg: var(--gin-bg-layer, #fff);
+  --ac-border: var(--gin-border-color, #dee2e6);
+  margin: 1em 0;
+}
+
+.audit-chain-window-toggle {
+  margin: 0 0 1em;
+}
+
+.audit-chain-window-toggle__label {
+  margin-inline-end: 0.5em;
+  font-weight: 700;
+}
+
+.audit-chain-window-toggle__link {
+  display: inline-block;
+  margin-inline-end: 0.25em;
+  padding: 0.2em 0.7em;
+  text-decoration: none;
+  border: 1px solid var(--ac-border);
+  border-radius: 3px;
+}
+
+.audit-chain-window-toggle__link.is-active {
+  color: var(--ac-color-on-primary);
+  border-color: var(--ac-color-primary);
+  background: var(--ac-color-primary);
+}
+
+.audit-chain-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.75em;
+  margin: 0 0 1em;
+}
+
+.audit-chain-tile {
+  padding: 0.75em 1em;
+  border: 1px solid var(--ac-border);
+  border-top: 4px solid #adb5bd;
+  border-radius: 4px;
+  background: var(--ac-bg);
+}
+
+.audit-chain-tile--ok {
+  border-top-color: var(--ac-color-ok);
+}
+
+.audit-chain-tile--warn {
+  border-top-color: var(--ac-color-warning);
+}
+
+.audit-chain-tile--crit {
+  border-top-color: var(--ac-color-danger);
+}
+
+.audit-chain-tile__label {
+  display: block;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--ac-color-muted);
+  font-size: 0.85em;
+}
+
+.audit-chain-tile__value {
+  display: block;
+  font-size: 1.8em;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.audit-chain-tile__sub {
+  display: block;
+  color: var(--ac-color-muted);
+  font-size: 0.85em;
+}
+
+.audit-chain-card {
+  display: flex;
+  flex-direction: column;
+  margin: 0 0 1em;
+  padding: 0.75em 1em;
+  border: 1px solid var(--ac-border);
+  border-left: 4px solid #adb5bd;
+  border-radius: 4px;
+  gap: 0.25em;
+}
+
+.audit-chain-card--ok {
+  border-left-color: var(--ac-color-ok);
+}
+
+.audit-chain-card--warn {
+  border-left-color: var(--ac-color-warning);
+}
+
+.audit-chain-card--crit {
+  border-left-color: var(--ac-color-danger);
+}
+
+.audit-chain-card__label {
+  font-weight: 700;
+}
+
+.audit-chain-card__detail {
+  color: var(--ac-color-muted);
+  font-size: 0.9em;
+}
+
+.audit-chain-quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5em;
+  margin: 0 0 1em;
+}
+
+.audit-chain-quick-actions__link {
+  display: inline-block;
+  padding: 0.4em 0.9em;
+  text-decoration: none;
+  color: var(--ac-color-primary);
+  border: 1px solid var(--ac-color-primary);
+  border-radius: 3px;
+}
+
+.audit-chain-charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1em;
+  margin: 0 0 1em;
+}
+
+.audit-chain-chart-cell {
+  padding: 0.75em;
+  border: 1px solid var(--ac-border);
+  border-radius: 4px;
+  background: var(--ac-bg);
+}
+
+.audit-chain-chart__title {
+  margin: 0 0 0.5em;
+  font-size: 0.95em;
+}
+
+.audit-chain-chart__svg {
+  width: 100%;
+  height: auto;
+}
+
+.audit-chain-chart__link {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+}
+
+.audit-chain-chart__bar {
+  fill: var(--ac-color-primary);
+}
+
+.audit-chain-chart__line {
+  stroke: var(--ac-color-primary);
+  stroke-width: 2;
+}
+
+.audit-chain-chart__slice--0 {
+  stroke: var(--ac-color-primary);
+}
+
+.audit-chain-chart__slice--1 {
+  stroke: var(--ac-color-danger);
+}
+
+.audit-chain-chart__slice--2 {
+  stroke: var(--ac-color-warning);
+}
+
+.audit-chain-chart__slice--3 {
+  stroke: var(--ac-color-ok);
+}
+
+.audit-chain-chart__slice--4 {
+  stroke: var(--gin-color-info, #6f42c1);
+}
+
+.audit-chain-chart__slice--5 {
+  stroke: var(--gin-color-info-light, #20c997);
+}
+
+.audit-chain-chart--empty .audit-chain-chart__empty {
+  color: var(--ac-color-muted);
+  font-style: italic;
+}

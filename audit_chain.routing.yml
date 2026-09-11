@@ -5,3 +5,11 @@ audit_chain.settings:
     _title: 'Audit Chain'
   requirements:
     _permission: 'administer site configuration'
+
+audit_chain.dashboard:
+  path: '/admin/reports/audit-chain'
+  defaults:
+    _controller: '\Drupal\audit_chain\Controller\AuditChainDashboardController::dashboard'
+    _title: 'Audit Chain'
+  requirements:
+    _permission: 'view audit chain reports'

@@ -16,11 +16,11 @@ use Symfony\Component\HttpFoundation\Request;
 /**
  * Renders the Audit Chain reports dashboard.
  *
- * GET /admin/reports/audit-chain. Read-only: assembles the integrity card,
- * window tiles, and four charts from indexed audit_chain_log columns. Does
- * not decrypt metadata, list rows, or re-verify the chain. Every widget is
- * built behind its own try/catch so a single failing metric degrades rather
- * than fataling the page.
+ * GET /admin/reports/audit-chain. Read-only: integrity card plus the
+ * keyed-vs-unkeyed split. Does not decrypt metadata, list rows, chart
+ * volume, or re-verify the chain. Every widget is built behind its own
+ * try/catch so a single failing metric degrades rather than fataling the
+ * page.
  */
 final class AuditChainDashboardController extends ControllerBase {
 
@@ -151,7 +151,7 @@ final class AuditChainDashboardController extends ControllerBase {
   }
 
   /**
-   * Builds the four status tiles.
+   * Builds the status tiles for the windowed keyed/unkeyed split.
    *
    * @param string $window
    *   The selected window.
@@ -161,7 +161,6 @@ final class AuditChainDashboardController extends ControllerBase {
    */
   private function buildTiles(string $window): array {
     $counts = $this->metrics->windowCounts($window);
-    $integrity = $this->metrics->integrity();
     $keyedShare = $counts['total'] > 0
       ? (string) $this->t('@pct%', ['@pct' => (int) round(100 * $counts['keyed'] / $counts['total'])])
       : self::PLACEHOLDER;
@@ -174,39 +173,30 @@ final class AuditChainDashboardController extends ControllerBase {
         'state' => 'ok',
       ],
       [
-        'label' => (string) $this->t('Channels'),
-        'value' => (string) $counts['channels'],
-        'sub' => (string) $this->t('distinct consumers'),
-        'state' => 'ok',
-      ],
-      [
         'label' => (string) $this->t('Keyed'),
         'value' => $keyedShare,
         'sub' => (string) $this->t('@n HMAC-signed', ['@n' => $counts['keyed']]),
         'state' => $counts['total'] > 0 && $counts['keyed'] === 0 ? 'warn' : 'ok',
       ],
       [
-        'label' => (string) $this->t('Integrity'),
-        'value' => (string) $this->integrityTileLabel($integrity['reason']),
-        'sub' => (string) $this->formatPlural($integrity['rows'], '1 row on the chain', '@count rows on the chain'),
-        'state' => $integrity['status'],
+        'label' => (string) $this->t('Unkeyed'),
+        'value' => (string) $counts['unkeyed'],
+        'sub' => (string) $this->t('unsigned in this window'),
+        'state' => $counts['unkeyed'] > 0 ? 'warn' : 'ok',
       ],
     ];
   }
 
   /**
-   * Builds the four dashboard charts via the chart renderer.
+   * Builds the keyed-vs-unkeyed chart.
    *
    * @param string $window
    *   The selected window.
    *
    * @return array<int, array>
-   *   The ordered chart render arrays.
+   *   A single chart render array.
    */
   private function buildCharts(string $window): array {
-    $volume = $this->metrics->volumeTimeSeries($window);
-    $channels = $this->labelMix($this->metrics->channelMix($window));
-    $operations = $this->labelMix($this->metrics->operationMix($window));
     $split = $this->metrics->keyedSplit($window);
     $keyedSeries = ($split['keyed'] + $split['unkeyed']) > 0
       ? [
@@ -216,15 +206,6 @@ final class AuditChainDashboardController extends ControllerBase {
       : [];
 
     return [
-      $this->chartRenderer->render('line', $volume, [
-        'title' => (string) $this->t('Volume'),
-      ]),
-      $this->chartRenderer->render('donut', $channels, [
-        'title' => (string) $this->t('By channel'),
-      ]),
-      $this->chartRenderer->render('bar', $operations, [
-        'title' => (string) $this->t('By operation'),
-      ]),
       $this->chartRenderer->render('donut', $keyedSeries, [
         'title' => (string) $this->t('Keyed vs unkeyed'),
       ]),
@@ -278,48 +259,6 @@ final class AuditChainDashboardController extends ControllerBase {
       // Settings route missing would be a broken install; skip the link.
     }
     return $actions;
-  }
-
-  /**
-   * Replaces reserved mix keys with translatable labels.
-   *
-   * @param array<string, int> $mix
-   *   Channel or operation mix from metrics.
-   *
-   * @return array<string, int>
-   *   The mix with _other / _empty labels translated.
-   */
-  private function labelMix(array $mix): array {
-    $labeled = [];
-    foreach ($mix as $label => $count) {
-      $key = match ($label) {
-        '_other' => (string) $this->t('Other'),
-        '_empty' => (string) $this->t('(none)'),
-        default => $label,
-      };
-      $labeled[$key] = $count;
-    }
-    return $labeled;
-  }
-
-  /**
-   * Returns a short integrity tile value.
-   *
-   * @param string $reason
-   *   A machine reason from metrics.integrity().
-   *
-   * @return string
-   *   The tile value.
-   */
-  private function integrityTileLabel(string $reason): string {
-    return (string) match ($reason) {
-      'passing' => $this->t('Passing'),
-      'failed' => $this->t('Failed'),
-      'seal_foreign' => $this->t('Foreign'),
-      'overdue' => $this->t('Overdue'),
-      'disabled' => $this->t('Off'),
-      default => $this->t('Pending'),
-    };
   }
 
   /**

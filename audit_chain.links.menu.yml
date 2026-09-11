@@ -6,6 +6,6 @@ audit_chain.settings:
 
 audit_chain.dashboard:
   title: 'Audit Chain'
-  description: 'Volume, channel mix, and hash-chain integrity for the tamper-evident audit log.'
+  description: 'Hash-chain integrity and keyed-vs-unkeyed status for the tamper-evident audit log.'
   parent: system.admin_reports
   route_name: audit_chain.dashboard

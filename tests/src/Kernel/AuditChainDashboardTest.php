@@ -67,11 +67,11 @@ final class AuditChainDashboardTest extends KernelTestBase {
   }
 
   /**
-   * The dashboard renders four chart cells and the integrity card.
+   * The dashboard renders the integrity card and keyed-vs-unkeyed chart.
    *
    * @covers ::dashboard
    */
-  public function testDashboardRendersChartsAndIntegrityCard(): void {
+  public function testDashboardRendersIntegrityAndKeyedSplit(): void {
     $this->insertRow('personnel', 'field_read', 'hmac');
     $this->insertRow('mcp', 'tool_call', '');
 
@@ -81,15 +81,14 @@ final class AuditChainDashboardTest extends KernelTestBase {
     $rendered = (string) $this->container->get('renderer')->renderRoot($build);
 
     $this->assertSame('audit_chain_dashboard', $build['#theme']);
-    $this->assertCount(4, $build['#charts']);
+    $this->assertCount(1, $build['#charts']);
     $this->assertStringContainsString('audit-chain-dashboard', $rendered);
-    $this->assertStringContainsString('audit-chain-chart-cell', $rendered);
-    $this->assertSame(4, substr_count($rendered, 'audit-chain-chart-cell'));
+    $this->assertSame(1, substr_count($rendered, 'audit-chain-chart-cell'));
     $this->assertStringContainsString('Hash chain', $rendered);
-    $this->assertStringContainsString('Volume', $rendered);
-    $this->assertStringContainsString('By channel', $rendered);
-    $this->assertStringContainsString('By operation', $rendered);
     $this->assertStringContainsString('Keyed vs unkeyed', $rendered);
+    $this->assertStringNotContainsString('Volume', $rendered);
+    $this->assertStringNotContainsString('By channel', $rendered);
+    $this->assertStringNotContainsString('By operation', $rendered);
     $this->assertStringNotContainsString('No charting library found', $rendered);
     $this->assertStringNotContainsString('field_salary', $rendered);
     $this->assertStringContainsString('window=7d', $rendered);

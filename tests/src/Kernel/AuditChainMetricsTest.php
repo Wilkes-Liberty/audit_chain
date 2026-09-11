@@ -81,87 +81,58 @@ final class AuditChainMetricsTest extends KernelTestBase {
   }
 
   /**
-   * An empty table yields empty series and zero counts.
+   * An empty table yields zero keyed/unkeyed counts.
    *
-   * @covers ::volumeTimeSeries
    * @covers ::windowCounts
    */
-  public function testEmptyTableYieldsEmptySeries(): void {
-    $this->assertSame([], $this->metrics->volumeTimeSeries('24h'));
+  public function testEmptyTableYieldsZeroCounts(): void {
     $this->assertSame([
       'total' => 0,
-      'channels' => 0,
       'keyed' => 0,
       'unkeyed' => 0,
     ], $this->metrics->windowCounts('24h'));
   }
 
   /**
-   * Volume, mix, and keyed split count only rows inside the window.
+   * Keyed split counts only rows inside the window.
    *
-   * @covers ::volumeTimeSeries
-   * @covers ::channelMix
-   * @covers ::operationMix
    * @covers ::keyedSplit
    * @covers ::windowCounts
    */
-  public function testWindowBoundedAggregatesIgnoreOldRows(): void {
+  public function testWindowBoundedKeyedSplitIgnoresOldRows(): void {
     $now = \Drupal::time()->getRequestTime();
     $this->insertRow([
-      'channel' => 'personnel',
-      'operation' => 'field_read',
       'timestamp' => $now - 60,
       'key_id' => 'hmac',
     ]);
     $this->insertRow([
-      'channel' => 'personnel',
-      'operation' => 'field_read',
       'timestamp' => $now - 90,
       'key_id' => '',
     ]);
     $this->insertRow([
-      'channel' => 'mcp',
-      'operation' => 'tool_call',
       'timestamp' => $now - 60,
       'key_id' => 'hmac',
     ]);
     // Outside the 24h window.
     $this->insertRow([
-      'channel' => 'ancient',
-      'operation' => 'field_read',
       'timestamp' => $now - 86400 * 40,
       'key_id' => 'hmac',
     ]);
 
     $counts = $this->metrics->windowCounts('24h');
     $this->assertSame(3, $counts['total']);
-    $this->assertSame(2, $counts['channels']);
     $this->assertSame(2, $counts['keyed']);
     $this->assertSame(1, $counts['unkeyed']);
-
-    $channels = $this->metrics->channelMix('24h');
-    $this->assertSame(2, $channels['personnel']);
-    $this->assertSame(1, $channels['mcp']);
-    $this->assertArrayNotHasKey('ancient', $channels);
-
-    $operations = $this->metrics->operationMix('24h');
-    $this->assertSame(2, $operations['field_read']);
-    $this->assertSame(1, $operations['tool_call']);
-
-    $volume = $this->metrics->volumeTimeSeries('24h');
-    $this->assertGreaterThan(0, array_sum($volume));
-    $this->assertSame(3, array_sum($volume));
   }
 
   /**
-   * Metadata, IP, and labels are not required for any aggregate.
+   * Metadata, IP, and labels are not required for the keyed split.
    *
-   * @covers ::channelMix
+   * @covers ::keyedSplit
    */
   public function testAggregatesDoNotReadMetadata(): void {
-    $this->insertRow(['channel' => 'personnel']);
-    $mix = $this->metrics->channelMix('24h');
-    $this->assertSame(['personnel' => 1], $mix);
+    $this->insertRow(['key_id' => 'hmac']);
+    $this->assertSame(['keyed' => 1, 'unkeyed' => 0], $this->metrics->keyedSplit('24h'));
   }
 
   /**

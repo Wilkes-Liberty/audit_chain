@@ -12,12 +12,12 @@ use Drupal\Core\State\StateInterface;
 use Psr\Log\LoggerInterface;
 
 /**
- * Aggregates indexed audit_chain_log columns for the reports dashboard.
+ * Integrity and keyed/unkeyed counts for the reports dashboard.
  *
- * Queries are window-bounded on the indexed timestamp column and never read
- * metadata, IP addresses, user agents, or entity labels. Verification is not
- * re-run on this path: integrity() reads the last scheduled-verification
- * record from state.
+ * Queries are window-bounded on the indexed timestamp and key_id columns and
+ * never read metadata, IP addresses, user agents, or entity labels.
+ * Verification is not re-run on this path: integrity() reads the last
+ * scheduled-verification record from state.
  */
 final class AuditChainMetrics {
 
@@ -34,11 +34,6 @@ final class AuditChainMetrics {
    * The default window used when an unknown value is supplied.
    */
   public const DEFAULT_WINDOW = '24h';
-
-  /**
-   * Maximum distinct labels kept in a mix series before lumping the rest.
-   */
-  private const MIX_LIMIT = 10;
 
   /**
    * Per-request static result cache, keyed by "method:window".
@@ -93,80 +88,6 @@ final class AuditChainMetrics {
   }
 
   /**
-   * Returns a bucketed volume time series for the window.
-   *
-   * Buckets by hour for 24h and by day for 7d/30d. Empty buckets are filled
-   * with zero so the axis is complete. An empty table in the window returns
-   * an empty series so the renderer can show the empty-state.
-   *
-   * @param string $window
-   *   One of 24h/7d/30d.
-   *
-   * @return array<string, int>
-   *   Bucket label => count, in ascending time order.
-   */
-  public function volumeTimeSeries(string $window): array {
-    return $this->guard(__FUNCTION__, $window, [], function () use ($window): array {
-      $window = $this->normalizeWindow($window);
-      $now = $this->time->getRequestTime();
-      $since = $now - self::WINDOWS[$window];
-      $bucketSeconds = $window === '24h' ? 3600 : 86400;
-
-      $rows = $this->baseQuery($since)
-        ->fields('l', ['timestamp'])
-        ->execute();
-
-      $counts = [];
-      foreach ($rows as $row) {
-        $bucket = (int) (floor(((int) $row->timestamp) / $bucketSeconds) * $bucketSeconds);
-        $counts[$bucket] = ($counts[$bucket] ?? 0) + 1;
-      }
-
-      if ($counts === []) {
-        return [];
-      }
-
-      $series = [];
-      $start = (int) (floor($since / $bucketSeconds) * $bucketSeconds);
-      for ($t = $start; $t <= $now; $t += $bucketSeconds) {
-        $label = $window === '24h' ? date('H:i', $t) : date('M j', $t);
-        $series[$label] = $counts[$t] ?? 0;
-      }
-      return $series;
-    });
-  }
-
-  /**
-   * Returns a count of rows by channel within the window.
-   *
-   * @param string $window
-   *   One of 24h/7d/30d.
-   *
-   * @return array<string, int>
-   *   Channel => count, highest first, capped with an "_other" remainder.
-   */
-  public function channelMix(string $window): array {
-    return $this->guard(__FUNCTION__, $window, [], function () use ($window): array {
-      return $this->mix($window, 'channel');
-    });
-  }
-
-  /**
-   * Returns a count of rows by operation within the window.
-   *
-   * @param string $window
-   *   One of 24h/7d/30d.
-   *
-   * @return array<string, int>
-   *   Operation => count, highest first, capped with an "_other" remainder.
-   */
-  public function operationMix(string $window): array {
-    return $this->guard(__FUNCTION__, $window, [], function () use ($window): array {
-      return $this->mix($window, 'operation');
-    });
-  }
-
-  /**
    * Returns keyed vs unkeyed row counts within the window.
    *
    * A row is keyed when key_id is a non-empty string. NULL and '' are unkeyed
@@ -206,20 +127,15 @@ final class AuditChainMetrics {
    * @param string $window
    *   One of 24h/7d/30d.
    *
-   * @return array{total: int, channels: int, keyed: int, unkeyed: int}
-   *   Window totals. channels is the number of distinct channel values.
+   * @return array{total: int, keyed: int, unkeyed: int}
+   *   Window totals for the keyed/unkeyed split.
    */
   public function windowCounts(string $window): array {
-    $empty = ['total' => 0, 'channels' => 0, 'keyed' => 0, 'unkeyed' => 0];
+    $empty = ['total' => 0, 'keyed' => 0, 'unkeyed' => 0];
     return $this->guard(__FUNCTION__, $window, $empty, function () use ($window): array {
       $split = $this->keyedSplit($window);
-      $since = $this->since($window);
-      $channelQuery = $this->baseQuery($since);
-      $channelQuery->addExpression('COUNT(DISTINCT l.channel)', 'n');
-      $channels = (int) $channelQuery->execute()->fetchField();
       return [
         'total' => $split['keyed'] + $split['unkeyed'],
-        'channels' => $channels,
         'keyed' => $split['keyed'],
         'unkeyed' => $split['unkeyed'],
       ];
@@ -310,40 +226,6 @@ final class AuditChainMetrics {
         'rows' => $rows,
       ];
     });
-  }
-
-  /**
-   * Groups a column into a descending mix, capped with "_other".
-   *
-   * @param string $window
-   *   One of 24h/7d/30d.
-   * @param string $column
-   *   An indexed varchar column on audit_chain_log.
-   *
-   * @return array<string, int>
-   *   Label => count.
-   */
-  private function mix(string $window, string $column): array {
-    $since = $this->since($window);
-    $query = $this->baseQuery($since);
-    $query->addField('l', $column, 'label');
-    $query->addExpression('COUNT(*)', 'cnt');
-    $query->groupBy('l.' . $column);
-    $mix = [];
-    foreach ($query->execute() as $row) {
-      $label = (string) $row->label;
-      if ($label === '') {
-        $label = '_empty';
-      }
-      $mix[$label] = (int) $row->cnt;
-    }
-    arsort($mix);
-    if (count($mix) <= self::MIX_LIMIT) {
-      return $mix;
-    }
-    $top = array_slice($mix, 0, self::MIX_LIMIT, TRUE);
-    $top['_other'] = (int) array_sum(array_slice($mix, self::MIX_LIMIT, NULL, TRUE));
-    return $top;
   }
 
   /**

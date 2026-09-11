@@ -179,17 +179,19 @@ without touching hashes. Keep profile A loadable until re-encrypt finishes.
 **Reports → Audit Chain** (`/admin/reports/audit-chain`), gated by the
 restrict-access permission *View Audit Chain reports*.
 
-The page is volume and integrity, not a log listing. It reads indexed columns
-only (`channel`, `timestamp`, `operation`, `key_id`) over a `24h` / `7d` /
-`30d` window. Metadata, IP addresses, user agents and entity labels are never
-queried. The integrity card uses the last scheduled-verification record; it
-does **not** re-walk the chain on page load.
+The page is integrity, not an operational log. It shows the last
+scheduled-verification verdict and the keyed-vs-unkeyed split over a `24h` /
+`7d` / `30d` window. It does not chart volume, channel mix, or operations —
+those belong in dblog or a consumer dashboard, not on the evidence chain.
+Counts use indexed `timestamp` and `key_id` only. Metadata, IP addresses,
+user agents and entity labels are never queried. The integrity card does
+**not** re-walk the chain on page load.
 
-Charts are inline SVG by default. Installing [Charts](https://www.drupal.org/project/charts)
-together with a library submodule (for example `charts_chartjs`) upgrades them
-to interactive charts with no code change. Enabling `charts` without a library
-plugin keeps the SVG fallback — the dashboard will not print "No charting
-library found".
+The keyed split is inline SVG by default. Installing
+[Charts](https://www.drupal.org/project/charts) together with a library
+submodule (for example `charts_chartjs`) upgrades it to an interactive chart
+with no code change. Enabling `charts` without a library plugin keeps the SVG
+fallback — the page will not print "No charting library found".
 
 ## Configuration
 

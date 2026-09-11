@@ -8,15 +8,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- **Reports dashboard with optional Charts API upgrade (#32).** A read-only
-  page at `/admin/reports/audit-chain` shows chain integrity (from the last
-  scheduled verification — it does not re-walk the chain on GET), windowed
-  volume, channel mix, operation mix, and keyed-vs-unkeyed split. Aggregates
-  use indexed columns only; metadata, IP addresses, user agents and entity
-  labels never appear. Charts upgrade to `drupal/charts` when a library
-  plugin is present and keep an inline-SVG fallback when Charts is absent or
-  enabled without a library. Gated by the restrict-access permission
-  `view audit chain reports`.
+- **Integrity reports page with optional Charts API upgrade (#32).** A
+  read-only page at `/admin/reports/audit-chain` shows chain integrity
+  (from the last scheduled verification — it does not re-walk the chain on
+  GET) and the keyed-vs-unkeyed split over a `24h` / `7d` / `30d` window.
+  It is not an operational volume dashboard: channel mix, operation mix,
+  and time-series charts are omitted on purpose. Counts use indexed
+  `timestamp` / `key_id` only; metadata, IP addresses, user agents and
+  entity labels never appear. The keyed split upgrades to `drupal/charts`
+  when a library plugin is present and keeps an inline-SVG fallback when
+  Charts is absent or enabled without a library. Gated by the
+  restrict-access permission `view audit chain reports`.
 
 ## [1.6.0] - 2026-09-02
 

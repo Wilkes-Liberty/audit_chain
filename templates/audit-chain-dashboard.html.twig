@@ -1,0 +1,59 @@
+{#
+/**
+ * @file
+ * Audit Chain reports dashboard layout.
+ *
+ * Available variables:
+ * - chain: chain-integrity card (state, label, detail).
+ * - tiles: a list of status tiles (label, value, sub, state).
+ * - charts: a list of chart render arrays.
+ * - quick_actions: a list of quick-action links (title, url).
+ * - window: the active time window key.
+ * - windows: window-toggle links (key, label, url, active).
+ */
+#}
+<div class="audit-chain-dashboard">
+
+  <div class="audit-chain-window-toggle">
+    <span class="audit-chain-window-toggle__label">{{ 'Window'|t }}:</span>
+    {% for w in windows %}
+      <a class="audit-chain-window-toggle__link{{ w.active ? ' is-active' : '' }}" href="{{ w.url }}">{{ w.label }}</a>
+    {% endfor %}
+  </div>
+
+  {% if tiles %}
+    <div class="audit-chain-tiles">
+      {% for tile in tiles %}
+        <div class="audit-chain-tile audit-chain-tile--{{ tile.state }}">
+          <span class="audit-chain-tile__label">{{ tile.label }}</span>
+          <span class="audit-chain-tile__value">{{ tile.value }}</span>
+          <span class="audit-chain-tile__sub">{{ tile.sub }}</span>
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  {% if chain %}
+    <div class="audit-chain-card audit-chain-card--{{ chain.state }}">
+      <span class="audit-chain-card__label">{{ 'Hash chain'|t }}: {{ chain.label }}</span>
+      <span class="audit-chain-card__detail">{{ chain.detail }}</span>
+    </div>
+  {% endif %}
+
+  {% if quick_actions %}
+    <div class="audit-chain-quick-actions">
+      {% for action in quick_actions %}
+        <a class="audit-chain-quick-actions__link" href="{{ action.url }}">{{ action.title }}</a>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  {% if charts %}
+    <div class="audit-chain-charts">
+      {% for chart in charts %}
+        <div class="audit-chain-chart-cell">{{ chart }}</div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+</div>

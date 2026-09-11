@@ -4,11 +4,47 @@
  * @file
  * Audit Chain companion hooks.
  *
- * The module's services do the work; this file only binds them to core's
- * scheduling. See ScheduledVerifier for the scheduled-verification contract.
+ * The module's services do the work; this file binds them to core's
+ * scheduling and registers the reports dashboard theme. See
+ * ScheduledVerifier for the scheduled-verification contract.
  */
 
 declare(strict_types=1);
+
+/**
+ * Implements hook_help().
+ */
+function audit_chain_help(string $route_name): string {
+  switch ($route_name) {
+    case 'help.page.audit_chain':
+      return '<p>' . t('Tamper-evident, hash-chained audit logging. Settings live at <a href=":settings">Configuration → System → Audit Chain</a>. Volume and integrity are at <a href=":reports">Reports → Audit Chain</a>.', [
+        ':settings' => '/admin/config/system/audit-chain',
+        ':reports' => '/admin/reports/audit-chain',
+      ]) . '</p>';
+
+    case 'audit_chain.dashboard':
+      return '<p>' . t('Aggregates indexed chain columns only — metadata, IP addresses, user agents and entity labels are never shown. Charts use the Charts API when a library plugin is installed, otherwise an inline SVG fallback. The integrity card reads the last scheduled verification; it does not re-walk the chain.') . '</p>';
+  }
+  return '';
+}
+
+/**
+ * Implements hook_theme().
+ */
+function audit_chain_theme(): array {
+  return [
+    'audit_chain_dashboard' => [
+      'variables' => [
+        'chain' => [],
+        'tiles' => [],
+        'charts' => [],
+        'quick_actions' => [],
+        'window' => '24h',
+        'windows' => [],
+      ],
+    ],
+  ];
+}
 
 /**
  * Implements hook_cron().

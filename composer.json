@@ -26,5 +26,8 @@
     "drupal/core": "^10.6 || ^11.3",
     "drupal/key": "^1.20",
     "drupal/encrypt": "^3.2"
+  },
+  "suggest": {
+    "drupal/charts": "Optional: upgrades the reports dashboard inline-SVG charts to interactive charts (install a library submodule such as charts_chartjs). The dashboard keeps the SVG fallback when Charts is absent or has no library."
   }
 }

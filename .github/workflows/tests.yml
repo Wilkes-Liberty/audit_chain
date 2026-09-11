@@ -163,7 +163,7 @@ jobs:
           SIMPLETEST_DB: 'sqlite://localhost/:memory:'
           BROWSERTEST_OUTPUT_DIRECTORY: /tmp
           SYMFONY_DEPRECATIONS_HELPER: weak
-          MIN_TESTS: '8'
+          MIN_TESTS: '16'
         run: |
           set -euo pipefail
           # Absolute -c path: the kernel tests declare

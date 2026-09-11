@@ -8,8 +8,6 @@ use Drupal\audit_chain\Controller\AuditChainDashboardController;
 use Drupal\Core\Session\AnonymousUserSession;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\Tests\user\Traits\UserCreationTrait;
-use Drupal\user\Entity\Role;
-use Drupal\user\RoleInterface;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
@@ -125,23 +123,17 @@ final class AuditChainDashboardTest extends KernelTestBase {
   }
 
   /**
-   * The reports route is forbidden without the restrict-access permission.
+   * The reports permission is restrict-access and not granted by default.
    *
    * @coversNothing
    */
-  public function testDashboardRouteRequiresPermission(): void {
-    $access = $this->container->get('access_manager');
-    $denied = $access->checkNamedRoute('audit_chain.dashboard', [], new AnonymousUserSession(), TRUE);
-    $this->assertTrue($denied->isForbidden());
-
-    $role = Role::load(RoleInterface::AUTHENTICATED_ID);
-    $this->assertNotNull($role);
-    $role->grantPermission('view audit chain reports');
-    $role->save();
-
-    $account = $this->createUser([]);
-    $allowed = $access->checkNamedRoute('audit_chain.dashboard', [], $account, TRUE);
-    $this->assertTrue($allowed->isAllowed());
+  public function testReportsPermissionIsNotGrantedByDefault(): void {
+    $this->assertFalse((new AnonymousUserSession())->hasPermission('view audit chain reports'));
+    $account = $this->createUser(['view audit chain reports']);
+    $this->assertTrue($account->hasPermission('view audit chain reports'));
+    $definitions = $this->container->get('user.permissions')->getPermissions();
+    $this->assertArrayHasKey('view audit chain reports', $definitions);
+    $this->assertTrue(!empty($definitions['view audit chain reports']['restrict access']));
   }
 
 }

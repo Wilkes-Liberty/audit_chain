@@ -6,9 +6,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-09-11
+
 ### Added
 
-- **Integrity reports page with optional Charts API upgrade (#32).** A
+- **Integrity reports page with optional Charts API upgrade (#32 / d.o. #3622590).** A
   read-only page at `/admin/reports/audit-chain` shows chain integrity
   (from the last scheduled verification — it does not re-walk the chain on
   GET) and the keyed-vs-unkeyed split over a `24h` / `7d` / `30d` window.

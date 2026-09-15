@@ -28,11 +28,6 @@ use Symfony\Component\HttpFoundation\RequestStack;
  * order so the hash is reproducible regardless of insertion order, and includes
  * the forensic columns (label, IP, user agent) so editing those breaks the
  * chain too.
- *
- * Extracted from mcp_sentinel 1.13, which remains its first consumer. The
- * behaviour is deliberately unchanged from that implementation — the point of
- * the extraction was to stop "governed AI" being a prerequisite for "governed
- * anything", not to redesign the chain.
  */
 final class AuditChainLogger implements AuditChainLoggerInterface {
 
@@ -371,25 +366,7 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
         $verifiedFrom = $id;
       }
 
-      $canonical = $this->buildCanonical([
-        'channel' => (string) ($record['channel'] ?? ''),
-        // Truncated to match the write path, so a future column-width change
-        // cannot silently desync the hashes.
-        'operation' => substr((string) $record['operation'], 0, 64),
-        'entity_type' => $record['entity_type'],
-        'bundle' => $record['bundle'],
-        'entity_id' => (string) ($record['entity_id'] ?? ''),
-        'entity_label' => isset($record['entity_label']) ? (string) $record['entity_label'] : NULL,
-        'ip_address' => isset($record['ip_address']) ? (string) $record['ip_address'] : NULL,
-        'user_agent' => isset($record['user_agent']) ? (string) $record['user_agent'] : NULL,
-        'timestamp' => (int) $record['timestamp'],
-        'uid' => (int) $record['uid'],
-      ], $this->decodeMetadata(
-        (string) ($record['metadata'] ?? ''),
-        // Prefer the profile that produced this row's bytes — after a rotation
-        // the configured profile is the wrong key for historical ciphertext.
-        (string) ($record['encryption_profile'] ?? ''),
-      ));
+      $canonical = $this->canonicalFromRecord($record);
 
       $storedPrev = (string) ($record['prev_hash'] ?? '');
 
@@ -519,21 +496,7 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
       }
       $chained++;
       $id = (int) $record['id'];
-      $canonical = $this->buildCanonical([
-        'channel' => (string) ($record['channel'] ?? ''),
-        'operation' => substr((string) $record['operation'], 0, 64),
-        'entity_type' => $record['entity_type'],
-        'bundle' => $record['bundle'],
-        'entity_id' => (string) ($record['entity_id'] ?? ''),
-        'entity_label' => isset($record['entity_label']) ? (string) $record['entity_label'] : NULL,
-        'ip_address' => isset($record['ip_address']) ? (string) $record['ip_address'] : NULL,
-        'user_agent' => isset($record['user_agent']) ? (string) $record['user_agent'] : NULL,
-        'timestamp' => (int) $record['timestamp'],
-        'uid' => (int) $record['uid'],
-      ], $this->decodeMetadata(
-        (string) ($record['metadata'] ?? ''),
-        (string) ($record['encryption_profile'] ?? ''),
-      ));
+      $canonical = $this->canonicalFromRecord($record);
       $storedPrev = (string) ($record['prev_hash'] ?? '');
       $stored = (string) $record['row_hash'];
       if ($this->matchesAnyKey($stored, $storedPrev, $canonical, $keys, (string) ($record['key_id'] ?? ''))) {
@@ -1018,11 +981,9 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
   /**
    * Resolves the HMAC key value from the configured Key entity.
    *
-   * Distinguishes the two states the previous implementation collapsed into a
-   * bare '': no key configured (unkeyed by design) and a configured key that
-   * will not resolve (a fault). They produce the same hash and mean opposite
-   * things, and merging them is what let a site run unsigned for 1,997 rows
-   * without a single signal.
+   * Distinguishes the two states that produce the same hash and mean opposite
+   * things: no key configured (unkeyed by design) and a configured key that
+   * will not resolve (a fault).
    *
    * @param mixed $keyId
    *   The hash_key setting: a Key entity ID, or NULL.
@@ -1039,6 +1000,40 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
     $key = $this->keyRepository->getKey($id);
     $value = $key ? (string) $key->getKeyValue() : '';
     return ['id' => $id, 'value' => $value, 'unresolvable' => $value === ''];
+  }
+
+  /**
+   * Rebuilds the canonical JSON from a stored log row.
+   *
+   * Shared by verify() and sealPrefix() so a column-width or null-handling
+   * change cannot desync content checks from the seal precondition.
+   *
+   * @param array $record
+   *   A stored audit_chain_log row as an associative array.
+   *
+   * @return string
+   *   Canonical JSON for hashing.
+   */
+  private function canonicalFromRecord(array $record): string {
+    return $this->buildCanonical([
+      'channel' => (string) ($record['channel'] ?? ''),
+      // Truncated to match the write path, so a future column-width change
+      // cannot silently desync the hashes.
+      'operation' => substr((string) $record['operation'], 0, 64),
+      'entity_type' => $record['entity_type'],
+      'bundle' => $record['bundle'],
+      'entity_id' => (string) ($record['entity_id'] ?? ''),
+      'entity_label' => isset($record['entity_label']) ? (string) $record['entity_label'] : NULL,
+      'ip_address' => isset($record['ip_address']) ? (string) $record['ip_address'] : NULL,
+      'user_agent' => isset($record['user_agent']) ? (string) $record['user_agent'] : NULL,
+      'timestamp' => (int) $record['timestamp'],
+      'uid' => (int) $record['uid'],
+    ], $this->decodeMetadata(
+      (string) ($record['metadata'] ?? ''),
+      // Prefer the profile that produced this row's bytes — after a rotation
+      // the configured profile is the wrong key for historical ciphertext.
+      (string) ($record['encryption_profile'] ?? ''),
+    ));
   }
 
   /**

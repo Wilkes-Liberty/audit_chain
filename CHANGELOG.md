@@ -6,6 +6,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-09-15
+
+### Changed
+- **verify() and sealPrefix() share one stored-row canonical helper.** Hashing of
+  existing rows for verification and prefix sealing now goes through a single
+  `canonicalFromRecord()` path so the two cannot drift. Hash format, locking,
+  and schema are unchanged.
+
 ## [1.7.0] - 2026-09-11
 
 ### Added

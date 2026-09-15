@@ -7,27 +7,7 @@ namespace Drupal\audit_chain;
 /**
  * A tamper-evident, append-only audit log.
  *
- * Each row's hash covers the row's own content *and* the previous row's hash,
- * so any later insertion, deletion or edit breaks the chain and is detectable
- * by verify(). With an HMAC key configured, forging a repair requires the key.
- *
- * Consumers write through this interface and are identified by a channel — a
- * short machine name such as `mcp_sentinel` or `personnel` — so one chain can
- * carry several kinds of event while keeping them filterable and attributable.
- *
- * Two constraints every consumer has to respect:
- *
- * - **Do not log per access check.** A hook like `hook_entity_field_access()`
- *   fires per field, per entity, per render; writing a row each time produces a
- *   chain nobody can read and a write-amplified request. Dedupe per request and
- *   flush once, at `kernel.terminate`.
- * - **Rotating the encryption profile orphans prior rows until they are
- *   re-encrypted.** Metadata encrypted under profile A cannot be read after
- *   switching to profile B if A is gone. The chain covers the plaintext, so
- *   verification still needs that plaintext — `drush audit-chain:reencrypt`
- *   rewrites ciphertext in place without touching hashes. Each row records
- *   which profile produced its bytes; the status report WARNs when any
- *   differ from the configured profile.
+ * @see README.md
  */
 interface AuditChainLoggerInterface {
 
@@ -53,9 +33,7 @@ interface AuditChainLoggerInterface {
    * Same row shape as log(). When no signing key is configured, or the
    * configured Key entity will not resolve to a non-empty value, throws
    * {@see \Drupal\audit_chain\Exception\AuditChainSigningUnavailableException}
-   * and writes nothing. Use this from evidence-required consumers that must
-   * not accept an unsigned precommit; ordinary auditing should keep calling
-   * log(), which prefers an unsigned row over a dropped one.
+   * and writes nothing.
    *
    * @param string $channel
    *   The consumer's machine name.
@@ -85,11 +63,8 @@ interface AuditChainLoggerInterface {
   /**
    * Walks the chain in insertion order and verifies every link.
    *
-   * Deliberately takes no channel argument. The chain is global — entries from
-   * every consumer are interleaved in one sequence — so a single channel cannot
-   * be verified in isolation without the entries between its own, and a
-   * per-channel walk could not tell a deletion from a gap. A break anywhere is
-   * a break.
+   * The chain is global: a break anywhere is a break. Per-channel verification
+   * cannot distinguish a deletion from a gap.
    *
    * Two different failures are reported differently, because they call for
    * different responses. A row whose content or ordering no longer matches its
@@ -125,14 +100,8 @@ interface AuditChainLoggerInterface {
   /**
    * Seals an unverifiable prefix so it is not re-chained or silently repaired.
    *
-   * Records a genesis anchor over the *stored* row_hash values of rows with
-   * id <= $throughId. Sealing proves nothing about the past; it makes any
-   * future change to that prefix's stored hashes detectable and lets
-   * post-seal verification exit cleanly. May only cover rows that do not
-   * currently verify under the site's signing keys — sealing a verifiable
-   * row would hide good history.
-   *
-   * Writes an audit entry (`channel=audit_chain`, `operation=prefix_sealed`).
+   * May only cover rows that do not currently verify under the site's signing
+   * keys — sealing a verifiable row would hide good history.
    *
    * @param int $throughId
    *   Highest row id included in the seal (inclusive).
@@ -199,11 +168,6 @@ interface AuditChainLoggerInterface {
 
   /**
    * Deletes a channel's entries older than a retention period.
-   *
-   * Deleting rows necessarily breaks the chain at the boundary — that is
-   * inherent to an append-only structure, not a defect — so verify() reports
-   * the seam afterwards. Export before pruning if the history has to stay
-   * provable.
    *
    * @param string $channel
    *   The channel to prune.

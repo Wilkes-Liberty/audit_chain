@@ -15,7 +15,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   cannot do. A missing mutex throws `AuditChainAppendException` and writes
   nothing; deadlock and lock-timeout failures still abort the write. Existing
   hashes and seals are not rewritten. The logger constructor no longer takes
-  the lock backend.
+  the lock backend. Run update 10003 and replace every old worker before
+  resuming traffic: a 1.7.x process does not take the mutex and can still
+  fork against a patched one.
 
 ## [1.7.1] - 2026-09-15
 

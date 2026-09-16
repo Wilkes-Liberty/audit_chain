@@ -69,6 +69,12 @@ A Drupal lock-backend lease cannot cover that commit boundary: it can expire,
 or commit on a different connection, while the caller's transaction is still
 open. Do not reintroduce one.
 
+Update `10003` creates and seeds the mutex table only. Quiesce appends (web,
+cron, queue, CLI), apply the update, replace every old worker, then resume
+traffic. A 1.7.x process does not take the mutex and can still fork against a
+patched one. The mutex row is not created lazily on the append path: concurrent
+first-writers would race on INSERT.
+
 `entity_type`, `bundle`, `id` and `label` are promoted to their own indexed
 columns; every other key is serialised into `metadata`. All of it — plus the
 actor, timestamp, IP and user agent — is covered by the hash.

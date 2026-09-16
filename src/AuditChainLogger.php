@@ -32,11 +32,6 @@ use Symfony\Component\HttpFoundation\RequestStack;
 final class AuditChainLogger implements AuditChainLoggerInterface {
 
   /**
-   * Lock name serialising the read-latest-then-insert critical section.
-   */
-  private const CHAIN_LOCK = 'audit_chain_append';
-
-  /**
    * JSON flags for the canonical payload and the stored metadata.
    *
    * JSON_INVALID_UTF8_SUBSTITUTE is load-bearing, not tidiness. Without it
@@ -119,8 +114,8 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
    * @param \Drupal\key\KeyRepositoryInterface $keyRepository
    *   The Key repository, resolving the HMAC signing key.
    * @param \Drupal\Core\Lock\LockBackendInterface $lock
-   *   The lock backend. Without it, two concurrent appends can read the same
-   *   prev_hash and produce a fork that verification then reports as tampering.
+   *   Deprecated compatibility argument. Append serialization now uses the
+   *   database transaction rather than an expiring lock backend lease.
    * @param \Psr\Log\LoggerInterface $logger
    *   The audit_chain logger channel.
    * @param \Drupal\encrypt\EncryptServiceInterface $encryptService
@@ -137,7 +132,7 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
     private readonly ConfigFactoryInterface $configFactory,
     private readonly TimeInterface $time,
     private readonly KeyRepositoryInterface $keyRepository,
-    private readonly LockBackendInterface $lock,
+    LockBackendInterface $lock,
     private readonly LoggerInterface $logger,
     private readonly EncryptServiceInterface $encryptService,
     private readonly EntityTypeManagerInterface $entityTypeManager,
@@ -233,11 +228,20 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
     // chain ordering depends on.
     $metadataStore = $this->encodeMetadata($extra, $config);
 
-    // Serialise read-latest-then-insert. If the lock cannot be taken the entry
-    // is still written — never drop an audit record — but the ordering
-    // guarantee is best-effort for that request.
-    $locked = $this->lock->acquire(self::CHAIN_LOCK, 3.0);
+    // A database row lock survives until the caller transaction commits or
+    // rolls back. An external lease cannot protect that boundary. The update
+    // also serializes an empty chain, where no latest audit row exists yet.
+    $transaction = $this->database->startTransaction();
     try {
+      // Native upsert is atomic, including the first append during module
+      // installation before hook_install() could seed a row. The singleton
+      // contains no audit state and can be initialized safely in this lock.
+      $this->database->upsert('audit_chain_mutex')
+        ->key('id')
+        ->fields(['id', 'locked'])
+        ->values([1, 1])
+        ->execute();
+
       // Re-resolve inside the lock so a key that vanished between the
       // precondition and the insert cannot produce an unkeyed row under
       // logKeyed(). Ordinary log() still prefers writing over dropping.
@@ -291,10 +295,14 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
         ]);
       }
     }
+    catch (\Throwable $exception) {
+      $transaction->rollBack();
+      throw $exception;
+    }
     finally {
-      if ($locked) {
-        $this->lock->release(self::CHAIN_LOCK);
-      }
+      // For a nested transaction this releases only the savepoint. The row
+      // lock remains held until the root transaction ends.
+      unset($transaction);
     }
   }
 
@@ -699,7 +707,7 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
   /**
    * Returns the most recently inserted row's hash, or NULL when empty.
    *
-   * Race-free only while CHAIN_LOCK is held.
+   * Called only while the transaction holds the serialization row lock.
    *
    * @return string|null
    *   The hex hash, or NULL.
@@ -709,6 +717,7 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
       ->fields('l', ['row_hash'])
       ->orderBy('id', 'DESC')
       ->range(0, 1)
+      ->forUpdate()
       ->execute()
       ->fetchField();
 

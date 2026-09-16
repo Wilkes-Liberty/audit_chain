@@ -14,6 +14,10 @@ interface AuditChainLoggerInterface {
   /**
    * Appends an entry to the chain.
    *
+   * Inside a caller transaction, the entry remains pending until that
+   * transaction commits. Database serialization failures propagate; callers
+   * that require evidence must abort the governed action or retry it safely.
+   *
    * @param string $channel
    *   The consumer's machine name, e.g. 'mcp_sentinel'. Bound into the row
    *   hash, so a row cannot be re-attributed to another channel undetected.
@@ -30,6 +34,7 @@ interface AuditChainLoggerInterface {
   /**
    * Appends an entry only when it will be HMAC-signed with the active key.
    *
+   * Uses the same transaction and serialization contract as log().
    * Same row shape as log(). When no signing key is configured, or the
    * configured Key entity will not resolve to a non-empty value, throws
    * {@see \Drupal\audit_chain\Exception\AuditChainSigningUnavailableException}

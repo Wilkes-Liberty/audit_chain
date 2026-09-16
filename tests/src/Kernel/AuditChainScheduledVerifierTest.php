@@ -47,7 +47,7 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
    */
   protected function setUp(): void {
     parent::setUp();
-    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installSchema('audit_chain', ['audit_chain_log', 'audit_chain_mutex']);
     // The system date formats back the date.formatter calls the status-report
     // requirement makes when rendering run times.
     $this->installConfig(['system', 'audit_chain']);

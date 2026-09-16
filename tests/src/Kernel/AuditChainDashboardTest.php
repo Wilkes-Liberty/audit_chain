@@ -46,7 +46,7 @@ final class AuditChainDashboardTest extends KernelTestBase {
    */
   protected function setUp(): void {
     parent::setUp();
-    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installSchema('audit_chain', ['audit_chain_log', 'audit_chain_mutex']);
     $this->installEntitySchema('user');
     $this->installSchema('user', ['users_data']);
     $this->installConfig(['system', 'user', 'audit_chain']);

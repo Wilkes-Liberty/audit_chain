@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace Drupal\Tests\audit_chain\Kernel;
 
 use Psr\Log\AbstractLogger;
+use Drupal\Core\Database\DatabaseExceptionWrapper;
+use Drupal\encrypt\EncryptServiceInterface;
+use Symfony\Component\Process\Process;
 use Drupal\audit_chain\AuditChainLogger;
 use Drupal\audit_chain\AuditChainLoggerInterface;
 use Drupal\audit_chain\Exception\AuditChainSigningUnavailableException;
@@ -51,9 +54,179 @@ final class AuditChainLoggerTest extends KernelTestBase {
   protected function setUp(): void {
     parent::setUp();
     $this->installEntitySchema('user');
-    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installSchema('audit_chain', ['audit_chain_log', 'audit_chain_mutex']);
     $this->installConfig(['audit_chain']);
     $this->chain = $this->container->get('audit_chain.logger');
+  }
+
+  /**
+   * An unavailable serialization table refuses both append entrypoints.
+   */
+  public function testMissingMutexTableRefusesAppend(): void {
+    $this->makeKey('mutex_test_key', 'synthetic-test-key');
+    $this->config('audit_chain.settings')->set('hash_key', 'mutex_test_key')->save();
+    $this->container->get('database')->schema()->dropTable('audit_chain_mutex');
+    foreach (['log', 'logKeyed'] as $method) {
+      try {
+        $this->chain->{$method}('test', 'missing_mutex');
+        $this->fail('Append must refuse a missing serialization row.');
+      }
+      catch (DatabaseExceptionWrapper) {
+        $this->assertFalse($this->container->get('database')->inTransaction());
+      }
+      $this->assertCount(0, $this->rows());
+    }
+  }
+
+  /**
+   * Caller rollback removes all nested appends and permits the next append.
+   */
+  public function testCallerRollbackRemovesNestedAppends(): void {
+    $transaction = $this->container->get('database')->startTransaction();
+    $this->chain->log('test', 'first');
+    $this->chain->log('test', 'second');
+    $this->assertCount(2, $this->rows());
+    $transaction->rollBack();
+    unset($transaction);
+    $this->assertCount(0, $this->rows());
+    $this->chain->log('test', 'after_rollback');
+    $this->assertCount(1, $this->rows());
+    $this->assertNull($this->rows()[0]->prev_hash);
+  }
+
+  /**
+   * A failed chain read releases its transaction and preserves the prior chain.
+   */
+  public function testReadFailureDoesNotLeaveTransactionOpen(): void {
+    $database = $this->container->get('database');
+    $this->chain->log('test', 'before_failure');
+    $database->schema()->renameTable('audit_chain_log', 'audit_chain_log_saved');
+    try {
+      $this->chain->log('test', 'insert_failure');
+      $this->fail('A missing audit table must refuse append.');
+    }
+    catch (DatabaseExceptionWrapper) {
+      $this->assertFalse($database->inTransaction());
+    }
+    finally {
+      $database->schema()->renameTable('audit_chain_log_saved', 'audit_chain_log');
+    }
+    $this->chain->log('test', 'after_failure');
+    $this->assertCount(2, $this->rows());
+    $this->assertTrue($this->chain->verify()['ok']);
+  }
+
+  /**
+   * The upgrade is repeatable and does not rewrite any existing audit record.
+   */
+  public function testSerializationUpdatePreservesHistory(): void {
+    $this->chain->log('test', 'before_update');
+    $before = $this->rows();
+    $this->container->get('database')->schema()->dropTable('audit_chain_mutex');
+    $this->container->get('module_handler')->loadInclude('audit_chain', 'install');
+    audit_chain_update_10003();
+    audit_chain_update_10003();
+    $this->assertEquals($before, $this->rows());
+    $this->chain->log('test', 'after_update');
+    $this->assertCount(2, $this->rows());
+    $this->assertTrue($this->chain->verify()['ok']);
+  }
+
+  /**
+   * Separate processes stay serialized until the outer transaction commits.
+   */
+  public function testConcurrentOuterCommit(): void {
+    $this->assertConcurrentAppend(FALSE);
+  }
+
+  /**
+   * A waiting process continues from the committed head after caller rollback.
+   */
+  public function testConcurrentOuterRollback(): void {
+    $this->assertConcurrentAppend(TRUE);
+  }
+
+  /**
+   * Runs real database writers with independent process and lock connections.
+   */
+  private function assertConcurrentAppend(bool $rollback): void {
+    $database = $this->container->get('database');
+    if (!in_array($database->driver(), ['pgsql', 'mysql'], TRUE)) {
+      $this->markTestSkipped('Cross-process tests require PostgreSQL or MySQL.');
+    }
+    $database->delete('audit_chain_mutex')->execute();
+    $this->makeKey('serialization_test', 'synthetic-serialization-key');
+    $this->config('audit_chain.settings')->set('hash_key', 'serialization_test')->save();
+    $prefix = sys_get_temp_dir() . '/audit-concurrency-' . bin2hex(random_bytes(8));
+    $ready = $prefix . '-ready';
+    $release = $prefix . '-release';
+    $started = $prefix . '-started';
+    $fixture = dirname(__DIR__, 2) . '/fixtures/append-worker.php';
+    $first = new Process([PHP_BINARY, $fixture, $this->root]);
+    $second = new Process([PHP_BINARY, $fixture, $this->root]);
+    $first->setTimeout(30);
+    $second->setTimeout(30);
+    $namespaces = [
+      'Drupal\\key\\' => dirname((new \ReflectionClass(Key::class))->getFileName(), 2),
+      'Drupal\\encrypt\\' => dirname((new \ReflectionClass(EncryptServiceInterface::class))->getFileName()),
+    ];
+    $first->setInput(json_encode([
+      'namespaces' => $namespaces,
+      'database' => $database->getConnectionOptions(),
+      'operation' => 'first',
+      'ready' => $ready,
+      'release' => $release,
+      'rollback' => $rollback,
+    ], JSON_THROW_ON_ERROR));
+    $second->setInput(json_encode([
+      'namespaces' => $namespaces,
+      'database' => $database->getConnectionOptions(),
+      'operation' => 'second',
+      'started' => $started,
+    ], JSON_THROW_ON_ERROR));
+    try {
+      $first->start();
+      $this->waitForWorker($first, $ready);
+      $second->start();
+      $this->waitForWorker($second, $started);
+      // Outlast the old three-second external lease while the caller holds
+      // its transaction. The second writer must still be waiting to append.
+      usleep(3300000);
+      $this->assertTrue($second->isRunning(), 'The second append returned before the caller transaction ended.');
+    }
+    finally {
+      file_put_contents($release, 'release');
+      if ($first->isStarted()) {
+        $first->wait();
+      }
+      if ($second->isStarted()) {
+        $second->wait();
+      }
+      foreach ([$ready, $release, $started] as $path) {
+        if (is_file($path)) {
+          unlink($path);
+        }
+      }
+    }
+    $this->assertSame(0, $first->getExitCode(), $first->getErrorOutput());
+    $this->assertSame(0, $second->getExitCode(), $second->getErrorOutput());
+    $rows = $this->rows();
+    $this->assertCount($rollback ? 1 : 2, $rows);
+    $this->assertSame('second', $rows[count($rows) - 1]->operation);
+    $this->assertTrue($this->chain->verify()['ok']);
+  }
+
+  /**
+   * Waits for a worker checkpoint without hiding an early process failure.
+   */
+  private function waitForWorker(Process $process, string $path): void {
+    $deadline = microtime(TRUE) + 10;
+    while (!is_file($path)) {
+      if (!$process->isRunning() || microtime(TRUE) >= $deadline) {
+        $this->fail('Worker did not reach its checkpoint: ' . $process->getErrorOutput());
+      }
+      usleep(20000);
+    }
   }
 
   /**

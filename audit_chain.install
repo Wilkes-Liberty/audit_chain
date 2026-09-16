@@ -207,6 +207,15 @@ function audit_chain_schema(): array {
     ],
   ];
 
+  $schema['audit_chain_mutex'] = [
+    'description' => 'Transaction-scoped serialization for audit appends.',
+    'fields' => [
+      'id' => ['type' => 'int', 'not null' => TRUE],
+      'locked' => ['type' => 'int', 'not null' => TRUE, 'default' => 1],
+    ],
+    'primary key' => ['id'],
+  ];
+
   return $schema;
 }
 
@@ -318,4 +327,15 @@ function _audit_chain_requirements_scheduled_verification(array &$requirements):
     ]),
     'severity' => REQUIREMENT_OK,
   ];
+}
+
+/**
+ * Add transaction-scoped serialization without changing audit history.
+ */
+function audit_chain_update_10003(): string {
+  $database = \Drupal::database();
+  if (!$database->schema()->tableExists('audit_chain_mutex')) {
+    $database->schema()->createTable('audit_chain_mutex', audit_chain_schema()['audit_chain_mutex']);
+  }
+  return 'Added append serialization. Existing audit rows and seals are unchanged.';
 }

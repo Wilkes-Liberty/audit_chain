@@ -264,3 +264,10 @@ error log and failure-event behavior for that integrity incident.
 
 - [Jeremy Michael Cerda](https://www.drupal.org/u/jmcerda) — <jmcerda@wilkesliberty.com>
 - Wilkes & Liberty, LLC — [drupal.org/u/wilkes-liberty](https://www.drupal.org/u/wilkes-liberty)
+
+### Append transactions
+
+Appends serialize through the database commit boundary. Callers must handle
+database failures and retain events for retry when needed. Before upgrading,
+quiesce all writers and read [append serialization](docs/APPEND_SERIALIZATION.md)
+for the transaction contract and rollout requirements.

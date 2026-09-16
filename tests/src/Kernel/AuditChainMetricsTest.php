@@ -48,7 +48,7 @@ final class AuditChainMetricsTest extends KernelTestBase {
    */
   protected function setUp(): void {
     parent::setUp();
-    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installSchema('audit_chain', ['audit_chain_log', 'audit_chain_mutex']);
     $this->installConfig(['audit_chain']);
     $this->metrics = $this->container->get('audit_chain.metrics');
   }

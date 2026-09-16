@@ -6,6 +6,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- Serialize appends through the database commit boundary instead of an expiring
+  external lock. Missing serialization state refuses writes. Existing audit
+  hashes and seals remain unchanged ([#3623694](https://www.drupal.org/project/audit_chain/issues/3623694)).
+
 ## [1.7.1] - 2026-09-15
 
 ### Changed

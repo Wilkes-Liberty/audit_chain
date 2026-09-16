@@ -50,7 +50,7 @@ final class AuditChainEvidenceExporterTest extends KernelTestBase {
    */
   protected function setUp(): void {
     parent::setUp();
-    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installSchema('audit_chain', ['audit_chain_log', 'audit_chain_mutex']);
     $this->installConfig(['system', 'audit_chain']);
 
     Key::create([

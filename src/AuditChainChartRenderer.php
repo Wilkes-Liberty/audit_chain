@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Drupal\audit_chain;
 
 use Drupal\Component\Plugin\PluginManagerInterface;
-use Drupal\Component\Render\FormattableMarkup;
 use Drupal\Component\Utility\Html;
 use Drupal\Core\Extension\ModuleHandlerInterface;
 use Drupal\Core\Render\Markup;
@@ -29,7 +28,7 @@ final class AuditChainChartRenderer {
   /**
    * Supported chart types.
    */
-  private const TYPES = ['bar', 'line', 'donut', 'pie'];
+  private const TYPES = ['donut'];
 
   /**
    * SVG viewbox width used by the fallback charts.
@@ -58,33 +57,28 @@ final class AuditChainChartRenderer {
    * Builds a render array for a metric series.
    *
    * @param string $type
-   *   The chart type: bar, line, donut, or pie.
+   *   The chart type. Production renders donut only; unknown types fall back
+   *   to donut.
    * @param array<string, int|float> $series
    *   Ordered label => value pairs.
-   * @param array{title?: string, drill_url?: string} $options
-   *   Optional title and click-to-drill URL.
+   * @param array{title?: string} $options
+   *   Optional title.
    *
    * @return array
    *   A render array: a charts element, an inline-SVG fallback, or an
    *   empty-state.
    */
   public function render(string $type, array $series, array $options = []): array {
-    $type = in_array($type, self::TYPES, TRUE) ? $type : 'bar';
+    $type = in_array($type, self::TYPES, TRUE) ? $type : 'donut';
     $title = (string) ($options['title'] ?? '');
 
     if ($series === []) {
       return $this->emptyState($title);
     }
 
-    $build = $this->chartsLibraryAvailable()
-      ? $this->buildChartsElement($type, $series, $title)
+    return $this->chartsLibraryAvailable()
+      ? $this->buildChartsElement($series, $title)
       : $this->buildSvgFallback($type, $series, $title);
-
-    $drillUrl = (string) ($options['drill_url'] ?? '');
-    if ($drillUrl !== '') {
-      return $this->wrapInLink($build, $drillUrl, $title);
-    }
-    return $build;
   }
 
   /**
@@ -131,8 +125,6 @@ final class AuditChainChartRenderer {
    *
    * This is the only method that references the contrib charts API.
    *
-   * @param string $type
-   *   The chart type.
    * @param array<string, int|float> $series
    *   Label => value pairs.
    * @param string $title
@@ -141,12 +133,11 @@ final class AuditChainChartRenderer {
    * @return array
    *   A charts render element.
    */
-  private function buildChartsElement(string $type, array $series, string $title): array {
+  private function buildChartsElement(array $series, string $title): array {
     // drupal/charts uses 'pie' for donut-style splits.
-    $chartType = $type === 'donut' ? 'pie' : $type;
     return [
       '#type' => 'chart',
-      '#chart_type' => $chartType,
+      '#chart_type' => 'pie',
       '#title' => $title,
       'series' => [
         '#type' => 'chart_data',
@@ -177,11 +168,7 @@ final class AuditChainChartRenderer {
    *   A render array containing the SVG markup.
    */
   private function buildSvgFallback(string $type, array $series, string $title): array {
-    $svg = match ($type) {
-      'line' => $this->lineSvg($series),
-      'donut', 'pie' => $this->donutSvg($series),
-      default => $this->barSvg($series),
-    };
+    $svg = $this->donutSvg($series);
     return [
       '#prefix' => '<div class="audit-chain-chart audit-chain-chart--' . $this->escape($type) . '">',
       '#suffix' => '</div>',
@@ -212,63 +199,6 @@ final class AuditChainChartRenderer {
   }
 
   /**
-   * Renders a bar chart as safe SVG markup.
-   *
-   * @param array<string, int|float> $series
-   *   Label => value pairs.
-   *
-   * @return \Drupal\Component\Render\MarkupInterface
-   *   The SVG markup.
-   */
-  private function barSvg(array $series): object {
-    $max = max(max(array_map('floatval', $series)), 1.0);
-    $count = count($series);
-    $gap = 6;
-    $barWidth = (self::SVG_WIDTH - ($gap * ($count + 1))) / $count;
-    $bars = '';
-    $i = 0;
-    foreach ($series as $label => $value) {
-      $h = ((float) $value / $max) * (self::SVG_HEIGHT - 24);
-      $x = $gap + $i * ($barWidth + $gap);
-      $y = self::SVG_HEIGHT - $h - 16;
-      $bars .= sprintf(
-        '<rect class="audit-chain-chart__bar" x="%.2f" y="%.2f" width="%.2f" height="%.2f"><title>%s: %s</title></rect>',
-        $x, $y, $barWidth, $h,
-        $this->escape((string) $label), $this->escape((string) $value),
-      );
-      $i++;
-    }
-    return $this->wrapSvg($bars);
-  }
-
-  /**
-   * Renders a line chart as safe SVG markup.
-   *
-   * @param array<string, int|float> $series
-   *   Label => value pairs.
-   *
-   * @return \Drupal\Component\Render\MarkupInterface
-   *   The SVG markup.
-   */
-  private function lineSvg(array $series): object {
-    $values = array_map('floatval', array_values($series));
-    $max = max(max($values), 1.0);
-    $count = count($values);
-    $stepX = $count > 1 ? (self::SVG_WIDTH - 16) / ($count - 1) : 0.0;
-    $points = [];
-    foreach ($values as $i => $value) {
-      $x = 8 + $i * $stepX;
-      $y = self::SVG_HEIGHT - 16 - (($value / $max) * (self::SVG_HEIGHT - 24));
-      $points[] = sprintf('%.2f,%.2f', $x, $y);
-    }
-    $polyline = sprintf(
-      '<polyline class="audit-chain-chart__line" fill="none" points="%s" />',
-      $this->escape(implode(' ', $points)),
-    );
-    return $this->wrapSvg($polyline);
-  }
-
-  /**
    * Renders a donut chart as safe SVG markup.
    *
    * @param array<string, int|float> $series
@@ -291,7 +221,7 @@ final class AuditChainChartRenderer {
       $dash = $fraction * $circumference;
       $segments .= sprintf(
         '<circle class="audit-chain-chart__slice audit-chain-chart__slice--%d" cx="%.2f" cy="%.2f" r="%.2f" fill="none" stroke-width="14" stroke-dasharray="%.2f %.2f" stroke-dashoffset="%.2f"><title>%s: %s</title></circle>',
-        $index % 6, $cx, $cy, $r, $dash, $circumference - $dash, -$offset,
+        $index % 2, $cx, $cy, $r, $dash, $circumference - $dash, -$offset,
         $this->escape((string) $label), $this->escape((string) $value),
       );
       $offset += $dash;
@@ -318,31 +248,6 @@ final class AuditChainChartRenderer {
     // already been passed through htmlspecialchars() in $this->escape(), so it
     // is safe to mark as trusted for the renderer.
     return Markup::create($svg);
-  }
-
-  /**
-   * Wraps a chart build in a drill-down link.
-   *
-   * @param array $build
-   *   The chart render array.
-   * @param string $url
-   *   The internal drill-down path.
-   * @param string $title
-   *   The chart title (used as the link label for accessibility).
-   *
-   * @return array
-   *   The link-wrapped render array.
-   */
-  private function wrapInLink(array $build, string $url, string $title): array {
-    $label = $title !== '' ? $title : 'View details';
-    return [
-      '#prefix' => new FormattableMarkup(
-        '<a class="audit-chain-chart__link" href="@url" title="@title">',
-        ['@url' => $url, '@title' => $label],
-      ),
-      '#suffix' => '</a>',
-      'content' => $build,
-    ];
   }
 
   /**

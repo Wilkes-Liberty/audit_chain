@@ -45,43 +45,15 @@ final class AuditChainChartRendererTest extends KernelTestBase {
   /**
    * @covers ::render
    */
-  public function testFallbackReturnsInlineSvgWhenChartsAbsent(): void {
-    /** @var \Drupal\audit_chain\AuditChainChartRenderer $r */
-    $r = \Drupal::service('audit_chain.chart_renderer');
-    $build = $r->render('bar', ['Mon' => 3, 'Tue' => 5], [
-      'title' => 'Volume',
-      'drill_url' => '/admin/reports/audit-chain',
-    ]);
-    $this->assertArrayNotHasKey('#type', $build);
-    $rendered = (string) \Drupal::service('renderer')->renderRoot($build);
-    $this->assertStringContainsString('<svg', $rendered);
-    $this->assertStringContainsString('Volume', $rendered);
-    $this->assertStringContainsString('/admin/reports/audit-chain', $rendered);
-    $this->assertStringContainsString('audit-chain-chart__svg', $rendered);
-  }
-
-  /**
-   * @covers ::render
-   */
-  public function testLineFallbackReturnsInlineSvg(): void {
-    /** @var \Drupal\audit_chain\AuditChainChartRenderer $r */
-    $r = \Drupal::service('audit_chain.chart_renderer');
-    $build = $r->render('line', ['00:00' => 1, '01:00' => 4, '02:00' => 2], ['title' => 'Trend']);
-    $rendered = (string) \Drupal::service('renderer')->renderRoot($build);
-    $this->assertStringContainsString('<svg', $rendered);
-    $this->assertStringContainsString('Trend', $rendered);
-    $this->assertStringContainsString('audit-chain-chart__line', $rendered);
-  }
-
-  /**
-   * @covers ::render
-   */
   public function testDonutFallbackReturnsInlineSvg(): void {
     /** @var \Drupal\audit_chain\AuditChainChartRenderer $r */
     $r = \Drupal::service('audit_chain.chart_renderer');
     $build = $r->render('donut', ['personnel' => 8, 'mcp' => 2], ['title' => 'Split']);
+    $this->assertArrayNotHasKey('#type', $build);
     $rendered = (string) \Drupal::service('renderer')->renderRoot($build);
     $this->assertStringContainsString('<svg', $rendered);
+    $this->assertStringContainsString('Split', $rendered);
+    $this->assertStringContainsString('audit-chain-chart__svg', $rendered);
     $this->assertStringContainsString('audit-chain-chart__slice', $rendered);
   }
 
@@ -91,7 +63,7 @@ final class AuditChainChartRendererTest extends KernelTestBase {
   public function testEmptySeriesRendersEmptyState(): void {
     /** @var \Drupal\audit_chain\AuditChainChartRenderer $r */
     $r = \Drupal::service('audit_chain.chart_renderer');
-    $build = $r->render('bar', [], ['title' => 'X']);
+    $build = $r->render('donut', [], ['title' => 'X']);
     $this->assertArrayNotHasKey('#type', $build);
     $rendered = (string) \Drupal::service('renderer')->renderRoot($build);
     $this->assertStringContainsString('No data', $rendered);
@@ -109,9 +81,9 @@ final class AuditChainChartRendererTest extends KernelTestBase {
     $manager = $this->createMock(PluginManagerInterface::class);
     $manager->method('getDefinitions')->willReturn([]);
     $renderer = new AuditChainChartRenderer($moduleHandler, $manager);
-    $build = $renderer->render('bar', ['Mon' => 3, 'Tue' => 5], ['title' => 'Volume']);
+    $build = $renderer->render('donut', ['Keyed' => 3, 'Unkeyed' => 5], ['title' => 'Keyed vs unkeyed']);
     $this->assertArrayNotHasKey('#type', $build);
-    $this->assertStringContainsString('audit-chain-chart--bar', (string) $build['#prefix']);
+    $this->assertStringContainsString('audit-chain-chart--donut', (string) $build['#prefix']);
     $this->assertArrayHasKey('svg', $build);
   }
 
@@ -126,8 +98,9 @@ final class AuditChainChartRendererTest extends KernelTestBase {
     $manager = $this->createMock(PluginManagerInterface::class);
     $manager->method('getDefinitions')->willReturn(['chartjs' => []]);
     $renderer = new AuditChainChartRenderer($moduleHandler, $manager);
-    $build = $renderer->render('bar', ['Mon' => 3], ['title' => 'Volume']);
+    $build = $renderer->render('donut', ['Keyed' => 3], ['title' => 'Keyed vs unkeyed']);
     $this->assertSame('chart', $build['#type']);
+    $this->assertSame('pie', $build['#chart_type']);
   }
 
   /**
@@ -145,9 +118,8 @@ final class AuditChainChartRendererTest extends KernelTestBase {
     }
     /** @var \Drupal\audit_chain\AuditChainChartRenderer $r */
     $r = \Drupal::service('audit_chain.chart_renderer');
-    $build = $r->render('bar', ['Mon' => 3], ['title' => 'Volume']);
-    $chart = $build['#type'] ?? ($build['content']['#type'] ?? NULL);
-    $this->assertSame('chart', $chart);
+    $build = $r->render('donut', ['Keyed' => 3], ['title' => 'Keyed vs unkeyed']);
+    $this->assertSame('chart', $build['#type'] ?? NULL);
   }
 
 }

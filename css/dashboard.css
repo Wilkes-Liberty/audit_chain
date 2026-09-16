@@ -163,43 +163,12 @@
   height: auto;
 }
 
-.audit-chain-chart__link {
-  display: block;
-  text-decoration: none;
-  color: inherit;
-}
-
-.audit-chain-chart__bar {
-  fill: var(--ac-color-primary);
-}
-
-.audit-chain-chart__line {
-  stroke: var(--ac-color-primary);
-  stroke-width: 2;
-}
-
 .audit-chain-chart__slice--0 {
   stroke: var(--ac-color-primary);
 }
 
 .audit-chain-chart__slice--1 {
   stroke: var(--ac-color-danger);
-}
-
-.audit-chain-chart__slice--2 {
-  stroke: var(--ac-color-warning);
-}
-
-.audit-chain-chart__slice--3 {
-  stroke: var(--ac-color-ok);
-}
-
-.audit-chain-chart__slice--4 {
-  stroke: var(--gin-color-info, #6f42c1);
-}
-
-.audit-chain-chart__slice--5 {
-  stroke: var(--gin-color-info-light, #20c997);
 }
 
 .audit-chain-chart--empty .audit-chain-chart__empty {

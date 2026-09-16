@@ -359,7 +359,7 @@ function audit_chain_update_10003(): string {
     $schema->createTable('audit_chain_mutex', audit_chain_schema()['audit_chain_mutex']);
   }
   $database->merge('audit_chain_mutex')
-    ->key(['id' => 1])
+    ->key('id', 1)
     ->fields(['locked' => 1])
     ->execute();
   return 'Added append serialization. Existing audit rows and seals are unchanged.';

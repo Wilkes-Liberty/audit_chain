@@ -12,9 +12,11 @@ use Drupal\audit_chain\Exception\AuditChainSigningUnavailableException;
 use Drupal\Core\Database\Connection;
 use Drupal\Core\Database\Database;
 use Drupal\Core\Database\DatabaseExceptionWrapper;
+use Drupal\encrypt\EncryptServiceInterface;
 use Drupal\encrypt\Entity\EncryptionProfile;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\key\Entity\Key;
+use Symfony\Component\Process\Process;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
@@ -176,6 +178,55 @@ final class AuditChainLoggerTest extends KernelTestBase {
     $rows = $this->rows();
     $this->assertCount(3, $rows);
     $this->assertSame($rows[1]->row_hash, $rows[2]->prev_hash);
+  }
+
+  /**
+   * An unavailable serialization table refuses both append entrypoints.
+   */
+  public function testMissingMutexTableRefusesAppend(): void {
+    $this->makeKey('mutex_table_key', 'synthetic-test-key');
+    $this->config('audit_chain.settings')->set('hash_key', 'mutex_table_key')->save();
+    $this->container->get('database')->schema()->dropTable('audit_chain_mutex');
+    foreach (['log', 'logKeyed'] as $method) {
+      try {
+        $this->chain->{$method}('test', 'missing_mutex_table');
+        $this->fail('Append must refuse a missing serialization table.');
+      }
+      catch (DatabaseExceptionWrapper) {
+        $this->assertFalse($this->container->get('database')->inTransaction());
+      }
+      $this->assertCount(0, $this->rows());
+    }
+  }
+
+  /**
+   * The upgrade is repeatable and does not rewrite any existing audit record.
+   */
+  public function testSerializationUpdatePreservesHistory(): void {
+    $this->chain->log('test', 'before_update');
+    $before = $this->rows();
+    $this->container->get('database')->schema()->dropTable('audit_chain_mutex');
+    $this->container->get('module_handler')->loadInclude('audit_chain', 'install');
+    audit_chain_update_10003();
+    audit_chain_update_10003();
+    $this->assertEquals($before, $this->rows());
+    $this->chain->log('test', 'after_update');
+    $this->assertCount(2, $this->rows());
+    $this->assertTrue($this->chain->verify()['ok']);
+  }
+
+  /**
+   * Separate processes stay serialized until the outer transaction commits.
+   */
+  public function testConcurrentOuterCommit(): void {
+    $this->assertConcurrentAppend(FALSE);
+  }
+
+  /**
+   * A waiting process continues from the committed head after caller rollback.
+   */
+  public function testConcurrentOuterRollback(): void {
+    $this->assertConcurrentAppend(TRUE);
   }
 
   /**
@@ -384,6 +435,102 @@ final class AuditChainLoggerTest extends KernelTestBase {
         $connection->query("SET lock_timeout = '" . ($seconds * 1000) . "ms'");
         break;
     }
+  }
+
+  /**
+   * Runs real database writers with independent process connections.
+   */
+  private function assertConcurrentAppend(bool $rollback): void {
+    $database = $this->container->get('database');
+    if (!in_array($database->driver(), ['pgsql', 'mysql'], TRUE)) {
+      $this->markTestSkipped('Cross-process tests require PostgreSQL or MySQL.');
+    }
+    $this->makeKey('serialization_test', 'synthetic-serialization-key');
+    $this->config('audit_chain.settings')->set('hash_key', 'serialization_test')->save();
+    $prefix = sys_get_temp_dir() . '/audit-concurrency-' . bin2hex(random_bytes(8));
+    $ready = $prefix . '-ready';
+    $release = $prefix . '-release';
+    $started = $prefix . '-started';
+    $fixture = dirname(__DIR__, 2) . '/fixtures/append-worker.php';
+    $vendor = $this->vendorDir();
+    $first = new Process([PHP_BINARY, $fixture, $this->root, $vendor]);
+    $second = new Process([PHP_BINARY, $fixture, $this->root, $vendor]);
+    $first->setTimeout(30);
+    $second->setTimeout(30);
+    $namespaces = [
+      'Drupal\\key\\' => dirname((new \ReflectionClass(Key::class))->getFileName(), 2),
+      'Drupal\\encrypt\\' => dirname((new \ReflectionClass(EncryptServiceInterface::class))->getFileName()),
+    ];
+    $options = $database->getConnectionOptions();
+    $first->setInput(json_encode([
+      'namespaces' => $namespaces,
+      'database' => $options,
+      'operation' => 'first',
+      'ready' => $ready,
+      'release' => $release,
+      'rollback' => $rollback,
+    ], JSON_THROW_ON_ERROR));
+    $second->setInput(json_encode([
+      'namespaces' => $namespaces,
+      'database' => $options,
+      'operation' => 'second',
+      'started' => $started,
+    ], JSON_THROW_ON_ERROR));
+    try {
+      $first->start();
+      $this->waitForWorker($first, $ready);
+      $second->start();
+      $this->waitForWorker($second, $started);
+      // Outlast the old three-second external lease while the caller holds
+      // its transaction. The second writer must still be waiting to append.
+      usleep(3300000);
+      $this->assertTrue($second->isRunning(), 'The second append returned before the caller transaction ended.');
+    }
+    finally {
+      file_put_contents($release, 'release');
+      if ($first->isStarted()) {
+        $first->wait();
+      }
+      if ($second->isStarted()) {
+        $second->wait();
+      }
+      foreach ([$ready, $release, $started] as $path) {
+        if (is_file($path)) {
+          unlink($path);
+        }
+      }
+    }
+    $this->assertSame(0, $first->getExitCode(), $first->getErrorOutput() . $first->getOutput());
+    $this->assertSame(0, $second->getExitCode(), $second->getErrorOutput() . $second->getOutput());
+    $rows = $this->rows();
+    $this->assertCount($rollback ? 1 : 2, $rows);
+    $this->assertSame('second', $rows[count($rows) - 1]->operation);
+    $this->assertTrue($this->chain->verify()['ok']);
+  }
+
+  /**
+   * Waits for a worker checkpoint without hiding an early process failure.
+   */
+  private function waitForWorker(Process $process, string $path): void {
+    $deadline = microtime(TRUE) + 10;
+    while (!is_file($path)) {
+      if (!$process->isRunning() || microtime(TRUE) >= $deadline) {
+        $this->fail('Worker did not reach its checkpoint: ' . $process->getErrorOutput() . $process->getOutput());
+      }
+      usleep(20000);
+    }
+  }
+
+  /**
+   * Locates vendor/autoload.php from the kernel Drupal root.
+   */
+  private function vendorDir(): string {
+    foreach ([dirname($this->root) . '/vendor', $this->root . '/vendor'] as $dir) {
+      if (is_file($dir . '/autoload.php')) {
+        return $dir;
+      }
+    }
+    throw new \RuntimeException('Could not locate vendor/autoload.php.');
   }
 
   /**

@@ -33,7 +33,7 @@ concurrency:
 
 jobs:
   phpunit:
-    name: PHPUnit (Drupal ${{ matrix.drupal }}, PHP ${{ matrix.php }})
+    name: PHPUnit (Drupal ${{ matrix.drupal }}, PHP ${{ matrix.php }})${{ matrix.database != 'sqlite' && format(' [{0}]', matrix.database) || '' }}
     runs-on: ubuntu-latest
     strategy:
       # Report every combination: a failure on one core version is a real
@@ -45,14 +45,62 @@ jobs:
             constraint: '~10.6.0'
             php: '8.3'
             phpunit: '^9.6'
+            database: sqlite
+            connection: 'sqlite://localhost/:memory:'
           - drupal: '11.3'
             constraint: '~11.3.0'
             php: '8.3'
             phpunit: '^11.5'
+            database: sqlite
+            connection: 'sqlite://localhost/:memory:'
           - drupal: '11'
             constraint: '^11'
             php: '8.4'
             phpunit: '^11.5'
+            database: sqlite
+            connection: 'sqlite://localhost/:memory:'
+
+          # Cross-process append serialization needs a server database. SQLite
+          # in-memory cannot share a mutex across processes, so those tests
+          # skip there. One PostgreSQL and one MySQL leg on the current major
+          # is enough to run them without multiplying the Drupal-version matrix.
+          - drupal: '11'
+            constraint: '^11'
+            php: '8.4'
+            phpunit: '^11.5'
+            database: postgres
+            connection: 'pgsql://drupal:drupal@127.0.0.1/drupal_test'
+          - drupal: '11'
+            constraint: '^11'
+            php: '8.4'
+            phpunit: '^11.5'
+            database: mysql
+            connection: 'mysql://drupal:drupal@127.0.0.1/drupal_test'
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: drupal_test
+          POSTGRES_USER: drupal
+          POSTGRES_PASSWORD: drupal
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U drupal -d drupal_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_DATABASE: drupal_test
+          MYSQL_USER: drupal
+          MYSQL_PASSWORD: drupal
+          MYSQL_ROOT_PASSWORD: drupal_root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pdrupal_root --silent"
+          --health-interval 5s --health-timeout 5s --health-retries 10
 
     steps:
       - name: Checkout the module
@@ -66,7 +114,7 @@ jobs:
           php-version: ${{ matrix.php }}
           # pdo_sqlite/sqlite3: the kernel-test database. gd: pulled in by
           # core's test bootstrap.
-          extensions: gd, pdo_sqlite, sqlite3
+          extensions: gd, pdo_sqlite, sqlite3, pdo_pgsql, pdo_mysql
           coverage: none
 
       - name: Scaffold a Drupal site
@@ -158,9 +206,9 @@ jobs:
       - name: PHPUnit — Kernel (blocking)
         working-directory: drupal
         env:
-          # Quoted: the value ends in a colon, which YAML would otherwise read
-          # as a mapping key and refuse to parse the file at all.
-          SIMPLETEST_DB: 'sqlite://localhost/:memory:'
+          # Matrix value, not a YAML literal: sqlite's DSN ends in a colon,
+          # which a quoted mapping value in this file would misparse.
+          SIMPLETEST_DB: ${{ matrix.connection }}
           BROWSERTEST_OUTPUT_DIRECTORY: /tmp
           SYMFONY_DEPRECATIONS_HELPER: weak
           MIN_TESTS: '16'

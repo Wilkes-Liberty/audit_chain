@@ -22,6 +22,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 #[RunTestsInSeparateProcesses]
 final class AuditChainCollectorTest extends KernelTestBase {
 
+  use AuditChainSchemaTrait;
+
   /**
    * {@inheritdoc}
    */
@@ -38,7 +40,7 @@ final class AuditChainCollectorTest extends KernelTestBase {
   protected function setUp(): void {
     parent::setUp();
     $this->installEntitySchema('user');
-    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installAuditChainTables();
     $this->installConfig(['audit_chain']);
     $this->collector = $this->container->get('audit_chain.collector');
   }

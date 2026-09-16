@@ -13,7 +13,6 @@ services:
       - '@config.factory'
       - '@datetime.time'
       - '@key.repository'
-      - '@lock'
       - '@logger.channel.audit_chain'
       - '@encryption'
       - '@entity_type.manager'

@@ -30,6 +30,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 #[RunTestsInSeparateProcesses]
 final class AuditChainScheduledVerifierTest extends KernelTestBase {
 
+  use AuditChainSchemaTrait;
+
   /**
    * {@inheritdoc}
    */
@@ -47,7 +49,7 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
    */
   protected function setUp(): void {
     parent::setUp();
-    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installAuditChainTables();
     // The system date formats back the date.formatter calls the status-report
     // requirement makes when rendering run times.
     $this->installConfig(['system', 'audit_chain']);

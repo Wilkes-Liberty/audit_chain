@@ -13,7 +13,7 @@ use Symfony\Component\HttpKernel\KernelEvents;
  *
  * `kernel.terminate` rather than `kernel.response`: the entries describe what
  * the request did, so nothing downstream needs them, and writing after the
- * response keeps the chain lock off the user's critical path. The lock
+ * response keeps the append mutex off the user's critical path. The mutex
  * serialises appends across the whole site, so holding it mid-request would
  * make concurrent requests wait on each other for work none of them needs.
  */

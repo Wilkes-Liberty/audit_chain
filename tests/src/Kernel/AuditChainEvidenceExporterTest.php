@@ -33,6 +33,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 #[RunTestsInSeparateProcesses]
 final class AuditChainEvidenceExporterTest extends KernelTestBase {
 
+  use AuditChainSchemaTrait;
+
   /**
    * {@inheritdoc}
    */
@@ -50,7 +52,7 @@ final class AuditChainEvidenceExporterTest extends KernelTestBase {
    */
   protected function setUp(): void {
     parent::setUp();
-    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installAuditChainTables();
     $this->installConfig(['system', 'audit_chain']);
 
     Key::create([

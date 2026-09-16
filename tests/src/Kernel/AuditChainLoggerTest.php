@@ -7,7 +7,11 @@ namespace Drupal\Tests\audit_chain\Kernel;
 use Psr\Log\AbstractLogger;
 use Drupal\audit_chain\AuditChainLogger;
 use Drupal\audit_chain\AuditChainLoggerInterface;
+use Drupal\audit_chain\Exception\AuditChainAppendException;
 use Drupal\audit_chain\Exception\AuditChainSigningUnavailableException;
+use Drupal\Core\Database\Connection;
+use Drupal\Core\Database\Database;
+use Drupal\Core\Database\DatabaseExceptionWrapper;
 use Drupal\encrypt\Entity\EncryptionProfile;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\key\Entity\Key;
@@ -27,6 +31,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 #[Group('audit_chain')]
 #[RunTestsInSeparateProcesses]
 final class AuditChainLoggerTest extends KernelTestBase {
+
+  use AuditChainSchemaTrait;
 
   /**
    * {@inheritdoc}
@@ -51,9 +57,125 @@ final class AuditChainLoggerTest extends KernelTestBase {
   protected function setUp(): void {
     parent::setUp();
     $this->installEntitySchema('user');
-    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installAuditChainTables();
     $this->installConfig(['audit_chain']);
     $this->chain = $this->container->get('audit_chain.logger');
+  }
+
+  /**
+   * Missing mutex refuses ordinary log() and writes nothing.
+   */
+  public function testMissingMutexRefusesAppend(): void {
+    $this->container->get('database')->delete('audit_chain_mutex')->execute();
+    try {
+      $this->chain->log('test', 'missing_mutex');
+      $this->fail('log() must refuse a missing serialization row.');
+    }
+    catch (AuditChainAppendException $exception) {
+      $this->assertStringContainsString('serialization row is missing', $exception->getMessage());
+    }
+    $this->assertCount(0, $this->rows());
+  }
+
+  /**
+   * Keyed append also refuses a missing mutex and writes nothing (#3623694).
+   */
+  public function testKeyedAppendRefusesMissingMutex(): void {
+    $this->makeKey('mutex_test_key', 'synthetic-test-key');
+    $this->config('audit_chain.settings')->set('hash_key', 'mutex_test_key')->save();
+    $this->container->get('database')->delete('audit_chain_mutex')->execute();
+    try {
+      $this->chain->logKeyed('mcp_sentinel', 'evidence_precommit', ['id' => '1']);
+      $this->fail('logKeyed() must refuse a missing serialization row.');
+    }
+    catch (AuditChainAppendException $exception) {
+      $this->assertStringContainsString('serialization row is missing', $exception->getMessage());
+    }
+    $this->assertCount(0, $this->rows());
+  }
+
+  /**
+   * Caller rollback removes nested appends and permits the next write.
+   */
+  public function testCallerRollbackRemovesNestedAppends(): void {
+    $transaction = $this->container->get('database')->startTransaction();
+    $this->chain->log('test', 'first');
+    $this->chain->log('test', 'second');
+    $this->assertCount(2, $this->rows());
+    $transaction->rollBack();
+    unset($transaction);
+    $this->assertCount(0, $this->rows());
+    $this->chain->log('test', 'after_rollback');
+    $this->assertCount(1, $this->rows());
+    $this->assertNull($this->rows()[0]->prev_hash);
+    $this->assertTrue($this->chain->verify()['ok']);
+  }
+
+  /**
+   * A failed chain read rolls back and leaves the prior chain intact.
+   */
+  public function testReadFailureDoesNotLeaveTransactionOpen(): void {
+    $database = $this->container->get('database');
+    $this->chain->log('test', 'before_failure');
+    $database->schema()->renameTable('audit_chain_log', 'audit_chain_log_saved');
+    try {
+      $this->chain->log('test', 'insert_failure');
+      $this->fail('A missing audit table must refuse append.');
+    }
+    catch (DatabaseExceptionWrapper) {
+      $this->assertFalse($database->inTransaction());
+    }
+    finally {
+      $database->schema()->renameTable('audit_chain_log_saved', 'audit_chain_log');
+    }
+    $this->chain->log('test', 'after_failure');
+    $this->assertCount(2, $this->rows());
+    $this->assertTrue($this->chain->verify()['ok']);
+  }
+
+  /**
+   * An uncommitted append holds the mutex against another connection.
+   *
+   * SQLite in-memory connections do not share a database, so this cannot
+   * express the race there. MySQL/PostgreSQL kernel runs (d.o GitLab) do.
+   */
+  public function testUncommittedAppendBlocksSecondConnection(): void {
+    $database = $this->container->get('database');
+    if ($database->databaseType() === 'sqlite') {
+      $this->markTestSkipped('SQLite in-memory cannot share a mutex across connections.');
+    }
+
+    $this->chain->log('test', 'committed_head');
+    $transaction = $database->startTransaction();
+    $this->chain->log('test', 'uncommitted');
+
+    $info = Database::getConnectionInfo('default');
+    Database::addConnectionInfo('audit_chain_other', 'default', $info['default']);
+    $other = Database::getConnection('default', 'audit_chain_other');
+    $this->setLockTimeout($other, 1);
+    $otherLogger = $this->loggerForConnection($other);
+
+    try {
+      $otherLogger->log('test', 'competitor');
+      $this->fail('Competing append must not proceed while the mutex is held.');
+    }
+    catch (DatabaseExceptionWrapper | AuditChainAppendException) {
+      // Lock wait timeout or a wrapped refusal — either is fail-closed.
+    }
+
+    $otherCount = (int) $other->select('audit_chain_log', 'l')
+      ->countQuery()
+      ->execute()
+      ->fetchField();
+    $this->assertSame(1, $otherCount, 'Competitor must not insert a fork.');
+
+    unset($transaction);
+
+    $otherLogger->log('test', 'competitor');
+    $this->assertTrue($this->chain->verify()['ok']);
+    $rows = $this->rows();
+    $this->assertCount(3, $rows);
+    $this->assertSame($rows[1]->row_hash, $rows[2]->prev_hash);
   }
 
   /**
@@ -229,6 +351,39 @@ final class AuditChainLoggerTest extends KernelTestBase {
       'key_provider' => 'config',
       'key_provider_settings' => ['key_value' => $value],
     ])->save();
+  }
+
+  /**
+   * Builds a logger that writes through a second database connection.
+   */
+  private function loggerForConnection(Connection $connection): AuditChainLogger {
+    return new AuditChainLogger(
+      $connection,
+      $this->container->get('current_user'),
+      $this->container->get('request_stack'),
+      $this->container->get('config.factory'),
+      $this->container->get('datetime.time'),
+      $this->container->get('key.repository'),
+      $this->container->get('logger.channel.audit_chain'),
+      $this->container->get('encryption'),
+      $this->container->get('entity_type.manager'),
+      $this->container->get('state'),
+    );
+  }
+
+  /**
+   * Caps lock-wait so a blocked second connection fails instead of hanging.
+   */
+  private function setLockTimeout(Connection $connection, int $seconds): void {
+    switch ($connection->databaseType()) {
+      case 'mysql':
+        $connection->query('SET SESSION innodb_lock_wait_timeout = ' . $seconds);
+        break;
+
+      case 'pgsql':
+        $connection->query("SET lock_timeout = '" . ($seconds * 1000) . "ms'");
+        break;
+    }
   }
 
   /**

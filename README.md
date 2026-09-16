@@ -55,7 +55,19 @@ call `logKeyed()` instead of `log()`. It throws
 `AuditChainSigningUnavailableException` and writes nothing when the signing key
 will not resolve. `signingStatus()` returns `{keyed, key_id}` for cheap
 precondition checks. Ordinary auditing should keep using `log()`, which
-prefers an unsigned row over a dropped one.
+prefers an unsigned row over a dropped one **when the only fault is signing**.
+
+Serialization is not optional. Both `log()` and `logKeyed()` take a
+transaction-scoped mutex before reading the chain head, and hold it until the
+wrapping database transaction commits or rolls back. A missing mutex throws
+`AuditChainAppendException` and writes nothing; a deadlock or lock timeout
+surfaces as a database exception — also a refused write, not a fork.
+Evidence-required callers must abort the governed action on either failure.
+The request-scoped collector is not a durable retry queue.
+
+A Drupal lock-backend lease cannot cover that commit boundary: it can expire,
+or commit on a different connection, while the caller's transaction is still
+open. Do not reintroduce one.
 
 `entity_type`, `bundle`, `id` and `label` are promoted to their own indexed
 columns; every other key is serialised into `metadata`. All of it — plus the
@@ -163,8 +175,8 @@ narrow that key. The first occurrence wins — its metadata is kept and later on
 are discarded rather than merged, because a read that happened forty times is
 still one read, and merging would invent a record of something nobody did.
 
-Writing happens after the response is sent, which also keeps the chain lock off
-the user's critical path.
+Writing happens after the response is sent, which also keeps the append mutex
+off the user's critical path.
 
 **2. Rotating the encryption profile orphans existing entries until you re-encrypt.**
 Metadata encrypted under profile A cannot be read with profile B alone. The

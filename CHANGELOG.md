@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.7.2] - 2026-09-16
+
 ### Fixed
 - **Appends no longer proceed without serialization (d.o. #3623694).** Both
   `log()` and `logKeyed()` take a transaction-scoped mutex on

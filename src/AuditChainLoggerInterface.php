@@ -24,6 +24,11 @@ interface AuditChainLoggerInterface {
    *   promoted to their own columns so they can be indexed and filtered;
    *   everything else is serialised into the metadata column (encrypted when an
    *   encryption profile is configured). All of it is covered by the hash.
+   *
+   * @throws \Drupal\audit_chain\Exception\AuditChainAppendException
+   *   When the append cannot be serialised (mutex missing). Deadlock and
+   *   lock-timeout failures propagate as database exceptions. Either way
+   *   nothing is written.
    */
   public function log(string $channel, string $operation, array $metadata = []): void;
 
@@ -44,6 +49,10 @@ interface AuditChainLoggerInterface {
    *
    * @throws \Drupal\audit_chain\Exception\AuditChainSigningUnavailableException
    *   When the append would not be HMAC-signed.
+   * @throws \Drupal\audit_chain\Exception\AuditChainAppendException
+   *   When the append cannot be serialised (mutex missing). Deadlock and
+   *   lock-timeout failures propagate as database exceptions. Either way
+   *   nothing is written; evidence-required callers must abort the action.
    */
   public function logKeyed(string $channel, string $operation, array $metadata = []): void;
 

@@ -4,13 +4,13 @@ declare(strict_types=1);
 
 namespace Drupal\audit_chain;
 
+use Drupal\audit_chain\Exception\AuditChainAppendException;
 use Drupal\audit_chain\Exception\AuditChainSigningUnavailableException;
 use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Config\ImmutableConfig;
 use Drupal\Core\Database\Connection;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
-use Drupal\Core\Lock\LockBackendInterface;
 use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\Core\State\StateInterface;
 use Drupal\encrypt\EncryptionProfileInterface;
@@ -28,13 +28,19 @@ use Symfony\Component\HttpFoundation\RequestStack;
  * order so the hash is reproducible regardless of insertion order, and includes
  * the forensic columns (label, IP, user agent) so editing those breaks the
  * chain too.
+ *
+ * Appends are serialised by a singleton row lock on {audit_chain_mutex}, held
+ * until the wrapping database transaction commits or rolls back. An expiring
+ * lock-backend lease cannot cover that boundary: releasing it before the
+ * caller commits lets another connection read the same head and fork the
+ * chain. Missing mutex state refuses the write.
  */
 final class AuditChainLogger implements AuditChainLoggerInterface {
 
   /**
-   * Lock name serialising the read-latest-then-insert critical section.
+   * Singleton id of the append mutex row.
    */
-  private const CHAIN_LOCK = 'audit_chain_append';
+  private const MUTEX_ID = 1;
 
   /**
    * JSON flags for the canonical payload and the stored metadata.
@@ -118,9 +124,6 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
    *   The time service.
    * @param \Drupal\key\KeyRepositoryInterface $keyRepository
    *   The Key repository, resolving the HMAC signing key.
-   * @param \Drupal\Core\Lock\LockBackendInterface $lock
-   *   The lock backend. Without it, two concurrent appends can read the same
-   *   prev_hash and produce a fork that verification then reports as tampering.
    * @param \Psr\Log\LoggerInterface $logger
    *   The audit_chain logger channel.
    * @param \Drupal\encrypt\EncryptServiceInterface $encryptService
@@ -137,7 +140,6 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
     private readonly ConfigFactoryInterface $configFactory,
     private readonly TimeInterface $time,
     private readonly KeyRepositoryInterface $keyRepository,
-    private readonly LockBackendInterface $lock,
     private readonly LoggerInterface $logger,
     private readonly EncryptServiceInterface $encryptService,
     private readonly EntityTypeManagerInterface $entityTypeManager,
@@ -185,6 +187,9 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
    *
    * @throws \Drupal\audit_chain\Exception\AuditChainSigningUnavailableException
    *   When $requireKeyed is TRUE and no signing key value is available.
+   * @throws \Drupal\audit_chain\Exception\AuditChainAppendException
+   *   When the append mutex is missing. Deadlock and lock-timeout failures
+   *   propagate as database exceptions; both paths write nothing.
    */
   private function append(string $channel, string $operation, array $metadata, bool $requireKeyed): void {
     $config = $this->configFactory->get('audit_chain.settings');
@@ -229,16 +234,20 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
       );
     }
 
-    // Encoded outside the lock: encryption can be slow and holds nothing the
+    // Encoded outside the mutex: encryption can be slow and holds nothing the
     // chain ordering depends on.
     $metadataStore = $this->encodeMetadata($extra, $config);
 
-    // Serialise read-latest-then-insert. If the lock cannot be taken the entry
-    // is still written — never drop an audit record — but the ordering
-    // guarantee is best-effort for that request.
-    $locked = $this->lock->acquire(self::CHAIN_LOCK, 3.0);
+    // Row lock on {audit_chain_mutex} is held until the root transaction
+    // commits or rolls back. startTransaction() is a savepoint when the
+    // caller already has a transaction, so an uncommitted append still
+    // blocks other connections. A missing mutex refuses the write: a fork
+    // is worse than a dropped row.
+    $transaction = $this->database->startTransaction();
     try {
-      // Re-resolve inside the lock so a key that vanished between the
+      $this->acquireAppendMutex();
+
+      // Re-resolve inside the mutex so a key that vanished between the
       // precondition and the insert cannot produce an unkeyed row under
       // logKeyed(). Ordinary log() still prefers writing over dropping.
       if ($requireKeyed) {
@@ -274,6 +283,7 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
 
       // A stable message template with the variable data in context, so log
       // aggregators can group by template and a SIEM can consume the fields.
+      // Streamed before the caller commits: it is not proof the row lasted.
       if ($config->get('stream_enabled')) {
         $this->logger->info('audit_chain_event', [
           'channel' => $row['channel'],
@@ -291,10 +301,14 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
         ]);
       }
     }
+    catch (\Throwable $exception) {
+      $transaction->rollBack();
+      throw $exception;
+    }
     finally {
-      if ($locked) {
-        $this->lock->release(self::CHAIN_LOCK);
-      }
+      // Nested: releases the savepoint only. The mutex stays held until
+      // the caller's root transaction ends.
+      unset($transaction);
     }
   }
 
@@ -697,9 +711,43 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
   }
 
   /**
+   * Takes the transaction-scoped mutex that serialises appends.
+   *
+   * SELECT ... FOR UPDATE is a current read on MySQL (so a caller whose
+   * snapshot started earlier still sees the committed head) and holds the
+   * row until the root transaction ends on PostgreSQL and InnoDB. SQLite
+   * ignores FOR UPDATE; the following UPDATE takes the write lock that
+   * actually serialises writers there. The mutex row also covers an empty
+   * chain, where no log row exists to lock.
+   *
+   * @throws \Drupal\audit_chain\Exception\AuditChainAppendException
+   *   When the singleton row is missing. The row is not created here:
+   *   concurrent first-writers would race on INSERT.
+   */
+  private function acquireAppendMutex(): void {
+    $id = $this->database->select('audit_chain_mutex', 'm')
+      ->fields('m', ['id'])
+      ->condition('id', self::MUTEX_ID)
+      ->forUpdate()
+      ->execute()
+      ->fetchField();
+    if ($id === FALSE || $id === NULL) {
+      throw new AuditChainAppendException(
+        'Audit chain append refused: serialization row is missing.',
+      );
+    }
+    $this->database->update('audit_chain_mutex')
+      ->fields(['locked' => 1])
+      ->condition('id', self::MUTEX_ID)
+      ->execute();
+  }
+
+  /**
    * Returns the most recently inserted row's hash, or NULL when empty.
    *
-   * Race-free only while CHAIN_LOCK is held.
+   * Called only while the mutex row lock is held. FOR UPDATE forces a
+   * current read under MySQL repeatable-read so the head is the latest
+   * committed row, not the caller's possibly-stale snapshot.
    *
    * @return string|null
    *   The hex hash, or NULL.
@@ -709,6 +757,7 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
       ->fields('l', ['row_hash'])
       ->orderBy('id', 'DESC')
       ->range(0, 1)
+      ->forUpdate()
       ->execute()
       ->fetchField();
 
@@ -961,7 +1010,7 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
   /**
    * Refuse a keyed append when no signing key value is available.
    *
-   * Shared by the pre-lock and in-lock checks so both failure sites keep the
+   * Shared by the pre-mutex and in-mutex checks so both failure sites keep the
    * same message if the wording ever changes.
    *
    * @param array{id: string, value: string, unresolvable: bool} $key

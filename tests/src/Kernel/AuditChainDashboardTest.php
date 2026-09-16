@@ -27,6 +27,7 @@ use Symfony\Component\HttpFoundation\Request;
 #[RunTestsInSeparateProcesses]
 final class AuditChainDashboardTest extends KernelTestBase {
 
+  use AuditChainSchemaTrait;
   use UserCreationTrait;
 
   /**
@@ -46,7 +47,7 @@ final class AuditChainDashboardTest extends KernelTestBase {
    */
   protected function setUp(): void {
     parent::setUp();
-    $this->installSchema('audit_chain', ['audit_chain_log']);
+    $this->installAuditChainTables();
     $this->installEntitySchema('user');
     $this->installSchema('user', ['users_data']);
     $this->installConfig(['system', 'user', 'audit_chain']);

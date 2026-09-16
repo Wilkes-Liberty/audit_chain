@@ -207,7 +207,36 @@ function audit_chain_schema(): array {
     ],
   ];
 
+  $schema['audit_chain_mutex'] = [
+    'description' => 'Singleton row lock serialising appends until commit.',
+    'fields' => [
+      'id' => [
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'not null' => TRUE,
+        'description' => 'Singleton id; always 1.',
+      ],
+      'locked' => [
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 1,
+        'description' => 'Dummy payload; UPDATE takes the SQLite write lock.',
+      ],
+    ],
+    'primary key' => ['id'],
+  ];
+
   return $schema;
+}
+
+/**
+ * Implements hook_install().
+ */
+function audit_chain_install(): void {
+  \Drupal::database()->insert('audit_chain_mutex')->fields([
+    'id' => 1,
+    'locked' => 1,
+  ])->execute();
 }
 
 /**
@@ -318,4 +347,20 @@ function _audit_chain_requirements_scheduled_verification(array &$requirements):
     ]),
     'severity' => REQUIREMENT_OK,
   ];
+}
+
+/**
+ * Add the append mutex without changing audit history.
+ */
+function audit_chain_update_10003(): string {
+  $database = \Drupal::database();
+  $schema = $database->schema();
+  if (!$schema->tableExists('audit_chain_mutex')) {
+    $schema->createTable('audit_chain_mutex', audit_chain_schema()['audit_chain_mutex']);
+  }
+  $database->merge('audit_chain_mutex')
+    ->key('id', 1)
+    ->fields(['locked' => 1])
+    ->execute();
+  return 'Added append serialization. Existing audit rows and seals are unchanged.';
 }

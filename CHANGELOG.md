@@ -6,6 +6,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **Appends no longer proceed without serialization (d.o. #3623694).** Both
+  `log()` and `logKeyed()` take a transaction-scoped mutex on
+  `{audit_chain_mutex}` before reading the chain head, so concurrent writers
+  cannot share a `prev_hash`. The mutex is held until the wrapping database
+  transaction commits or rolls back, which an expiring lock-backend lease
+  cannot do. A missing mutex throws `AuditChainAppendException` and writes
+  nothing; deadlock and lock-timeout failures still abort the write. Existing
+  hashes and seals are not rewritten. The logger constructor no longer takes
+  the lock backend. Run update 10003 and replace every old worker before
+  resuming traffic: a 1.7.x process does not take the mutex and can still
+  fork against a patched one. CI runs the kernel suite on PostgreSQL 16 and
+  MySQL 8.0 as well as SQLite so the cross-process serialization tests execute.
+
 ## [1.7.1] - 2026-09-15
 
 ### Changed

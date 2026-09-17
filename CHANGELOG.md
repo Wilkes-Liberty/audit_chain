@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-09-17
+
 ### Added
 - Explicit signed successor segments for reviewed historical failures
   (#3623864), with snapshot approval, an append-only recovery record and

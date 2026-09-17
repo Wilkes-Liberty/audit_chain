@@ -6,6 +6,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- Refuse destructive per-channel pruning while no verifiable archival boundary
+  exists (#3623864). Eligible records are retained, with a log warning and a
+  persistent status-report warning. Channels share one chain; deleting expired
+  rows could invalidate another channel's history or a prefix seal. Review
+  retention obligations and disk capacity when upgrading. Existing failures
+  are not repaired or hidden.
+
 ## [1.7.2] - 2026-09-16
 
 ### Fixed

@@ -9,6 +9,7 @@ use Drupal\audit_chain\AuditChainLogger;
 use Drupal\audit_chain\AuditChainLoggerInterface;
 use Drupal\audit_chain\Exception\AuditChainAppendException;
 use Drupal\audit_chain\Exception\AuditChainSigningUnavailableException;
+use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Core\Database\Connection;
 use Drupal\Core\Database\Database;
 use Drupal\Core\Database\DatabaseExceptionWrapper;
@@ -1118,25 +1119,74 @@ final class AuditChainLoggerTest extends KernelTestBase {
   }
 
   /**
-   * Pruning removes only the named channel's aged rows.
+   * Retention preserves valid interleaved and legacy channel history.
    */
-  public function testPruneIsScopedToItsChannelAndAge(): void {
-    $this->chain->log('personnel', 'field_read', ['id' => '1']);
-    $this->chain->log('mcp_sentinel', 'entity_save', ['id' => '2']);
+  public function testPrunePreservesSharedHistory(): void {
+    $now = 1800000000;
+    $time = $this->createMock(TimeInterface::class);
+    $time->method('getRequestTime')->willReturnCallback(static function () use (&$now): int {
+      return $now;
+    });
+    $this->container->set('datetime.time', $time);
+    $this->container->set('audit_chain.logger', NULL);
+    $this->chain = $this->container->get('audit_chain.logger');
+    $this->makeKey('retention_key', 'synthetic-retention-key');
+    $this->config('audit_chain.settings')->set('hash_key', 'retention_key')->save();
+    $this->chain->logKeyed('', 'legacy');
+    $this->chain->logKeyed('personnel', 'field_read');
+    $this->chain->logKeyed('mcp_sentinel', 'entity_save');
+    $original = $this->rows();
+    $this->assertTrue($this->chain->verify()['ok']);
 
-    $this->assertSame(0, $this->chain->prune('personnel', 0), 'Retention of 0 is a no-op.');
-    $this->assertCount(2, $this->rows());
+    // Advance the clock, never edit a timestamp covered by the signature.
+    $now += 10 * 86400;
+    $this->assertSame(0, $this->chain->prune('personnel', 0));
+    $this->assertFalse($this->container->get('state')->get('audit_chain.retention_refused', FALSE));
+    foreach (['', 'personnel', 'mcp_sentinel'] as $channel) {
+      $this->assertSame(0, $this->chain->prune($channel, 5));
+      $this->assertEquals($original, $this->rows());
+      $this->assertTrue($this->chain->verify()['ok']);
+    }
+    $this->assertTrue($this->container->get('state')->get('audit_chain.retention_refused'));
+    $this->chain->logKeyed('personnel', 'after_retention');
+    $this->assertTrue($this->chain->verify()['ok']);
+    $this->assertCount(4, $this->rows());
+  }
 
-    // Age the personnel row past the window.
+  /**
+   * Retention does not alter a prefix seal or hide an existing failure.
+   */
+  public function testPrunePreservesSealAndFailedVerdict(): void {
+    $now = 1800000000;
+    $time = $this->createMock(TimeInterface::class);
+    $time->method('getRequestTime')->willReturnCallback(static function () use (&$now): int {
+      return $now;
+    });
+    $this->container->set('datetime.time', $time);
+    $this->container->set('audit_chain.logger', NULL);
+    $this->chain = $this->container->get('audit_chain.logger');
+    $this->chain->log('legacy', 'unsigned');
+    $this->makeKey('retention_key', 'synthetic-retention-key');
+    $this->config('audit_chain.settings')->set('hash_key', 'retention_key')->save();
+    $this->assertTrue($this->chain->sealPrefix(1, 'synthetic unsigned prefix')['sealed']);
+    $seal = $this->chain->getSeal();
+    $this->chain->logKeyed('test', 'signed');
+    $now += 10 * 86400;
+    $this->assertTrue($this->chain->verify()['ok']);
+    $this->assertSame(0, $this->chain->prune('legacy', 1));
+    $this->assertSame($seal, $this->chain->getSeal());
+    $this->assertTrue($this->chain->verify()['ok']);
+
     $this->container->get('database')->update('audit_chain_log')
-      ->fields(['timestamp' => $this->container->get('datetime.time')->getRequestTime() - (10 * 86400)])
-      ->condition('channel', 'personnel')
+      ->fields(['prev_hash' => str_repeat('f', 64)])
+      ->condition('operation', 'signed')
       ->execute();
-
-    $this->assertSame(1, $this->chain->prune('personnel', 5));
-    $rows = $this->rows();
-    $this->assertCount(1, $rows);
-    $this->assertSame('mcp_sentinel', $rows[0]->channel);
+    $before = $this->chain->verify();
+    $this->assertFalse($before['ok']);
+    $original = $this->rows();
+    $this->assertSame(0, $this->chain->prune('test', 1));
+    $this->assertSame($before, $this->chain->verify());
+    $this->assertEquals($original, $this->rows());
   }
 
   /**

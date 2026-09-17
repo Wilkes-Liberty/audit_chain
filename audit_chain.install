@@ -32,6 +32,15 @@ function audit_chain_requirements(string $phase): array {
   // encryption profile is independent of whether the chain is signed, and
   // hanging it off the key check would hide it on exactly the sites that
   // configured signing correctly.
+  if (\Drupal::state()->get('audit_chain.retention_refused', FALSE)) {
+    $requirements['audit_chain_retention'] = [
+      'title' => t('Audit Chain: retention requires review'),
+      'value' => t('Automatic deletion refused; audit records retained'),
+      'severity' => REQUIREMENT_WARNING,
+      'description' => t('A consumer requested deletion of expired audit records. Channels share one chain, so deleting those records would invalidate retained evidence. Review retention requirements and storage capacity. This warning does not mean the chain verifies; check the separate verification result.'),
+    ];
+  }
+
   _audit_chain_requirements_encryption($requirements);
   _audit_chain_requirements_seal($requirements);
   _audit_chain_requirements_scheduled_verification($requirements);

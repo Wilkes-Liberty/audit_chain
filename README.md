@@ -1,5 +1,28 @@
 # Audit Chain
 
+## Retention and upgrades
+
+Audit channels share one hash chain. Removing an expired row can break the
+verification of records that remain, including records in other channels.
+Until a verifiable archival boundary is available, `prune()` preserves records
+and returns zero. If eligible rows exist, it logs a warning and adds a persistent
+warning to Drupal's status report. A retention value of zero remains a no-op.
+
+Review storage capacity and your retention obligations before upgrading.
+This safeguard prevents automatic deletion; it does not implement compliant
+archival or erasure. Do not substitute a direct SQL delete or rehash retained
+records to make verification pass. Preserve a backup and investigate failures.
+
+Install the append-serialization update introduced in 1.7.2 and replace every
+old worker before resuming writes. Mixed old and new workers are not protected
+by the same mutex. Run whole-history verification after upgrading; previously
+damaged history remains a separate recovery task.
+
+Signed successor segments are tracked in
+[issue #3623864](https://www.drupal.org/project/audit_chain/issues/3623864).
+The retention safeguard does not itself create a successor or change a
+historical verification result.
+
 ## Introduction
 
 Tamper-evident audit logging for Drupal, usable by any module.

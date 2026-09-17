@@ -6,6 +6,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.8.2] - 2026-09-17
+
+### Fixed
+- Apply the global Drush confirmation fix to the older prefix-sealing command
+  as well (#3623864). Installed CLI coverage checks command discovery, explicit
+  refusal without a seal, and refusal to reseal frozen successor history.
+
 ## [1.8.1] - 2026-09-17
 
 ### Fixed

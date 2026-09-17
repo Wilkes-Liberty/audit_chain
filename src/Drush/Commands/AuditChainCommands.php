@@ -12,6 +12,7 @@ use Drupal\Core\Database\Connection;
 use Drush\Attributes as CLI;
 use Drush\Commands\AutowireTrait;
 use Drush\Commands\DrushCommands;
+use Drush\Drush;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 
 /**
@@ -127,10 +128,9 @@ final class AuditChainCommands extends DrushCommands {
   #[CLI\Command(name: 'audit-chain:seal', aliases: ['acs'])]
   #[CLI\Option(name: 'through', description: 'Highest row id to include in the seal (inclusive).')]
   #[CLI\Option(name: 'reason', description: 'Operator reason (required; stored on the seal and in the audit entry).')]
-  #[CLI\Option(name: 'yes', description: 'Skip confirmation.')]
   #[CLI\Usage(name: 'drush audit-chain:seal --through=1997 --reason="pre-key unkeyed production segment"', description: 'Seal rows 1..1997.')]
   public function seal(
-    array $options = ['through' => 0, 'reason' => '', 'yes' => FALSE],
+    array $options = ['through' => 0, 'reason' => ''],
   ): int {
     $through = (int) ($options['through'] ?? 0);
     $reason = (string) ($options['reason'] ?? '');
@@ -139,7 +139,7 @@ final class AuditChainCommands extends DrushCommands {
       return self::EXIT_FAILURE;
     }
 
-    if (empty($options['yes'])) {
+    if (!Drush::affirmative()) {
       $this->logger()->warning(sprintf(
         'Sealing through row %d is permanent site state. Post-seal verification will not re-check that prefix\'s content — only that its stored hashes are unchanged. Continue only if you accept that history as frozen.',
         $through,

@@ -99,21 +99,21 @@ silent no-op, an unverified archive, a direct SQL delete, or a new prefix seal.
 2. Install the new code and run database updates. Replace every older worker.
    Updates create storage only; they do not activate recovery or rewrite history.
 3. Set a stable, unique runtime identity in settings.php:
-   \`$settings['audit_chain_instance_id'] = 'your-deployment-identity';\`
+   `$settings['audit_chain_instance_id'] = 'your-deployment-identity';`
    This is a non-secret identifier. Override it separately for staging and
    production, and when cloning a database. Do not export it as site config.
-4. Run \`drush audit-chain:recovery-prepare\`. Review the snapshot, original
+4. Run `drush audit-chain:recovery-prepare`. Review the snapshot, original
    verdict, retained branch tips and selected head. Preserve that output.
-5. Run \`drush audit-chain:recovery-activate\` with \`--segment\` (a new UUID),
-   \`--snapshot\` (the exact reviewed digest), \`--incident\`, \`--reason\`,
-   \`--approved-by\` and \`--backup-digest\`. Confirm the historical exception.
+5. Run `drush audit-chain:recovery-activate` with `--segment` (a new UUID),
+   `--snapshot` (the exact reviewed digest), `--incident`, `--reason`,
+   `--approved-by` and `--backup-digest`. Confirm the historical exception.
    The operator name is an approval assertion, authenticated by the site's
    recovery signature; it is not a separate personal digital signature.
-6. Run \`drush audit-chain:recovery-verify SEGMENT_UUID\`. Exit zero means only
+6. Run `drush audit-chain:recovery-verify SEGMENT_UUID`. Exit zero means only
    that the successor and retained anchor verify. The JSON still reports
-   \`historical_ok: false\`. Run ordinary \`audit-chain:verify\` separately and
+   `historical_ok: false`. Run ordinary `audit-chain:verify` separately and
    confirm the original failure remains.
-7. Run \`drush audit-chain:recovery-export SEGMENT_UUID\` and preserve the signed
+7. Run `drush audit-chain:recovery-export SEGMENT_UUID` and preserve the signed
    record with the incident evidence. This exports the recovery record, not
    raw audit rows or key values. Ordinary evidence export remains blocked.
 8. Run scheduled verification and confirm the dashboard distinguishes the

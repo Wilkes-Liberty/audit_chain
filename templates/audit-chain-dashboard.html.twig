@@ -40,6 +40,18 @@
     </div>
   {% endif %}
 
+  {% if recovery %}
+    <div class="audit-chain-card audit-chain-card--{{ recovery.segment_ok ? 'warn' : 'crit' }}">
+      <span class="audit-chain-card__label">{{ 'Successor segment'|t }}:
+        {{ recovery.segment_ok ? 'Verified with historical exception'|t : 'Verification failed'|t }}
+      </span>
+      <span class="audit-chain-card__detail">
+        {{ 'The original history remains failed. This result covers only the separately identified successor and its retained historical anchor.'|t }}
+        {% if recovery.segment_id %}{{ recovery.segment_id }}{% endif %}
+      </span>
+    </div>
+  {% endif %}
+
   {% if quick_actions %}
     <div class="audit-chain-quick-actions">
       {% for action in quick_actions %}

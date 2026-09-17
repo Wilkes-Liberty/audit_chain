@@ -116,8 +116,13 @@ final class EvidenceExporter {
     }
 
     $verification = $this->state->get(ScheduledVerifier::STATE_KEY);
-    if (\is_array($verification) && empty($verification['ok'])) {
-      $this->logger->warning('Evidence export to @destination refused: the last scheduled verification did not pass. Resolve the integrity failure before exporting.', [
+    // A cached pre-incident success cannot authorize whole-history export
+    // after explicit recovery. Recovery evidence has its own export contract.
+    $recoveryExists = $this->database->schema()->tableExists('audit_chain_recovery')
+      && $this->database->select('audit_chain_recovery', 'r')
+        ->fields('r', ['segment_id'])->range(0, 1)->forUpdate()->execute()->fetchField() !== FALSE;
+    if ($recoveryExists || (\is_array($verification) && empty($verification['ok']))) {
+      $this->logger->warning('Evidence export to @destination refused: whole-history verification is failing or recovery records an unresolved historical exception. Use the explicit recovery-record export for that exception.', [
         '@destination' => self::redactDestination($destination),
       ]);
       return [

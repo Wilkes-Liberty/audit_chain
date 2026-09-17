@@ -8,13 +8,16 @@
 declare(strict_types=1);
 
 use Drupal\audit_chain\AuditChainLogger;
+use Drupal\audit_chain\RecoverySegments;
 use Drupal\Component\Datetime\TimeInterface;
+use Drupal\Component\Datetime\Time;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Config\ImmutableConfig;
 use Drupal\Core\Database\Database;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Session\AccountProxyInterface;
 use Drupal\Core\State\StateInterface;
+use Drupal\Core\Site\Settings;
 use Drupal\encrypt\EncryptServiceInterface;
 use Drupal\key\Entity\Key;
 use Drupal\key\KeyRepositoryInterface;
@@ -73,20 +76,27 @@ if (!preg_match('/^test[0-9]+/', (string) $prefix)) {
 $builder = new class('appendWorker') extends TestCase {
 
   /**
+   * Supplies isolated verification state for the recovery worker.
+   */
+  public function recoveryState(): StateInterface {
+    return $this->createMock(StateInterface::class);
+  }
+
+  /**
    * Builds a real logger with synthetic request and signing services.
    */
-  public function build(array $options): AuditChainLogger {
+  public function build(array $options, bool $recovery = FALSE): AuditChainLogger {
     Database::addConnectionInfo('worker', 'default', $options);
     $config = $this->createMock(ImmutableConfig::class);
     $config->method('get')->willReturnMap([
-      ['hash_key', 'serialization_test'],
+      ['hash_key', $recovery ? 'recovery_key' : 'serialization_test'],
       ['encryption_profile', NULL],
       ['stream_enabled', FALSE],
     ]);
     $factory = $this->createMock(ConfigFactoryInterface::class);
     $factory->method('get')->willReturn($config);
     $key = $this->createMock(Key::class);
-    $key->method('getKeyValue')->willReturn('synthetic-serialization-key');
+    $key->method('getKeyValue')->willReturn($recovery ? 'synthetic-recovery-secret' : 'synthetic-serialization-key');
     $keys = $this->createMock(KeyRepositoryInterface::class);
     $keys->method('getKey')->willReturn($key);
     $account = $this->createMock(AccountProxyInterface::class);
@@ -108,7 +118,7 @@ $builder = new class('appendWorker') extends TestCase {
   }
 
 };
-$logger = $builder->build($input['database']);
+$logger = $builder->build($input['database'], !empty($input['recovery_fixture']));
 $database = Database::getConnection('default', 'worker');
 if ($database->driver() === 'mysql') {
   $database->query('SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ');
@@ -123,7 +133,14 @@ $database->select('audit_chain_log', 'l')->fields('l', ['id'])->execute()->fetch
 if (isset($input['started'])) {
   file_put_contents($input['started'], 'started');
 }
-$logger->logKeyed('test', $input['operation']);
+if (isset($input['activate_segment'])) {
+  new Settings(['audit_chain_instance_id' => 'synthetic-instance-a']);
+  $segments = new RecoverySegments($database, $logger, new Time(new RequestStack()), $builder->recoveryState());
+  $segments->activate($input['activate_segment'], $input['snapshot_digest'], $input['context']);
+}
+else {
+  $logger->logKeyed('test', $input['operation']);
+}
 if (isset($input['ready'])) {
   file_put_contents($input['ready'], 'ready');
   $deadline = microtime(TRUE) + 20;

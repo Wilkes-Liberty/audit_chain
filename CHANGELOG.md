@@ -6,6 +6,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Explicit signed successor segments for reviewed historical failures
+  (#3623864), with snapshot approval, an append-only recovery record and
+  transaction-serialized activation. Dedicated Drush commands prepare,
+  activate, verify and export the recovery record. Original rows, hashes,
+  seals and whole-history failure remain unchanged. Scheduled monitoring and
+  the dashboard distinguish successor health from the historical exception.
+  Run database updates and configure a unique runtime instance identity before
+  activation. See docs/SUCCESSOR_SEGMENTS.md for the recovery procedure.
+  Once activated, bulk re-encryption and resealing refuse to change the frozen
+  evidence. Both maintenance paths now share append serialization.
+
 ### Fixed
 - Refuse destructive per-channel pruning while no verifiable archival boundary
   exists (#3623864). Eligible records are retained, with a log warning and a

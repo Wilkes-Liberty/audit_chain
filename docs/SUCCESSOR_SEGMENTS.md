@@ -1,6 +1,6 @@
 # Successor segments: implementation contract
 
-Status: implementation under validation; not released. Public tracking:
+Available in Audit Chain 1.8.0. Public tracking:
 https://www.drupal.org/project/audit_chain/issues/3623864.
 
 ## What a successor proves

@@ -18,10 +18,11 @@ old worker before resuming writes. Mixed old and new workers are not protected
 by the same mutex. Run whole-history verification after upgrading; previously
 damaged history remains a separate recovery task.
 
-Signed successor segments are tracked in
-[issue #3623864](https://www.drupal.org/project/audit_chain/issues/3623864).
-The retention safeguard does not itself create a successor or change a
-historical verification result.
+For investigated historical failures, the explicit
+[successor-segment workflow](docs/SUCCESSOR_SEGMENTS.md) preserves the old
+verdict and creates a separately signed continuation. It requires operator
+approval, a reviewed backup and a runtime instance identity. The retention
+safeguard does not itself activate recovery or change a historical verdict.
 
 ## Introduction
 

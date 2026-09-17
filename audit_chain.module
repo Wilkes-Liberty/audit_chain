@@ -36,6 +36,7 @@ function audit_chain_theme(): array {
     'audit_chain_dashboard' => [
       'variables' => [
         'chain' => [],
+        'recovery' => NULL,
         'tiles' => [],
         'charts' => [],
         'quick_actions' => [],

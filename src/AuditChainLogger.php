@@ -445,6 +445,22 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
    * {@inheritdoc}
    */
   public function sealPrefix(int $throughId, string $reason): array {
+    return $this->withChainLock(function () use ($throughId, $reason): array {
+      if ($this->hasRecoveryRecord()) {
+        return [
+          'sealed' => FALSE,
+          'message' => 'A recovery record freezes the historical seal; resealing is refused.',
+          'seal' => NULL,
+        ];
+      }
+      return $this->sealPrefixLocked($throughId, $reason);
+    });
+  }
+
+  /**
+   * Creates the prefix seal while holding chain serialization.
+   */
+  private function sealPrefixLocked(int $throughId, string $reason): array {
     $reason = trim($reason);
     if ($throughId < 1) {
       return ['sealed' => FALSE, 'message' => 'throughId must be a positive row id.', 'seal' => NULL];
@@ -605,6 +621,24 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
    * {@inheritdoc}
    */
   public function reencrypt(string $fromProfile, string $toProfile, int $limit = 0): array {
+    return $this->withChainLock(function () use ($fromProfile, $toProfile, $limit): array {
+      if ($this->hasRecoveryRecord()) {
+        return [
+          'updated' => 0,
+          'failed' => 0,
+          'remaining' => (int) $this->database->select('audit_chain_log', 'l')
+            ->condition('encryption_profile', $fromProfile)->countQuery()->execute()->fetchField(),
+          'refused' => 'A recovery record freezes retained evidence; bulk re-encryption is refused.',
+        ];
+      }
+      return $this->reencryptLocked($fromProfile, $toProfile, $limit);
+    });
+  }
+
+  /**
+   * Re-encrypts metadata while holding chain serialization.
+   */
+  private function reencryptLocked(string $fromProfile, string $toProfile, int $limit): array {
     $from = $this->loadEncryptionProfile($fromProfile);
     $to = $this->loadEncryptionProfile($toProfile);
     if ($from === NULL) {
@@ -753,6 +787,101 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
       ->fields(['locked' => 1])
       ->condition('id', self::MUTEX_ID)
       ->execute();
+  }
+
+  /**
+   * Runs a chain operation under the same transaction lock as appends.
+   *
+   * @internal
+   * Recovery callers must not perform network I/O inside this callback.
+   */
+  public function withChainLock(callable $operation): mixed {
+    $transaction = $this->database->startTransaction();
+    try {
+      $this->acquireAppendMutex();
+      // Recovery must not reuse a seal cached before another serialized
+      // maintenance operation completed.
+      $this->state->resetCache();
+      $result = $operation();
+    }
+    catch (\Throwable $exception) {
+      $transaction->rollBack();
+      throw $exception;
+    }
+    unset($transaction);
+    return $result;
+  }
+
+  /**
+   * Checks for a retained checkpoint using a current read under the mutex.
+   */
+  private function hasRecoveryRecord(): bool {
+    // Allows older installations to run their database updates. Once recovery
+    // is installed, even a malformed checkpoint must prevent blind mutation.
+    if (!$this->database->schema()->tableExists('audit_chain_recovery')) {
+      return FALSE;
+    }
+    return $this->database->select('audit_chain_recovery', 'r')
+      ->fields('r', ['segment_id'])->range(0, 1)->forUpdate()->execute()->fetchField() !== FALSE;
+  }
+
+  /**
+   * Creates an inspector using the normal verifier's canonical encoding.
+   *
+   * @internal
+   * No plaintext metadata or signing material leaves this method.
+   *
+   * @return callable
+   *   Returns a content digest and keyed authentication flag for a stored row.
+   */
+  public function recoveryRowInspector(): callable {
+    $keys = $this->verificationKeys();
+    return function (array $row) use ($keys): array {
+      $canonical = $this->canonicalFromRecord($row);
+      return [
+        'content_digest' => hash('sha256', $canonical),
+        'authenticated' => $this->matchesAnyKey(
+          (string) ($row['row_hash'] ?? ''),
+          (string) ($row['prev_hash'] ?? ''),
+          $canonical,
+          $keys,
+          (string) ($row['key_id'] ?? ''),
+        ),
+      ];
+    };
+  }
+
+  /**
+   * Signs a recovery manifest with an available active key.
+   *
+   * @internal
+   *
+   * @return array
+   *   Signing key identifier and domain-separated HMAC, never key material.
+   */
+  public function signRecoveryManifest(string $manifest): array {
+    $key = $this->resolveHashKey($this->configFactory->get('audit_chain.settings')->get('hash_key'));
+    if ($key['value'] === '') {
+      $this->throwSigningUnavailable($key);
+    }
+    return [
+      'key_id' => $key['id'],
+      'mac' => hash_hmac('sha256', 'audit_chain.recovery.v1|' . $manifest, $key['value']),
+    ];
+  }
+
+  /**
+   * Authenticates a recovery manifest with active or retained signing keys.
+   *
+   * @internal
+   */
+  public function authenticateRecoveryManifest(string $manifest, string $mac): bool {
+    foreach ($this->verificationKeys() as $key) {
+      if (hash_equals(hash_hmac('sha256', 'audit_chain.recovery.v1|' . $manifest, $key), $mac)) {
+        return TRUE;
+      }
+    }
+    return FALSE;
   }
 
   /**

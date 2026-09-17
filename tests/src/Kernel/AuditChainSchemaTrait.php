@@ -19,6 +19,7 @@ trait AuditChainSchemaTrait {
     $this->installSchema('audit_chain', [
       'audit_chain_log',
       'audit_chain_mutex',
+      'audit_chain_recovery',
     ]);
     $this->container->get('database')->insert('audit_chain_mutex')
       ->fields(['id' => 1, 'locked' => 1])

@@ -229,6 +229,14 @@ final class AuditChainMetrics {
   }
 
   /**
+   * Reads the scheduled successor result without re-verifying on page load.
+   */
+  public function recoveryStatus(): ?array {
+    $run = $this->state->get(ScheduledVerifier::STATE_KEY);
+    return is_array($run) && is_array($run['successor'] ?? NULL) ? $run['successor'] : NULL;
+  }
+
+  /**
    * Returns the unix timestamp at the start of the window.
    *
    * @param string $window

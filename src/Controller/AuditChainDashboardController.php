@@ -75,6 +75,7 @@ final class AuditChainDashboardController extends ControllerBase {
     return [
       '#theme' => 'audit_chain_dashboard',
       '#chain' => $this->widget('chain', fn() => $this->buildChain(), []),
+      '#recovery' => $this->widget('recovery', fn() => $this->metrics->recoveryStatus(), NULL),
       '#tiles' => $this->widget('tiles', fn() => $this->buildTiles($window), []),
       '#charts' => $this->widget('charts', fn() => $this->buildCharts($window), []),
       '#quick_actions' => $this->widget('quick_actions', fn() => $this->buildQuickActions(), []),

@@ -26,6 +26,15 @@ services:
     arguments:
       - '@audit_chain.logger'
 
+  audit_chain.recovery:
+    class: Drupal\audit_chain\RecoverySegments
+    arguments:
+      - '@database'
+      - '@audit_chain.logger'
+      - '@datetime.time'
+      - '@state'
+      - '@extension.list.module'
+
   audit_chain.flush_subscriber:
     class: Drupal\audit_chain\EventSubscriber\AuditChainFlushSubscriber
     arguments:
@@ -43,6 +52,7 @@ services:
       - '@event_dispatcher'
       - '@logger.channel.audit_chain'
       - '@key.repository'
+      - '@audit_chain.recovery'
 
   audit_chain.evidence_exporter:
     class: Drupal\audit_chain\EvidenceExporter

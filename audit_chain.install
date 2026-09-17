@@ -235,7 +235,30 @@ function audit_chain_schema(): array {
     'primary key' => ['id'],
   ];
 
+  $schema['audit_chain_recovery'] = [
+    'description' => 'Append-only signed recovery manifests; historical verdicts remain unchanged.',
+    'fields' => [
+      'segment_id' => ['type' => 'varchar', 'length' => 36, 'not null' => TRUE],
+      'manifest' => ['type' => 'text', 'size' => 'big', 'not null' => TRUE],
+      'key_id' => ['type' => 'varchar', 'length' => 255, 'not null' => TRUE],
+      'mac' => ['type' => 'varchar', 'length' => 64, 'not null' => TRUE],
+    ],
+    'primary key' => ['segment_id'],
+  ];
+
   return $schema;
+}
+
+/**
+ * Adds recovery-record storage without modifying any historical audit row.
+ */
+function audit_chain_update_10004(): string {
+  $schema = \Drupal::database()->schema();
+  if (!$schema->tableExists('audit_chain_recovery')) {
+    $definition = audit_chain_schema();
+    $schema->createTable('audit_chain_recovery', $definition['audit_chain_recovery']);
+  }
+  return 'Added signed recovery-record storage. No successor was activated and no audit history was changed.';
 }
 
 /**

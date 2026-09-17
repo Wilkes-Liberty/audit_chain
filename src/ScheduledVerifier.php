@@ -50,6 +50,7 @@ final class ScheduledVerifier {
     private readonly EventDispatcherInterface $eventDispatcher,
     private readonly LoggerInterface $logger,
     private readonly KeyRepositoryInterface $keyRepository,
+    private readonly ?RecoverySegments $recovery = NULL,
   ) {}
 
   /**
@@ -118,7 +119,15 @@ final class ScheduledVerifier {
       ];
     }
 
+    // Never substitute successor health for the whole-history verdict.
+    $run['successor'] = $this->recovery?->currentStatus();
     $this->state->set(self::STATE_KEY, $run);
+    if ($run['successor'] !== NULL && !$run['successor']['segment_ok']) {
+      $this->logger->error(
+        'Audit successor verification FAILED: @reason. The historical exception remains unresolved.',
+        ['@reason' => $run['successor']['reason']],
+      );
+    }
 
     if (!$run['ok'] && $run['reason'] === AuditChainLogger::REASON_SEAL_FOREIGN) {
       $this->logger->warning(

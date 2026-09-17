@@ -704,10 +704,23 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
       return 0;
     }
     $cutoff = $this->time->getRequestTime() - ($retentionDays * 86400);
-    return (int) $this->database->delete('audit_chain_log')
+    // Channels share one chain. Deleting a channel's rows can remove another
+    // channel's predecessor or invalidate a seal. Preserve evidence until a
+    // verifiable archival boundary is available.
+    $eligible = $this->database->select('audit_chain_log', 'l')
+      ->fields('l', ['id'])
       ->condition('channel', $channel)
       ->condition('timestamp', $cutoff, '<')
-      ->execute();
+      ->range(0, 1)
+      ->execute()
+      ->fetchField();
+    if ($eligible !== FALSE) {
+      $this->state->set('audit_chain.retention_refused', TRUE);
+      $this->logger->warning(
+        'Audit Chain retained expired entries: automatic pruning cannot preserve shared-chain integrity. Review retention and storage capacity; no audit rows were deleted.',
+      );
+    }
+    return 0;
   }
 
   /**

@@ -176,15 +176,18 @@ interface AuditChainLoggerInterface {
   public function reencrypt(string $fromProfile, string $toProfile, int $limit = 0): array;
 
   /**
-   * Deletes a channel's entries older than a retention period.
+   * Retains entries until pruning can preserve the shared chain.
+   *
+   * Positive retention requests with eligible rows report a warning. Raw
+   * deletion is refused because it breaks continuity and historical seals.
    *
    * @param string $channel
    *   The channel to prune.
    * @param int $retentionDays
-   *   Age in days beyond which entries are deleted. Zero or less is a no-op.
+   *   Requested retention age in days. Zero or less is a no-op.
    *
    * @return int
-   *   Rows deleted.
+   *   Always zero; no rows are deleted.
    */
   public function prune(string $channel, int $retentionDays): int;
 

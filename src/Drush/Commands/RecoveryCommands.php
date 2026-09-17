@@ -8,6 +8,7 @@ use Drupal\audit_chain\RecoverySegments;
 use Drush\Attributes as CLI;
 use Drush\Commands\AutowireTrait;
 use Drush\Commands\DrushCommands;
+use Drush\Drush;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 
 /**
@@ -43,7 +44,6 @@ final class RecoveryCommands extends DrushCommands {
   #[CLI\Option(name: 'reason', description: 'Reason for accepting the unresolved historical exception.')]
   #[CLI\Option(name: 'approved-by', description: 'Operator accepting that exception.')]
   #[CLI\Option(name: 'backup-digest', description: 'SHA-256 digest of the reviewed backup.')]
-  #[CLI\Option(name: 'yes', description: 'Confirm the explicit historical exception without prompting.')]
   public function activate(
     array $options = [
       'segment' => '',
@@ -52,11 +52,10 @@ final class RecoveryCommands extends DrushCommands {
       'reason' => '',
       'approved-by' => '',
       'backup-digest' => '',
-      'yes' => FALSE,
     ],
   ): int {
     $this->logger()->warning('This creates a separately identified successor. Historical verification remains FAILED; no original row, hash or seal is repaired.');
-    if (empty($options['yes']) && !$this->io()->confirm('Activate this reviewed successor segment?', FALSE)) {
+    if (!Drush::affirmative() && !$this->io()->confirm('Activate this reviewed successor segment?', FALSE)) {
       return self::EXIT_FAILURE;
     }
     $record = $this->recovery->activate(

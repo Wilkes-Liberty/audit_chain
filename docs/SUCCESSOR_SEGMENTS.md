@@ -1,6 +1,8 @@
 # Successor segments: implementation contract
 
-Available in Audit Chain 1.8.0. Public tracking:
+Available in Audit Chain 1.8.0; use 1.8.1 or later for the Drush activation
+command. Version 1.8.0 declares a duplicate global `--yes` option and refuses
+CLI activation before creating a successor. Public tracking:
 https://www.drupal.org/project/audit_chain/issues/3623864.
 
 ## What a successor proves

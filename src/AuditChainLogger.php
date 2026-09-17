@@ -224,9 +224,6 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
     // an unkeyed hash quietly. The row is still written — dropping an audit
     // entry is its own failure, and worse than an unsigned one — but every such
     // write says so, and hook_requirements() reports it on the status report.
-    // The alternative is what this module shipped until now: a site believing
-    // it has a signed chain while every row goes in unsigned, with nothing
-    // anywhere to notice it. logKeyed() never reaches here: it throws above.
     if ($key['unresolvable']) {
       $this->logger->error(
         "Audit chain signing key '@key' is configured but cannot be resolved; this entry was written with unkeyed SHA-256 and the chain is not signed. Fix the Key entity — entries written meanwhile cannot be signed retrospectively.",

@@ -14,9 +14,7 @@ use Drupal\audit_chain\ScheduledVerifier;
  * Reports the one condition that otherwise has no signal anywhere: a signing
  * key that is configured but will not resolve. The chain keeps working when
  * that happens — it falls back to unkeyed SHA-256 — so nothing errors, nothing
- * is missing, and the site goes on believing its audit trail is signed. A real
- * deployment ran that way for 1,997 of 2,002 rows before anyone noticed, and
- * noticed only because verification then reported the whole chain as tampered.
+ * is missing, and the site goes on believing its audit trail is signed.
  *
  * Reported at ERROR rather than WARNING: the module's single headline claim is
  * that forging a repair requires the key. While this condition holds, it does
@@ -202,8 +200,6 @@ function audit_chain_schema(): array {
       'encryption_profile' => ['type' => 'varchar', 'length' => 64, 'not null' => FALSE],
     ],
     'primary key' => ['id'],
-    // Back the usual filters (channel, time window, actor, operation, type)
-    // and the verifier's hash lookups.
     'indexes' => [
       'channel'     => ['channel'],
       'timestamp'   => ['timestamp'],
@@ -211,7 +207,6 @@ function audit_chain_schema(): array {
       'operation'   => ['operation'],
       'entity_type' => ['entity_type'],
       'row_hash'    => ['row_hash'],
-      // Backs the status-report check for rows written under a retired profile.
       'encryption_profile' => ['encryption_profile'],
     ],
   ];

@@ -11,17 +11,6 @@ use Drupal\Core\Render\Markup;
 
 /**
  * Renders a metric series as a chart render array.
- *
- * Isolates the optional drupal/charts contrib dependency to a single place:
- * when Charts is enabled AND a library plugin is available (for example
- * charts_chartjs), a `#type => 'chart'` element is returned; otherwise a
- * self-contained inline-SVG/CSS fallback (no JavaScript) is built. Enabling
- * Charts without a library must not replace the SVG with the Charts
- * "No charting library found" markup. An empty series always returns an
- * empty-state build.
- *
- * Chart styling is supplied by the dashboard library (attached by the
- * dashboard controller), so this helper returns markup only.
  */
 final class AuditChainChartRenderer {
 
@@ -122,8 +111,6 @@ final class AuditChainChartRenderer {
 
   /**
    * Builds a drupal/charts `#type => 'chart'` element.
-   *
-   * This is the only method that references the contrib charts API.
    *
    * @param array<string, int|float> $series
    *   Label => value pairs.

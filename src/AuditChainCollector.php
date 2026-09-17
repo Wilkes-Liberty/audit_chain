@@ -14,17 +14,10 @@ namespace Drupal\audit_chain;
  * can read, and the damage is not reversible: you cannot un-flood a hash chain
  * without breaking it.
  *
- * Documentation saying "do not do the obvious thing" is weaker than an API
- * where the obvious thing is correct, so consumers that log per access check
- * should collect here and let the subscriber flush at `kernel.terminate`.
- *
  * Deduplication is by caller-supplied key. The first occurrence wins: its
  * metadata is kept and later ones are discarded rather than merged, because a
  * read that happened forty times is still one read of one field, and merging
  * would invent a record of something nobody did.
- *
- * Order is insertion order of first occurrence, so the flushed rows read in the
- * sequence the request actually did things.
  */
 final class AuditChainCollector {
 
@@ -68,8 +61,6 @@ final class AuditChainCollector {
       (string) ($metadata['id'] ?? ''),
     ]);
 
-    // First occurrence wins; see the class docblock on why later ones are not
-    // merged.
     if (!isset($this->pending[$key])) {
       $this->pending[$key] = [
         'channel' => $channel,

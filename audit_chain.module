@@ -3,10 +3,6 @@
 /**
  * @file
  * Audit Chain companion hooks.
- *
- * The module's services do the work; this file binds them to core's
- * scheduling and registers the reports dashboard theme. See
- * ScheduledVerifier for the scheduled-verification contract.
  */
 
 declare(strict_types=1);
@@ -49,12 +45,6 @@ function audit_chain_theme(): array {
 
 /**
  * Implements hook_cron().
- *
- * Runs the scheduled keyed chain verification when it is due
- * (d.o #3616535). Disabled by default (`verify_interval: 0`); a due run
- * records its verdict in state, and a failure alerts through the
- * audit_chain logger channel and the verification-failed event without
- * ever rewriting the chain.
  *
  * Verification runs before the evidence export deliberately: the export is
  * gated on the last recorded verification verdict, so ordering them this way

@@ -233,6 +233,12 @@ jobs:
             exit 1
           fi
 
+      - name: Installed Drush recovery lifecycle (blocking)
+        working-directory: drupal
+        env:
+          AUDIT_CHAIN_CLI_TEST: '1'
+        run: bash web/modules/contrib/audit_chain/tests/scripts/recovery-cli.sh
+
   phpcs:
     name: Drupal coding standards
     runs-on: ubuntu-latest

@@ -6,6 +6,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-09-17
+
+### Fixed
+- Recovery activation uses Drush’s global confirmation options instead of
+  declaring a second `--yes` option (#3623864). The duplicate prevented the
+  command from running. `--no` refuses activation; `--yes` confirms the
+  historical exception through Drush’s normal confirmation handler.
+
 ## [1.8.0] - 2026-09-17
 
 ### Added

@@ -15,6 +15,12 @@ printf '\n%s\n' '$settings["audit_chain_instance_id"] = "synthetic-cli-instance"
 "$drush" pm:enable audit_chain --yes
 "$drush" php:script web/modules/contrib/audit_chain/tests/fixtures/recovery-cli-setup.php
 "$drush" audit-chain:recovery-activate --help > "$fixture_dir/help.txt"
+"$drush" audit-chain:seal --help > "$fixture_dir/seal-help.txt"
+if "$drush" audit-chain:seal --through=3 --reason=synthetic-cli-refusal --no > "$fixture_dir/seal-refused.txt" 2>&1; then
+  echo 'Explicit --no unexpectedly sealed the prefix.' >&2
+  exit 1
+fi
+"$drush" php:eval 'if (\Drupal::service("audit_chain.logger")->getSeal() !== NULL) { throw new \RuntimeException("Refusal created a seal"); }'
 "$drush" audit-chain:recovery-prepare > "$fixture_dir/prepare.json"
 jq -e '.historical_verdict.ok == false' "$fixture_dir/prepare.json" >/dev/null
 snapshot="$(jq -r .snapshot_digest "$fixture_dir/prepare.json")"
@@ -35,4 +41,9 @@ jq -e '.segment_ok == true and .historical_ok == false' "$fixture_dir/verify.jso
 "$drush" audit-chain:recovery-export "$segment" > "$fixture_dir/export.json"
 jq -e '.verification.segment_ok == true and .verification.historical_ok == false' "$fixture_dir/export.json" >/dev/null
 "$drush" php:eval 'if (\Drupal::service("audit_chain.logger")->verify()["ok"] || \Drupal::database()->select("audit_chain_recovery", "r")->countQuery()->execute()->fetchField() != 1) { throw new \RuntimeException("Historical failure or retry contract changed"); }'
+if "$drush" audit-chain:seal --through=3 --reason=synthetic-frozen-history --yes > "$fixture_dir/seal-frozen.txt" 2>&1; then
+  echo 'Confirmed sealing must still refuse frozen successor history.' >&2
+  exit 1
+fi
+grep -q 'recovery' "$fixture_dir/seal-frozen.txt"
 echo 'Installed CLI discovery, refusal, activation, retry, verification and export passed.'

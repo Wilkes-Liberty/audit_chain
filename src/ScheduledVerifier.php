@@ -17,9 +17,6 @@ use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
  *
  * Keyed chain integrity is valuable only when verification is routinely
  * executed and a failure leaves the writer's trust boundary (d.o #3616535).
- * Cron drives this service; each due run verifies the whole chain, stores the
- * verdict in state (the status report renders it as health), and sends real
- * integrity failures through the audit_chain channel and event contract.
  * A foreign prefix seal remains a fail-closed, export-blocking result, but is
  * logged as an advisory and does not dispatch the tampering-oriented failure
  * event. Verification is strictly read-only: a failing chain is never

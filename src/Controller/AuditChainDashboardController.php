@@ -16,11 +16,7 @@ use Symfony\Component\HttpFoundation\Request;
 /**
  * Renders the Audit Chain reports dashboard.
  *
- * GET /admin/reports/audit-chain. Read-only: integrity card plus the
- * keyed-vs-unkeyed split. Does not decrypt metadata, list rows, chart
- * volume, or re-verify the chain. Every widget is built behind its own
- * try/catch so a single failing metric degrades rather than fataling the
- * page.
+ * Does not decrypt metadata, list rows, chart volume, or re-verify the chain.
  */
 final class AuditChainDashboardController extends ControllerBase {
 

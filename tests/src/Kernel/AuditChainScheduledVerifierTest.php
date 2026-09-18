@@ -6,6 +6,7 @@ namespace Drupal\Tests\audit_chain\Kernel;
 
 use Drupal\audit_chain\AuditChainLogger;
 use Drupal\audit_chain\Event\AuditChainVerificationFailedEvent;
+use Drupal\audit_chain\ScheduledVerificationIntegrity;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\key\Entity\Key;
 use Psr\Log\AbstractLogger;
@@ -195,6 +196,7 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
     $this->assertArrayHasKey('audit_chain_scheduled_verification', $requirements);
     $this->assertSame(REQUIREMENT_ERROR, $requirements['audit_chain_scheduled_verification']['severity'],
       'A failed scheduled verification must be a non-success health state.');
+    $this->assertRequirementMatchesClassifier($requirements);
   }
 
   /**
@@ -251,6 +253,7 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
 
     $requirements = $this->runtimeRequirements();
     $this->assertSame(REQUIREMENT_ERROR, $requirements['audit_chain_scheduled_verification']['severity']);
+    $this->assertRequirementMatchesClassifier($requirements);
   }
 
   /**
@@ -304,6 +307,7 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
       $requirements['audit_chain_scheduled_verification']['severity'],
       'The status report must distinguish an unauthenticated copy from tampering.'
     );
+    $this->assertRequirementMatchesClassifier($requirements);
   }
 
   /**
@@ -389,6 +393,7 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
     $this->assertArrayHasKey('audit_chain_scheduled_verification', $requirements);
     $this->assertSame(REQUIREMENT_WARNING, $requirements['audit_chain_scheduled_verification']['severity'],
       'A run older than twice the interval must warn: silence is not health.');
+    $this->assertRequirementMatchesClassifier($requirements);
   }
 
   /**
@@ -404,6 +409,34 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
     $this->assertArrayHasKey('audit_chain_scheduled_verification', $requirements);
     $this->assertSame(REQUIREMENT_WARNING, $requirements['audit_chain_scheduled_verification']['severity'],
       'Requiring keyed verification while never scheduling it must warn.');
+    $this->assertRequirementMatchesClassifier($requirements);
+  }
+
+  /**
+   * Asserts the status-report severity matches the shared classifier.
+   *
+   * @param array $requirements
+   *   Runtime requirements keyed by id.
+   */
+  private function assertRequirementMatchesClassifier(array $requirements): void {
+    $classified = ScheduledVerificationIntegrity::classify(
+      $this->lastRun(),
+      (int) $this->config('audit_chain.settings')->get('verify_interval'),
+      \Drupal::time()->getRequestTime(),
+    );
+    $require_keyed = (bool) $this->config('audit_chain.settings')->get('verify_require_keyed');
+    if ($classified['reason'] === 'disabled' && !$require_keyed) {
+      $this->assertArrayNotHasKey('audit_chain_scheduled_verification', $requirements);
+      return;
+    }
+    $expected = match ($classified['status']) {
+      'ok' => REQUIREMENT_OK,
+      'crit' => REQUIREMENT_ERROR,
+      'warn' => REQUIREMENT_WARNING,
+      default => throw new \InvalidArgumentException('Unknown integrity status: ' . $classified['status']),
+    };
+    $this->assertArrayHasKey('audit_chain_scheduled_verification', $requirements);
+    $this->assertSame($expected, $requirements['audit_chain_scheduled_verification']['severity']);
   }
 
 }

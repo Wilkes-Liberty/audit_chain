@@ -6,6 +6,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.8.3] - 2026-09-18
+
+### Fixed
+- Scheduled-verification integrity classification is shared by the
+  dashboard and status report. Date formatting is skipped unless the
+  integrity state shows a run time.
+
 ## [1.8.2] - 2026-09-17
 
 ### Fixed

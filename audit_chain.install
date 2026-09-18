@@ -322,9 +322,18 @@ function _audit_chain_requirements_scheduled_verification(array &$requirements):
     'warn' => REQUIREMENT_WARNING,
     default => throw new \InvalidArgumentException('Unknown integrity status: ' . $classified['status']),
   };
-  $when = \Drupal::service('date.formatter')->format((int) ($classified['time'] ?? 0));
   $run_reason = is_array($run) ? (string) ($run['reason'] ?? '') : '';
   $title = t('Audit Chain: scheduled verification');
+  // Only states that show a last-run time need date.formatter; other
+  // hook_requirements callers may not have system date formats installed.
+  $when = in_array($classified['reason'], [
+    'seal_foreign',
+    'failed',
+    'overdue',
+    'passing',
+  ], TRUE)
+    ? \Drupal::service('date.formatter')->format((int) ($classified['time'] ?? 0))
+    : NULL;
 
   $requirement = match ($classified['reason']) {
     'disabled' => $require_keyed ? [

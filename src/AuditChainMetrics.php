@@ -17,7 +17,8 @@ use Psr\Log\LoggerInterface;
  * Queries are window-bounded on the indexed timestamp and key_id columns and
  * never read metadata, IP addresses, user agents, or entity labels.
  * Verification is not re-run on this path: integrity() reads the last
- * scheduled-verification record from state.
+ * scheduled-verification record from state and classifies it with
+ * ScheduledVerificationIntegrity.
  */
 final class AuditChainMetrics {
 
@@ -145,8 +146,8 @@ final class AuditChainMetrics {
   /**
    * Returns the stored scheduled-verification integrity result.
    *
-   * Does not re-walk the chain. Classifies the last scheduled run the same
-   * way the status report does.
+   * Does not re-walk the chain. Classification is
+   * ScheduledVerificationIntegrity::classify(); this method adds the row count.
    *
    * @return array{status: string, reason: string, time: int|null, rows: int}
    *   status is ok/warn/crit. reason is a stable machine key.
@@ -168,61 +169,15 @@ final class AuditChainMetrics {
       }
 
       $interval = (int) $this->configFactory->get('audit_chain.settings')->get('verify_interval');
-      $run = $this->state->get(ScheduledVerifier::STATE_KEY);
-
-      if ($interval <= 0) {
-        return [
-          'status' => 'warn',
-          'reason' => 'disabled',
-          'time' => is_array($run) ? (int) ($run['time'] ?? 0) ?: NULL : NULL,
-          'rows' => $rows,
-        ];
-      }
-
-      if (!is_array($run)) {
-        return [
-          'status' => 'warn',
-          'reason' => 'pending',
-          'time' => NULL,
-          'rows' => $rows,
-        ];
-      }
-
-      $time = (int) ($run['time'] ?? 0) ?: NULL;
-      $ok = (bool) ($run['ok'] ?? FALSE);
-      $reason = (string) ($run['reason'] ?? '');
-
-      if (!$ok && $reason === AuditChainLogger::REASON_SEAL_FOREIGN) {
-        return [
-          'status' => 'warn',
-          'reason' => 'seal_foreign',
-          'time' => $time,
-          'rows' => $rows,
-        ];
-      }
-
-      if (!$ok) {
-        return [
-          'status' => 'crit',
-          'reason' => 'failed',
-          'time' => $time,
-          'rows' => $rows,
-        ];
-      }
-
-      if ($time !== NULL && $this->time->getRequestTime() > ($time + 2 * $interval)) {
-        return [
-          'status' => 'warn',
-          'reason' => 'overdue',
-          'time' => $time,
-          'rows' => $rows,
-        ];
-      }
-
+      $classified = ScheduledVerificationIntegrity::classify(
+        $this->state->get(ScheduledVerifier::STATE_KEY),
+        $interval,
+        $this->time->getRequestTime(),
+      );
       return [
-        'status' => 'ok',
-        'reason' => 'passing',
-        'time' => $time,
+        'status' => $classified['status'],
+        'reason' => $classified['reason'],
+        'time' => $classified['time'],
         'rows' => $rows,
       ];
     });

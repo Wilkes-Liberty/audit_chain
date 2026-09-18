@@ -6,6 +6,7 @@ namespace Drupal\Tests\audit_chain\Kernel;
 
 use Drupal\audit_chain\AuditChainLogger;
 use Drupal\audit_chain\AuditChainMetrics;
+use Drupal\audit_chain\ScheduledVerificationIntegrity;
 use Drupal\audit_chain\ScheduledVerifier;
 use Drupal\KernelTests\KernelTestBase;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -148,6 +149,7 @@ final class AuditChainMetricsTest extends KernelTestBase {
     $this->assertSame('disabled', $disabled['reason']);
     $this->assertSame('warn', $disabled['status']);
     $this->assertSame(1, $disabled['rows']);
+    $this->assertIntegrityMatchesClassifier($disabled);
   }
 
   /**
@@ -168,6 +170,7 @@ final class AuditChainMetricsTest extends KernelTestBase {
     $passing = $this->metrics->integrity();
     $this->assertSame('passing', $passing['reason']);
     $this->assertSame('ok', $passing['status']);
+    $this->assertIntegrityMatchesClassifier($passing);
   }
 
   /**
@@ -187,6 +190,24 @@ final class AuditChainMetricsTest extends KernelTestBase {
     $failed = $this->metrics->integrity();
     $this->assertSame('failed', $failed['reason']);
     $this->assertSame('crit', $failed['status']);
+    $this->assertIntegrityMatchesClassifier($failed);
+  }
+
+  /**
+   * Asserts a metrics integrity payload matches the shared classifier.
+   *
+   * @param array{status: string, reason: string, time: int|null, rows: int} $integrity
+   *   The metrics result.
+   */
+  private function assertIntegrityMatchesClassifier(array $integrity): void {
+    $classified = ScheduledVerificationIntegrity::classify(
+      $this->container->get('state')->get(ScheduledVerifier::STATE_KEY),
+      (int) $this->config('audit_chain.settings')->get('verify_interval'),
+      \Drupal::time()->getRequestTime(),
+    );
+    $this->assertSame($classified['status'], $integrity['status']);
+    $this->assertSame($classified['reason'], $integrity['reason']);
+    $this->assertSame($classified['time'], $integrity['time']);
   }
 
 }

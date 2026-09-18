@@ -5,7 +5,7 @@
  * Install and schema functions for Audit Chain.
  */
 
-use Drupal\audit_chain\AuditChainLogger;
+use Drupal\audit_chain\ScheduledVerificationIntegrity;
 use Drupal\audit_chain\ScheduledVerifier;
 
 /**
@@ -293,6 +293,10 @@ function audit_chain_update_10002(): string {
 /**
  * Reports the scheduled-verification health (d.o #3616535).
  *
+ * Classification is ScheduledVerificationIntegrity::classify(); this function
+ * maps those states onto requirement copy. The assurance-profile-without-
+ * schedule warning is presentation: the classifier only sees interval and run.
+ *
  * An integrity or assurance failure is an ERROR. A foreign seal is a WARNING:
  * it remains unverified, but its copied prefix hashes have not changed. A
  * schedule that has gone quiet (no run within twice its interval) is a WARNING
@@ -307,73 +311,81 @@ function _audit_chain_requirements_scheduled_verification(array &$requirements):
   $interval = (int) $settings->get('verify_interval');
   $require_keyed = (bool) $settings->get('verify_require_keyed');
   $run = \Drupal::state()->get(ScheduledVerifier::STATE_KEY);
+  $classified = ScheduledVerificationIntegrity::classify(
+    $run,
+    $interval,
+    \Drupal::time()->getRequestTime(),
+  );
+  $severity = match ($classified['status']) {
+    'ok' => REQUIREMENT_OK,
+    'crit' => REQUIREMENT_ERROR,
+    'warn' => REQUIREMENT_WARNING,
+    default => throw new \InvalidArgumentException('Unknown integrity status: ' . $classified['status']),
+  };
+  $run_reason = is_array($run) ? (string) ($run['reason'] ?? '') : '';
+  $title = t('Audit Chain: scheduled verification');
+  // Only states that show a last-run time need date.formatter; other
+  // hook_requirements callers may not have system date formats installed.
+  $when = in_array($classified['reason'], [
+    'seal_foreign',
+    'failed',
+    'overdue',
+    'passing',
+  ], TRUE)
+    ? \Drupal::service('date.formatter')->format((int) ($classified['time'] ?? 0))
+    : NULL;
 
-  if ($interval <= 0) {
-    if ($require_keyed) {
-      $requirements['audit_chain_scheduled_verification'] = [
-        'title' => t('Audit Chain: scheduled verification'),
-        'value' => t('Assurance profile enabled, but no verification schedule'),
-        'severity' => REQUIREMENT_WARNING,
-        'description' => t('verify_require_keyed is on while verify_interval is 0: keyed verification is required but never runs. Set a verification interval so integrity is proven on a cadence rather than on demand.'),
-      ];
-    }
-    return;
-  }
-
-  if (!is_array($run)) {
-    $requirements['audit_chain_scheduled_verification'] = [
-      'title' => t('Audit Chain: scheduled verification'),
+  $requirement = match ($classified['reason']) {
+    'disabled' => $require_keyed ? [
+      'title' => $title,
+      'value' => t('Assurance profile enabled, but no verification schedule'),
+      'severity' => $severity,
+      'description' => t('verify_require_keyed is on while verify_interval is 0: keyed verification is required but never runs. Set a verification interval so integrity is proven on a cadence rather than on demand.'),
+    ] : NULL,
+    'pending' => [
+      'title' => $title,
       'value' => t('Enabled, but no run recorded yet'),
-      'severity' => REQUIREMENT_WARNING,
+      'severity' => $severity,
       'description' => t('The schedule is configured but cron has not executed a verification yet. Run cron, then re-check this report.'),
-    ];
-    return;
-  }
-
-  if (!$run['ok'] && ($run['reason'] ?? NULL) === AuditChainLogger::REASON_SEAL_FOREIGN) {
-    $requirements['audit_chain_scheduled_verification'] = [
-      'title' => t('Audit Chain: scheduled verification'),
+    ],
+    'seal_foreign' => [
+      'title' => $title,
       'value' => t('FOREIGN SEAL — unverified copy (last run @time)', [
-        '@time' => \Drupal::service('date.formatter')->format((int) $run['time']),
+        '@time' => $when,
       ]),
-      'severity' => REQUIREMENT_WARNING,
+      'severity' => $severity,
       'description' => t('The sealed prefix hashes are unchanged, but this environment cannot authenticate the copied seal with a current or retired signing key. No prefix-hash change was detected. Verification remains fail-closed and evidence export stays blocked. Verify on the source environment, or make its signing key available as a retired key only if your key-separation policy permits.'),
-    ];
-    return;
-  }
-
-  if (!$run['ok']) {
-    $requirements['audit_chain_scheduled_verification'] = [
-      'title' => t('Audit Chain: scheduled verification'),
+    ],
+    'failed' => [
+      'title' => $title,
       'value' => t('FAILED — @reason (last run @time)', [
-        '@reason' => (string) $run['reason'],
-        '@time' => \Drupal::service('date.formatter')->format((int) $run['time']),
+        '@reason' => $run_reason,
+        '@time' => $when,
       ]),
-      'severity' => REQUIREMENT_ERROR,
+      'severity' => $severity,
       'description' => t('The last scheduled verification did not pass. The chain was not modified by the check; investigate the reported reason with <code>drush audit-chain:verify</code> before trusting new entries.'),
-    ];
-    return;
-  }
-
-  if (\Drupal::time()->getRequestTime() > ((int) $run['time'] + 2 * $interval)) {
-    $requirements['audit_chain_scheduled_verification'] = [
-      'title' => t('Audit Chain: scheduled verification'),
+    ],
+    'overdue' => [
+      'title' => $title,
       'value' => t('Overdue — last successful run @time', [
-        '@time' => \Drupal::service('date.formatter')->format((int) $run['time']),
+        '@time' => $when,
       ]),
-      'severity' => REQUIREMENT_WARNING,
+      'severity' => $severity,
       'description' => t('No verification has run within twice the configured interval. Confirm cron is executing; an unverified chain is an unproven one.'),
-    ];
-    return;
-  }
+    ],
+    'passing' => [
+      'title' => $title,
+      'value' => t('Passing — last run @time', [
+        '@time' => $when,
+      ]),
+      'severity' => $severity,
+    ],
+    default => throw new \InvalidArgumentException('Unknown integrity reason: ' . $classified['reason']),
+  };
 
-  $requirements['audit_chain_scheduled_verification'] = [
-    'title' => t('Audit Chain: scheduled verification'),
-    'value' => t('Passing — last run @time', [
-      '@time' => \Drupal::service('date.formatter')->format((int) $run['time']),
-    ]),
-    'severity' => REQUIREMENT_OK,
-  ];
+  if ($requirement !== NULL) {
+    $requirements['audit_chain_scheduled_verification'] = $requirement;
+  }
 }
 
 /**

@@ -6,6 +6,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-09-19
+
+### Changed
+- `RecoverySegments` reuses `snapshot()`'s historical verdict in `prepare()`
+  and `activate()` so the shared lock does not walk the chain a second time.
+  `snapshot()` still calls `verify()`; that verdict remains part of
+  `snapshot_digest`.
+
 ## [1.9.0] - 2026-09-19
 
 ### Added

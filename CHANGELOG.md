@@ -6,6 +6,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Optional `audit_chain_mcp` submodule: four Tool API plugins governed by MCP
+  Sentinel (#3624446). `audit_chain_status`, `audit_chain_window_counts` and
+  `audit_chain_export_status` are read-only. `audit_chain_verify_now` runs
+  scheduled verification and needs its own permission. No tool returns a row,
+  metadata, a hash, the seal MAC, the prefix digest, a key identifier or the
+  export destination's path or credentials. The base module's dependencies are
+  unchanged. The submodule requires Tool API and MCP Sentinel and declares
+  Drupal `^10.6 || ^11.3`.
+- `EvidenceExporter::checkpointStatus()` reads a destination's checkpoint and
+  backlog without exporting. It does not return the stored destination label.
+
 ## [1.8.3] - 2026-09-18
 
 ### Fixed

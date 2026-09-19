@@ -28,6 +28,8 @@
     "drupal/encrypt": "^3.2"
   },
   "suggest": {
+    "drupal/mcp_sentinel": "Required only by the Audit Chain MCP submodule (audit_chain_mcp): ^2.22. Not a dev requirement: MCP Sentinel requires this module, and a pipeline that installed it would fetch a second copy.",
+    "drupal/tool": "Required only by the Audit Chain MCP submodule (audit_chain_mcp): ^1.0.0-beta8.",
     "drupal/charts": "Optional: upgrades the keyed-vs-unkeyed SVG on Reports → Audit Chain to an interactive chart (install a library submodule such as charts_chartjs). The page keeps the SVG fallback when Charts is absent or has no library."
   }
 }

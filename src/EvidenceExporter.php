@@ -255,6 +255,30 @@ final class EvidenceExporter {
   }
 
   /**
+   * Reads a destination's checkpoint and backlog without exporting anything.
+   *
+   * @param string $destination
+   *   The destination exactly as it is passed to exportTo().
+   * @param string|null $channel
+   *   Restrict the backlog count to one channel partition (NULL/'' = all).
+   *
+   * @return array{last_id: int, time: int|null, remaining: int}
+   *   The highest row id delivered (0 when nothing was), when the checkpoint
+   *   last advanced, and the rows still beyond it. The stored destination
+   *   label is deliberately not returned.
+   */
+  public function checkpointStatus(string $destination, ?string $channel = NULL): array {
+    $checkpoint = $this->state->get(self::CHECKPOINT_PREFIX . sha1($destination));
+    $lastId = \is_array($checkpoint) ? (int) ($checkpoint['last_id'] ?? 0) : 0;
+    $time = \is_array($checkpoint) && isset($checkpoint['time']) ? (int) $checkpoint['time'] : NULL;
+    return [
+      'last_id' => $lastId,
+      'time' => $time,
+      'remaining' => $this->remainingAfter($lastId, $channel),
+    ];
+  }
+
+  /**
    * Counts rows still beyond a checkpoint, honoring the channel filter.
    */
   private function remainingAfter(int $afterId, ?string $channel): int {

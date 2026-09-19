@@ -120,6 +120,29 @@ final class AuditChainEvidenceExporterTest extends KernelTestBase {
   }
 
   /**
+   * The checkpoint status reads the backlog without exporting or labelling.
+   */
+  public function testCheckpointStatusReadsWithoutExporting(): void {
+    $this->writeRows(3);
+    $this->writeRows(2, 'other');
+    $exporter = \Drupal::service('audit_chain.evidence_exporter');
+
+    $this->assertSame(
+      ['last_id' => 0, 'time' => NULL, 'remaining' => 5],
+      $exporter->checkpointStatus($this->destination()),
+    );
+    $this->assertSame([], $this->exportedRows(), 'Reading the status must not export.');
+
+    $exporter->exportTo($this->destination(), NULL, NULL, 2);
+    $status = $exporter->checkpointStatus($this->destination());
+    $this->assertSame(2, $status['last_id']);
+    $this->assertIsInt($status['time']);
+    $this->assertSame(3, $status['remaining']);
+    $this->assertSame(2, $exporter->checkpointStatus($this->destination(), 'other')['remaining']);
+    $this->assertSame(['last_id', 'time', 'remaining'], array_keys($status));
+  }
+
+  /**
    * Replay re-emits from a requested id without moving the checkpoint back.
    */
   public function testReplayReEmitsWithoutMovingCheckpointBackwards(): void {

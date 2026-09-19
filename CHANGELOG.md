@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-09-19
+
 ### Added
 - Optional `audit_chain_mcp` submodule: four Tool API plugins governed by MCP
   Sentinel (#3624446). `audit_chain_status`, `audit_chain_window_counts` and

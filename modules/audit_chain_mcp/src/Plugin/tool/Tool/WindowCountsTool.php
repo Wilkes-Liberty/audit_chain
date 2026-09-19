@@ -17,7 +17,7 @@ use Symfony\Component\DependencyInjection\ContainerInterface;
 #[Tool(
   id: 'audit_chain_window_counts',
   label: new TranslatableMarkup('Audit Chain window counts'),
-  description: new TranslatableMarkup('Count chain entries written in the last 24 hours, 7 days or 30 days, split into keyed (HMAC-signed) and unkeyed. Unkeyed entries on a site with a signing key mean the key was missing when they were written. Omit the window to get all three. Counts only; no rows are read.'),
+  description: new TranslatableMarkup('Count chain entries written in the last 24 hours, 7 days or 30 days, split into keyed (HMAC-signed) and unkeyed. Unkeyed entries on a site with a signing key mean the key was missing when they were written. Omit the window to get all three. Counts only; no rows are read. The counts come from the dashboard metrics service, which logs a failed query and reports zero for it, so zero on a busy site is a reason to read the log.'),
   operation: ToolOperation::Read,
   input_definitions: [
     'window' => new InputDefinition(

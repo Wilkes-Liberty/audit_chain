@@ -268,6 +268,9 @@ though verification never changes the chain.
   seal's reason or a recovery incident reference. Verdict and successor reasons
   are reported from the module's own fixed list; any other stored value reads
   `other`. `broken_at` is a row id.
+- Status and window counts read the dashboard metrics service. That service
+  logs a failed query and degrades to `pending` or zero instead of throwing, so
+  the tools do too. Zero on a busy site is a reason to read the log.
 - The export destination is reported as its kind (`https`, `http` or `file`)
   and, for a URL, its host. The path, port, credentials and query string are
   left out, because ingest services put tokens in paths. A file path is never

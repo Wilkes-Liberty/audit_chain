@@ -443,6 +443,33 @@ final class AuditChainToolsKernelTest extends KernelTestBase {
   }
 
   /**
+   * The window is re-validated in code, behind Tool API's Choice constraint.
+   *
+   * Tool API rejects an unknown window before doExecute() runs, and the
+   * metrics service maps one to 24h. The only way to reach the tool's own
+   * check is to call doExecute() the way a PHP caller could.
+   */
+  public function testWindowIsRevalidatedInCode(): void {
+    $this->seedSealedChain();
+    $tool = $this->tool('audit_chain_window_counts');
+    $method = new \ReflectionMethod($tool, 'doExecute');
+    foreach (['bogus-window-7Q', '1d', '', 24, ['24h']] as $window) {
+      $result = $method->invoke($tool, ['window' => $window]);
+      self::assertFalse($result->isSuccess(), json_encode($window));
+      self::assertSame(
+        'Audit Chain operation refused. Check permissions, inputs and limits.',
+        (string) $result->getMessage(),
+      );
+      self::assertEmpty($result->getContextValues());
+    }
+    // The same call path succeeds with a known window, so the refusals above
+    // come from validation and not from the way the method is reached.
+    $ok = $method->invoke($tool, ['window' => '30d']);
+    self::assertTrue($ok->isSuccess());
+    self::assertSame(['30d'], array_keys($ok->getContextValues()['windows']));
+  }
+
+  /**
    * Creates a fresh tool instance.
    */
   private function tool(string $id): object {

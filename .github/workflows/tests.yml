@@ -280,7 +280,7 @@ jobs:
           SIMPLETEST_DB: ${{ matrix.connection }}
           BROWSERTEST_OUTPUT_DIRECTORY: /tmp
           SYMFONY_DEPRECATIONS_HELPER: weak
-          MIN_MCP_TESTS: '10'
+          MIN_MCP_TESTS: '11'
         run: |
           set -euo pipefail
           config="${PWD}/web/core/phpunit.xml.dist"

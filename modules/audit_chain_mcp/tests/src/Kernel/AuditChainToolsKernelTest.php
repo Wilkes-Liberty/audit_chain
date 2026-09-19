@@ -385,6 +385,64 @@ final class AuditChainToolsKernelTest extends KernelTestBase {
   }
 
   /**
+   * Stored free text and unknown keys never pass through to a result.
+   *
+   * The run record is state. A later version, another module or a restored
+   * database can put anything in it.
+   */
+  public function testStoredFreeTextNeverPassesThrough(): void {
+    Role::load('mcp_api')->grantPermission('run audit chain verification via mcp')->save();
+    $now = $this->container->get('datetime.time')->getRequestTime();
+    $this->container->get('state')->set(ScheduledVerifier::STATE_KEY, [
+      'time' => $now,
+      'ok' => FALSE,
+      'reason' => 'free text reason 7Q',
+      'keyed' => TRUE,
+      'operator_note' => 'note-7Q',
+      'verdict' => [
+        'ok' => FALSE,
+        'broken_at' => 4,
+        'reason' => 'free text reason 7Q',
+        'unkeyed_rows' => 0,
+        'row' => ['ip_address' => self::IP, 'metadata' => self::METADATA],
+      ],
+      'successor' => [
+        'segment_ok' => FALSE,
+        'historical_ok' => FALSE,
+        'reason' => 'successor_integrity_failed',
+        'segment_id' => 'segment-7Q',
+        'incident' => 'INC-7Q operator text',
+        'historical_verdict' => ['reason' => 'tampered-7Q'],
+        'verified_rows' => 9,
+      ],
+    ]);
+
+    // Inside the minimum interval, so verify now returns this stored run.
+    $results = [
+      $this->execute('audit_chain_status'),
+      $this->execute(self::VERIFY),
+    ];
+    self::assertFalse($results[1]['ran']);
+    foreach ([$results[0]['last_run'], $results[1]] as $run) {
+      self::assertFalse($run['ok']);
+      self::assertSame('other', $run['reason']);
+      self::assertSame(4, $run['broken_at']);
+    }
+    $expected = [
+      'segment_ok' => FALSE,
+      'historical_ok' => FALSE,
+      'reason' => 'successor_integrity_failed',
+      'verified_rows' => 9,
+    ];
+    self::assertSame($expected, $results[0]['recovery']);
+    self::assertSame($expected, $results[1]['successor']);
+    $json = json_encode($results);
+    foreach (['7Q', self::IP, 'operator_note', 'incident', 'segment_id', 'historical_verdict'] as $forbidden) {
+      self::assertStringNotContainsString($forbidden, $json, $forbidden);
+    }
+  }
+
+  /**
    * Creates a fresh tool instance.
    */
   private function tool(string $id): object {

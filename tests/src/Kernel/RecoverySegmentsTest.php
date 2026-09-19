@@ -77,7 +77,10 @@ final class RecoverySegmentsTest extends KernelTestBase {
     $this->assertFalse($before['ok']);
     $prepared = $this->recovery->prepare();
     $this->assertCount(2, $prepared['snapshot']['branch_tips']);
+    $this->assertSame($prepared['snapshot']['historical_verdict'], $prepared['historical_verdict']);
     $record = $this->recovery->activate(self::SEGMENT, $prepared['snapshot_digest'], $this->context());
+    $manifest = json_decode($record['manifest'], TRUE, 64, JSON_THROW_ON_ERROR);
+    $this->assertSame($prepared['snapshot']['historical_verdict'], $manifest['historical_verdict']);
     $this->assertSame($before, $this->chain->verify());
     $this->assertEquals($original, array_slice($this->rows(), 0, 3));
     $this->chain->logKeyed('test', 'new_work');

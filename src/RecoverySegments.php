@@ -37,7 +37,7 @@ final class RecoverySegments {
       return [
         'snapshot' => $snapshot,
         'snapshot_digest' => hash('sha256', self::encode($snapshot)),
-        'historical_verdict' => $this->chain->verify(),
+        'historical_verdict' => $snapshot['historical_verdict'],
       ];
     });
   }
@@ -82,7 +82,7 @@ final class RecoverySegments {
       if (!hash_equals($expectedSnapshot, hash('sha256', self::encode($snapshot)))) {
         throw new \RuntimeException('The approved snapshot is stale. Prepare and review a fresh snapshot.');
       }
-      $verdict = $this->chain->verify();
+      $verdict = $snapshot['historical_verdict'];
       if ($verdict['ok'] || $snapshot['count'] === 0) {
         throw new \RuntimeException('Recovery requires a non-empty history with an explicit failed verdict.');
       }

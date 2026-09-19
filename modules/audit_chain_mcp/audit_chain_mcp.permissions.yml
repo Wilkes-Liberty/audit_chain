@@ -1,0 +1,9 @@
+'use audit chain mcp tools':
+  title: 'Use Audit Chain MCP read tools'
+  description: 'Read chain status, window counts and export status through governed MCP tools. Never returns rows, metadata, IP addresses, user agents, hashes, MACs or key identifiers.'
+  restrict access: true
+
+'run audit chain verification via mcp':
+  title: 'Run Audit Chain verification through MCP'
+  description: 'Run scheduled verification now through a governed MCP tool. Verification reads and decrypts every row. Also requires the read permission.'
+  restrict access: true

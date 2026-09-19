@@ -237,6 +237,63 @@ submodule (for example `charts_chartjs`) upgrades it to an interactive chart
 with no code change. Enabling `charts` without a library plugin keeps the SVG
 fallback — the page will not print "No charting library found".
 
+## Optional MCP tools
+
+`audit_chain_mcp` exposes [Tool API](https://www.drupal.org/project/tool)
+plugins so an operator or a governed agent can ask over MCP whether the chain is
+healthy. It depends on Tool API and
+[MCP Sentinel](https://www.drupal.org/project/mcp_sentinel). MCP Sentinel
+depends on Audit Chain, so the tools live in a submodule and the base module
+depends on neither. The submodule declares Drupal `^10.6 || ^11.3`, the range
+MCP Sentinel declares.
+
+| Tool | Operation | OAuth scope | Returns |
+| --- | --- | --- | --- |
+| `audit_chain_status` | read | `mcp_read` | How the last scheduled verification classifies and when it ran, the last verdict, whether new entries are signed, the sealed-through position, recovery successor status |
+| `audit_chain_window_counts` | read | `mcp_read` | Total, keyed and unkeyed entry counts for `24h`, `7d` and `30d`, or for one of them |
+| `audit_chain_export_status` | read | `mcp_read` | Whether cron export is enabled, the export checkpoint, and how many entries are waiting |
+| `audit_chain_verify_now` | trigger | `mcp_write` | Runs scheduled verification now and returns the verdict |
+
+MCP Sentinel derives the scope from the operation each tool declares. It treats
+a trigger as modifying, so `audit_chain_verify_now` needs the write scope even
+though verification never changes the chain.
+
+- Grant `use audit chain mcp tools` to the role your MCP credential uses.
+  `audit_chain_verify_now` also needs `run audit chain verification via mcp`.
+  Both are restricted permissions.
+- MCP Sentinel's gates apply first: permission, source readiness, scope, IP
+  policy and rate limit. A tool is listed only for an account that can run it.
+- No tool returns a row, metadata, an IP address, a user agent, an entity
+  label, a row hash, the seal MAC, the prefix digest, a key identifier, the
+  seal's reason or a recovery incident reference. Verdict and successor reasons
+  are reported from the module's own fixed list; any other stored value reads
+  `other`. `broken_at` is a row id.
+- The export destination is reported as its kind (`https`, `http` or `file`)
+  and, for a URL, its host. The path, port, credentials and query string are
+  left out, because ingest services put tokens in paths. A file path is never
+  returned.
+- Verification reads every row past the seal and decrypts its metadata, so its
+  cost grows with the table. The profile rate limit applies. A call within 60
+  seconds of the last recorded run returns that run with `"ran": false` and
+  does not walk the table again. A run through the tool is recorded exactly as
+  a cron run is: a failure is logged and `AuditChainVerificationFailedEvent`
+  fires.
+- A refusal from this module is one fixed message. Tool API and MCP Sentinel
+  have their own messages for invalid input, denied access and rate limits.
+  None relays an input value.
+- Installing the submodule publishes nothing by itself. Enable the tools in
+  your site's MCP tool bridge configuration.
+
+Not available as tools, by design:
+
+- Sealing a prefix, preparing or activating recovery, re-encryption and
+  pruning. Each is permanent and is built around a person confirming it.
+- Export to a destination the caller supplies. That would send evidence
+  wherever an agent names.
+- Writing a log entry. An agent must not be able to forge evidence.
+- Any reader of rows or metadata. IP addresses, user agents and decrypted
+  metadata are personal data.
+
 ## Configuration
 
 **Configuration → System → Audit Chain** (`/admin/config/system/audit-chain`).

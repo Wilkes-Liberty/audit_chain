@@ -1,0 +1,11 @@
+name: 'Audit Chain MCP'
+type: module
+description: 'Optional Tool API plugins for chain status, window counts, export status and verify now, governed by MCP Sentinel.'
+package: 'Security'
+# The intersection of Audit Chain's range and what Tool API and MCP Sentinel
+# support. MCP Sentinel does not declare Drupal 12 yet.
+core_version_requirement: ^10.6 || ^11.3
+dependencies:
+  - audit_chain:audit_chain
+  - mcp_sentinel:mcp_sentinel (>=2.22.0)
+  - tool:tool (>=1.0.0-beta8)

@@ -239,6 +239,74 @@ jobs:
           AUDIT_CHAIN_CLI_TEST: '1'
         run: bash web/modules/contrib/audit_chain/tests/scripts/recovery-cli.sh
 
+      # The optional audit_chain_mcp submodule (#3624446) needs Tool API and MCP
+      # Sentinel. They are installed only now, after the base suite and the CLI
+      # lifecycle have run against a fixture that holds the base module alone,
+      # so the base module is still proven to need neither. Both packages
+      # support every core version this matrix runs, so every leg runs this.
+      - name: Install Tool API and MCP Sentinel
+        working-directory: drupal
+        run: |
+          retry() {
+            rc=0
+            for n in 1 2 3; do
+              "$@" && return 0
+              rc=$?
+              if [ "$n" -lt 3 ]; then
+                echo "::warning::attempt $n of 3 failed (exit $rc): $* - retrying"
+                sleep "$((15 * n))"
+              fi
+            done
+            return "$rc"
+          }
+          # MCP Sentinel requires drupal/audit_chain ^1.0.1. A path repo takes
+          # its version from the checkout, which here is a detached commit and
+          # satisfies no release constraint. Name the version, so the working
+          # copy stays the package under test.
+          composer config repositories.audit_chain --json \
+            '{"type":"path","url":"../module","options":{"versions":{"drupal/audit_chain":"1.x-dev"}}}'
+          retry composer require -W --no-interaction --no-progress \
+            'drupal/audit_chain:1.x-dev' \
+            'drupal/mcp_sentinel:^2.22' \
+            'drupal/tool:^1.0.0-beta8'
+          composer show --no-ansi drupal/mcp_sentinel | sed -n '1,4p'
+          composer show --no-ansi drupal/tool | sed -n '1,4p'
+          test -L web/modules/contrib/audit_chain \
+            || { echo "::error::audit_chain is no longer symlinked to the working copy - MCP Sentinel pulled in a released copy"; exit 1; }
+
+      - name: PHPUnit — audit_chain_mcp Kernel (blocking)
+        working-directory: drupal
+        env:
+          SIMPLETEST_DB: ${{ matrix.connection }}
+          BROWSERTEST_OUTPUT_DIRECTORY: /tmp
+          SYMFONY_DEPRECATIONS_HELPER: weak
+          MIN_MCP_TESTS: '10'
+        run: |
+          set -euo pipefail
+          config="${PWD}/web/core/phpunit.xml.dist"
+          vendor/bin/phpunit -c "${config}" \
+            --log-junit "${PWD}/junit-Mcp.xml" \
+            "${PWD}/web/modules/contrib/audit_chain/modules/audit_chain_mcp/tests/src/Kernel"
+
+          # Count the tests that ran. The suite skips itself when Tool API or
+          # MCP Sentinel is missing, and a skipped test is still a <testcase>,
+          # so counting elements alone would pass a run that tested nothing.
+          ran="$(php -r '
+            $xml = simplexml_load_file($argv[1]);
+            $ran = 0;
+            foreach ($xml->xpath("//testcase") as $case) {
+              if (!isset($case->skipped)) {
+                $ran++;
+              }
+            }
+            echo $ran;
+          ' junit-Mcp.xml)"
+          echo "Ran ${ran} audit_chain_mcp tests (floor ${MIN_MCP_TESTS})."
+          if [ "${ran}" -lt "${MIN_MCP_TESTS}" ]; then
+            echo "::error::Only ${ran} audit_chain_mcp tests ran, below the floor of ${MIN_MCP_TESTS}."
+            exit 1
+          fi
+
   phpcs:
     name: Drupal coding standards
     runs-on: ubuntu-latest

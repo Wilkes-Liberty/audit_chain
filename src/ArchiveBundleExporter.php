@@ -114,7 +114,7 @@ final class ArchiveBundleExporter {
     $rows = [];
     foreach ($result as $record) {
       $rows[] = [
-        'contract_version' => EvidenceExporter::CONTRACT_VERSION,
+        'contract_version' => self::CONTRACT_VERSION,
         'id' => (int) $record->id,
         'prev_hash' => $record->prev_hash === NULL ? NULL : (string) $record->prev_hash,
         'row_hash' => $record->row_hash === NULL ? NULL : (string) $record->row_hash,

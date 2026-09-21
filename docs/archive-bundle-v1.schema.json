@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://www.drupal.org/project/audit_chain/archive-bundle-v1.schema.json",
+  "title": "Audit Chain archive bundle v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["manifest", "rows", "merkle", "verification"],
+  "properties": {
+    "manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract", "contract_version", "instance_id", "window", "hash_algorithm", "merkle_algorithm", "merkle_root", "chain_head", "seal", "successor", "digest"],
+      "properties": {
+        "contract": { "const": "audit_chain.archive.v1" },
+        "contract_version": { "const": 1 },
+        "instance_id": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "window": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["from_id", "through_id", "row_count"],
+          "properties": {
+            "from_id": { "type": "integer", "minimum": 1 },
+            "through_id": { "type": "integer", "minimum": 1 },
+            "row_count": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "hash_algorithm": { "const": "sha256" },
+        "merkle_algorithm": { "const": "audit_chain.merkle.v1" },
+        "merkle_root": { "$ref": "#/$defs/sha256" },
+        "chain_head": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+        "seal": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["sealed_through_id", "row_count", "prefix_digest", "record_digest"],
+              "properties": {
+                "sealed_through_id": { "type": "integer", "minimum": 1 },
+                "row_count": { "type": "integer", "minimum": 1 },
+                "prefix_digest": { "$ref": "#/$defs/sha256" },
+                "record_digest": { "$ref": "#/$defs/sha256" }
+              }
+            }
+          ]
+        },
+        "successor": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["segment_id", "manifest_digest", "record_digest"],
+              "properties": {
+                "segment_id": { "type": "string", "minLength": 1, "maxLength": 36 },
+                "manifest_digest": { "$ref": "#/$defs/sha256" },
+                "record_digest": { "$ref": "#/$defs/sha256" }
+              }
+            }
+          ]
+        },
+        "digest": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "rows": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["contract_version", "id", "prev_hash", "row_hash"],
+        "properties": {
+          "contract_version": { "const": 1 },
+          "id": { "type": "integer", "minimum": 1 },
+          "prev_hash": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+          "row_hash": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] }
+        }
+      }
+    },
+    "merkle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["root", "leaves", "proofs"],
+      "properties": {
+        "root": { "$ref": "#/$defs/sha256" },
+        "leaves": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "hash"],
+            "properties": {
+              "id": { "type": "integer", "minimum": 1 },
+              "hash": { "$ref": "#/$defs/sha256" }
+            }
+          }
+        },
+        "proofs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "path"],
+            "properties": {
+              "id": { "type": "integer", "minimum": 1 },
+              "path": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["side", "hash"],
+                  "properties": {
+                    "side": { "enum": ["left", "right"] },
+                    "hash": { "$ref": "#/$defs/sha256" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["row_encoding", "leaf", "node", "checkpoint"],
+      "properties": {
+        "row_encoding": { "type": "string" },
+        "leaf": { "type": "string" },
+        "node": { "type": "string" },
+        "checkpoint": { "type": "string" }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  }
+}

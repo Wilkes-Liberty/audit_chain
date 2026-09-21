@@ -241,6 +241,42 @@ function audit_chain_schema(): array {
     'primary key' => ['segment_id'],
   ];
 
+  $schema['audit_chain_checkpoint'] = [
+    'description' => 'Versioned archival checkpoints over closed global chain windows.',
+    'fields' => [
+      'digest' => ['type' => 'varchar', 'length' => 64, 'not null' => TRUE],
+      'contract_version' => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE],
+      'from_id' => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE],
+      'through_id' => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE],
+      'row_count' => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE],
+      'created' => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE],
+      'manifest' => ['type' => 'text', 'size' => 'big', 'not null' => TRUE],
+    ],
+    'primary key' => ['digest'],
+    'indexes' => [
+      'window' => ['from_id', 'through_id'],
+      'created' => ['created'],
+    ],
+  ];
+
+  $schema['audit_chain_witness_receipt'] = [
+    'description' => 'Opaque receipts for external witnesses of checkpoint digests.',
+    'fields' => [
+      'id' => ['type' => 'varchar', 'length' => 128, 'not null' => TRUE],
+      'checkpoint_digest' => ['type' => 'varchar', 'length' => 64, 'not null' => TRUE],
+      'backend_id' => ['type' => 'varchar', 'length' => 64, 'not null' => TRUE],
+      'status' => ['type' => 'varchar', 'length' => 16, 'not null' => TRUE],
+      'submitted' => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE],
+      'updated' => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE],
+      'opaque_token' => ['type' => 'text', 'size' => 'big', 'not null' => TRUE],
+    ],
+    'primary key' => ['id'],
+    'indexes' => [
+      'checkpoint_digest' => ['checkpoint_digest'],
+      'backend_status' => ['backend_id', 'status'],
+    ],
+  ];
+
   return $schema;
 }
 
@@ -254,6 +290,20 @@ function audit_chain_update_10004(): string {
     $schema->createTable('audit_chain_recovery', $definition['audit_chain_recovery']);
   }
   return 'Added signed recovery-record storage. No successor was activated and no audit history was changed.';
+}
+
+/**
+ * Adds archival checkpoint and witness-receipt storage without changing rows.
+ */
+function audit_chain_update_10005(): string {
+  $schema = \Drupal::database()->schema();
+  $definition = audit_chain_schema();
+  foreach (['audit_chain_checkpoint', 'audit_chain_witness_receipt'] as $table) {
+    if (!$schema->tableExists($table)) {
+      $schema->createTable($table, $definition[$table]);
+    }
+  }
+  return 'Added archival checkpoint and witness-receipt storage. No audit rows or retention behavior changed.';
 }
 
 /**

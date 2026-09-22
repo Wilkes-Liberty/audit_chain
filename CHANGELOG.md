@@ -6,6 +6,31 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.10.0]
+
+### Added
+- Versioned global archive checkpoints and independently verifiable archive
+  bundles (#3624875). Contract v1 commits to a deterministic Merkle root over
+  row ids and stored hash-chain columns, the window chain head, and bounded
+  commitments to any existing prefix seal or successor record. Bundles include
+  inclusion proofs, a JSON Schema, and an offline verification recipe without
+  metadata, IP addresses, user agents, entity labels, channel names, actors,
+  entity identifiers, or key identifiers.
+- A digest-only `WitnessBackendInterface`, immutable receipt and verdict values,
+  persisted opaque receipt placeholders, and a NoOp backend (#3624875). Missing
+  configuration remains pending and fails verification; witness operations make
+  no network request and add no audit-chain row.
+- `docs/ARCHIVAL_BOUNDARY.md` documents v1 canonicalization, the limits of the
+  existing NDJSON stream, offline bundle verification, and what a future
+  witness can and cannot prove.
+
+### Changed
+- Clarified that `prune()` remains a no-op in 1.10 even when eligible rows
+  exist. A checkpoint or receipt does not authorize deletion (#3624875).
+- Drupal support remains `^10.6 || ^11.3`. Drupal 12 is not claimed because the
+  current stable Key and Encrypt dependencies, and the optional MCP Sentinel
+  integration, do not yet provide a CI-testable Drupal 12 dependency set.
+
 ## [1.9.1] - 2026-09-19
 
 ### Changed

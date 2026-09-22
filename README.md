@@ -4,9 +4,11 @@
 
 Audit channels share one hash chain. Removing an expired row can break the
 verification of records that remain, including records in other channels.
-Until a verifiable archival boundary is available, `prune()` preserves records
-and returns zero. If eligible rows exist, it logs a warning and adds a persistent
-warning to Drupal's status report. A retention value of zero remains a no-op.
+`prune()` preserves records and returns zero. If eligible rows exist, it logs a
+warning and adds a persistent warning to Drupal's status report. A retention
+value of zero remains a no-op. The 1.10 checkpoint and archive-bundle contract
+does not enable deletion; a later release must define and verify the complete
+archival boundary and deletion ceremony before pruning can change.
 
 Review storage capacity and your retention obligations before upgrading.
 This safeguard prevents automatic deletion; it does not implement compliant
@@ -169,6 +171,26 @@ same:
   Consumers must deduplicate on the row `id` — a duplicate is expected, a gap
   is not. `--limit` caps a run and stays resumable; `--from-id` replays
   history without ever moving the checkpoint backwards.
+
+### Archival checkpoints and future witnesses
+
+The separate `audit_chain.archive_bundle_exporter` service closes a global row
+window under append serialization and returns a versioned offline bundle. The
+bundle contains only row ids and stored hash-chain columns, a deterministic
+Merkle root with inclusion proofs, the window's chain head, and commitments to
+any existing prefix seal or successor record. It requires the runtime
+`audit_chain_instance_id` already used by successor segments.
+
+The v1 canonicalization and offline verification recipe are fixed in
+[docs/ARCHIVAL_BOUNDARY.md](docs/ARCHIVAL_BOUNDARY.md). Changing the projection,
+field order, Merkle rule, domain separators, or digest algorithm requires a new
+contract version.
+
+`WitnessBackendInterface` is a digest-only seam for later backends. The shipped
+NoOp backend performs no network request, leaves receipts pending, and always
+fails verification with `backend_not_configured`. Witness operations never add
+rows to the audit chain. No timestamp-authority, OpenTimestamps, Bitcoin, XRPL,
+or wallet backend ships in 1.10.
 
 ### Rotating the signing key
 
@@ -356,9 +378,16 @@ error log and failure-event behavior for that integrity incident.
 ## What it does not do
 
 - **It does not make deletion impossible.** Nothing at the application layer
-  can. It makes deletion *evident*: the seam is visible at the next verify.
-  Pruning is therefore an explicit, channel-scoped operation, and it leaves a
-  seam by design.
+  can. It makes deletion *evident*. `prune()` does not delete: eligible rows are
+  retained until a later release has a complete, verifiable archival boundary.
+- **The ordinary NDJSON export is not independently re-hashable.** It omits
+  values covered by `row_hash`; that minimization is deliberate.
+- **A witness is a narrow existence claim.** A future receipt can show that a
+  checkpoint digest existed before a verifier-recognized time. It does not
+  prove authorship, legal time by itself, or that the live table is the archive.
+- **No public chain is the ledger.** A future public-chain backend would be one
+  witness transport. Audit Chain's global hash chain remains the evidence
+  primitive, and no wallet belongs in this module.
 - **It does not order events across servers.** The chain is a single sequence
   in one database.
 - **It is not a replacement for `dblog` or syslog.** Those are operational

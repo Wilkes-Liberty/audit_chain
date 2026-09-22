@@ -32,3 +32,6 @@ audit_chain.settings:
     export_channel:
       type: string
       label: 'Restrict the cron export to one channel (empty = all channels)'
+    witness_backend:
+      type: string
+      label: 'Witness backend service identifier (empty = fail-closed NoOp backend)'

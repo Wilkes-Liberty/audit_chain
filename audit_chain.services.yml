@@ -63,6 +63,30 @@ services:
       - '@http_client'
       - '@logger.channel.audit_chain'
 
+  audit_chain.archive_bundle_exporter:
+    class: Drupal\audit_chain\ArchiveBundleExporter
+    arguments:
+      - '@database'
+      - '@audit_chain.logger'
+      - '@audit_chain.recovery'
+      - '@datetime.time'
+
+  audit_chain.witness_backend.null:
+    class: Drupal\audit_chain\NullWitnessBackend
+    arguments:
+      - '@uuid'
+    tags:
+      - { name: audit_chain.witness_backend }
+
+  audit_chain.witness_manager:
+    class: Drupal\audit_chain\WitnessManager
+    arguments:
+      - '@database'
+      - '@config.factory'
+      - '@datetime.time'
+    tags:
+      - { name: service_collector, tag: audit_chain.witness_backend, call: addBackend }
+
   audit_chain.metrics:
     class: Drupal\audit_chain\AuditChainMetrics
     arguments:

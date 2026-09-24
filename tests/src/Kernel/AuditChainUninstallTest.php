@@ -44,8 +44,10 @@ final class AuditChainUninstallTest extends KernelTestBase {
    */
   protected function setUp(): void {
     parent::setUp();
+    $this->installEntitySchema('user');
+    $this->installSchema('user', ['users_data']);
     $this->installAuditChainTables();
-    $this->installConfig(['system', 'audit_chain']);
+    $this->installConfig(['system', 'user', 'audit_chain']);
   }
 
   /**

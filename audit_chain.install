@@ -5,6 +5,8 @@
  * Install and schema functions for Audit Chain.
  */
 
+use Drupal\audit_chain\AuditChainLogger;
+use Drupal\audit_chain\EvidenceExporter;
 use Drupal\audit_chain\ScheduledVerificationIntegrity;
 use Drupal\audit_chain\ScheduledVerifier;
 
@@ -314,6 +316,27 @@ function audit_chain_install(): void {
     'id' => 1,
     'locked' => 1,
   ])->execute();
+}
+
+/**
+ * Implements hook_uninstall().
+ *
+ * Schema tables drop automatically. Module-owned state does not. A leftover
+ * prefix seal makes the next install's empty-chain verify() return
+ * seal_broken.
+ */
+function audit_chain_uninstall(): void {
+  $keys = [
+    AuditChainLogger::STATE_SEAL,
+    ScheduledVerifier::STATE_KEY,
+    'audit_chain.retention_refused',
+  ];
+  foreach (array_keys(\Drupal::keyValue('state')->getAll()) as $name) {
+    if (str_starts_with((string) $name, EvidenceExporter::CHECKPOINT_PREFIX)) {
+      $keys[] = $name;
+    }
+  }
+  \Drupal::state()->deleteMultiple($keys);
 }
 
 /**

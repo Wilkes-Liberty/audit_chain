@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.10.1] - 2026-09-24
+
 ### Fixed
 - Uninstall deletes module-owned state (`audit_chain.seal`,
   `audit_chain.scheduled_verification`, `audit_chain.retention_refused`,

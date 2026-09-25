@@ -445,7 +445,7 @@ final class AuditChainToolsKernelTest extends KernelTestBase {
   /**
    * The post-activate successor key is allowlisted, not remapped to other.
    *
-   * activate() writes successor.reason=awaiting_verification into scheduled
+   * Activation writes successor.reason=awaiting_verification into scheduled
    * state. Status and verify-now must return that key while unknown free text
    * still maps to other (see testStoredFreeTextNeverPassesThrough()).
    */

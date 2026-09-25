@@ -443,6 +443,44 @@ final class AuditChainToolsKernelTest extends KernelTestBase {
   }
 
   /**
+   * The post-activate successor key is allowlisted, not remapped to other.
+   *
+   * activate() writes successor.reason=awaiting_verification into scheduled
+   * state. Status and verify-now must return that key while unknown free text
+   * still maps to other (see testStoredFreeTextNeverPassesThrough()).
+   */
+  public function testAwaitingVerificationSuccessorReasonPassesThrough(): void {
+    Role::load('mcp_api')->grantPermission('run audit chain verification via mcp')->save();
+    $now = $this->container->get('datetime.time')->getRequestTime();
+    $this->container->get('state')->set(ScheduledVerifier::STATE_KEY, [
+      'time' => $now,
+      'ok' => FALSE,
+      'reason' => AuditChainLogger::REASON_TAMPERED,
+      'keyed' => TRUE,
+      'verdict' => [
+        'ok' => FALSE,
+        'broken_at' => 3,
+        'reason' => AuditChainLogger::REASON_TAMPERED,
+        'unkeyed_rows' => 0,
+      ],
+      'successor' => [
+        'segment_ok' => FALSE,
+        'historical_ok' => FALSE,
+        'reason' => 'awaiting_verification',
+        'segment_id' => '957345ba-a0c8-42d5-9dcb-92ba4430a820',
+      ],
+    ]);
+
+    $status = $this->execute('audit_chain_status');
+    $verify = $this->execute(self::VERIFY);
+    self::assertFalse($verify['ran']);
+    self::assertSame('awaiting_verification', $status['recovery']['reason']);
+    self::assertSame('awaiting_verification', $verify['successor']['reason']);
+    $json = json_encode([$status, $verify]);
+    self::assertStringNotContainsString('957345ba', $json);
+  }
+
+  /**
    * The window is re-validated in code, behind Tool API's Choice constraint.
    *
    * Tool API rejects an unknown window before doExecute() runs, and the

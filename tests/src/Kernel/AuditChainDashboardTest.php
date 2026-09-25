@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\Tests\audit_chain\Kernel;
 
 use Drupal\audit_chain\Controller\AuditChainDashboardController;
+use Drupal\audit_chain\ScheduledVerifier;
 use Drupal\Core\Session\AnonymousUserSession;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\Tests\user\Traits\UserCreationTrait;
@@ -94,6 +95,35 @@ final class AuditChainDashboardTest extends KernelTestBase {
     $this->assertStringNotContainsString('field_salary', $rendered);
     $this->assertStringContainsString('window=7d', $rendered);
     $this->assertStringContainsString('window=30d', $rendered);
+  }
+
+  /**
+   * The post-activate successor card is pending, not a verification failure.
+   *
+   * @covers ::dashboard
+   */
+  public function testAwaitingVerificationDoesNotPrintVerificationFailed(): void {
+    $this->container->get('state')->set(ScheduledVerifier::STATE_KEY, [
+      'time' => \Drupal::time()->getRequestTime(),
+      'ok' => FALSE,
+      'reason' => 'tampered',
+      'successor' => [
+        'segment_ok' => FALSE,
+        'historical_ok' => FALSE,
+        'reason' => 'awaiting_verification',
+        'segment_id' => '957345ba-a0c8-42d5-9dcb-92ba4430a820',
+      ],
+    ]);
+
+    $request = Request::create('/admin/reports/audit-chain');
+    $controller = AuditChainDashboardController::create($this->container);
+    $build = $controller->dashboard($request);
+    $rendered = (string) $this->container->get('renderer')->renderRoot($build);
+
+    $this->assertStringContainsString('Successor segment', $rendered);
+    $this->assertStringContainsString('Awaiting verification', $rendered);
+    $this->assertStringNotContainsString('Verification failed', $rendered);
+    $this->assertStringContainsString('audit-chain-card--warn', $rendered);
   }
 
   /**

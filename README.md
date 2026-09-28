@@ -129,7 +129,12 @@ responses:
   hashed without the configured signing key, so anyone with database access can
   rewrite them. Nothing was edited. This almost always means the Key entity did
   not resolve in the environment that wrote them; the status report flags that
-  condition while it is still happening.
+  condition while it is still happening. When those unsigned rows are a leading
+  prefix and a later row verifies under a signing key, the status report
+  annotates the prefix as a warning instead of an integrity error. The rows
+  stay. They are not re-signed or deleted. The signed rows after the prefix
+  are the authoritative chain. An unsigned row after that successor, a missing
+  signing key, and an edited signed row remain errors.
 
 Both exit non-zero. Entries already written unsigned cannot be signed
 retrospectively.
@@ -329,7 +334,7 @@ Not available as tools, by design:
 | Retired signing keys | Keys this chain was signed with previously. Verification accepts a row signed by any of them, so rotating does not make earlier rows look tampered with. Removing one makes the rows it signed unverifiable. |
 | Encryption profile | Encrypts `metadata` at rest. See the rotation caveat above. |
 | Stream entries | Emits each entry to the `audit_chain` logger channel as a structured record, so syslog or Monolog can forward to a SIEM without polling. |
-| Scheduled verification interval | Runs a full chain verification on cron at most this often (`0` disables). An integrity failure is an error on the status report, an alert on the `audit_chain` channel, and an `AuditChainVerificationFailedEvent` — the chain itself is never modified by the check. A foreign seal is a fail-closed warning; see below. |
+| Scheduled verification interval | Runs a full chain verification on cron at most this often (`0` disables). An integrity failure is an error on the status report, an alert on the `audit_chain` channel, and an `AuditChainVerificationFailedEvent` — the chain itself is never modified by the check. A leading unsigned prefix with a signed successor is a documented warning, not that alert. A foreign seal is a fail-closed warning; see below. |
 | Require keyed verification | The enterprise assurance profile: scheduled verification fails — instead of falling back to unkeyed SHA-256 — when no signing key resolves or when rows were written unkeyed. |
 | Export evidence off-system on cron | Pushes new chain rows to the export destination after each cron run. See *Exporting evidence off-system* for the delivery contract. |
 | Export destination | An `https://` ingest URL or a server file path. |

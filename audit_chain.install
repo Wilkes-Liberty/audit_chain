@@ -370,11 +370,13 @@ function audit_chain_update_10002(): string {
  * maps those states onto requirement copy. The assurance-profile-without-
  * schedule warning is presentation: the classifier only sees interval and run.
  *
- * An integrity or assurance failure is an ERROR. A foreign seal is a WARNING:
- * it remains unverified, but its copied prefix hashes have not changed. A
- * schedule that has gone quiet (no run within twice its interval) is a WARNING
- * — silence is not health. Requiring keyed verification while never scheduling
- * it is also a WARNING: the assurance profile is only as strong as its cadence.
+ * An integrity or assurance failure is an ERROR. A leading unsigned prefix
+ * with a verifying signed successor is a documented WARNING: those rows stay
+ * in the log and are not re-signed. A foreign seal is a WARNING: it remains
+ * unverified, but its copied prefix hashes have not changed. A schedule that
+ * has gone quiet (no run within twice its interval) is a WARNING — silence is
+ * not health. Requiring keyed verification while never scheduling it is also
+ * a WARNING: the assurance profile is only as strong as its cadence.
  *
  * @param array $requirements
  *   The requirements array, added to by reference.
@@ -401,6 +403,7 @@ function _audit_chain_requirements_scheduled_verification(array &$requirements):
   // hook_requirements callers may not have system date formats installed.
   $when = in_array($classified['reason'], [
     'seal_foreign',
+    'unsigned_prefix',
     'failed',
     'overdue',
     'passing',
@@ -428,6 +431,14 @@ function _audit_chain_requirements_scheduled_verification(array &$requirements):
       ]),
       'severity' => $severity,
       'description' => t('The sealed prefix hashes are unchanged, but this environment cannot authenticate the copied seal with a current or retired signing key. No prefix-hash change was detected. Verification remains fail-closed and evidence export stays blocked. Verify on the source environment, or make its signing key available as a retired key only if your key-separation policy permits.'),
+    ],
+    'unsigned_prefix' => [
+      'title' => $title,
+      'value' => t('Documented unsigned prefix (last run @time)', [
+        '@time' => $when,
+      ]),
+      'severity' => $severity,
+      'description' => t('A leading run of entries was hashed with unkeyed SHA-256. Those rows stay in the log. They are not cryptographically verifiable, and they are not re-signed or deleted. The signed rows after that prefix are the authoritative chain. An edited signed row, a missing signing key, or an unsigned row after the signed successor is still an error.'),
     ],
     'failed' => [
       'title' => $title,

@@ -122,6 +122,13 @@ final class AuditChainDashboardController extends ControllerBase {
         'label' => (string) $this->t('Foreign seal'),
         'detail' => (string) $this->t('Sealed prefix hashes are unchanged but this environment cannot authenticate the copied seal.'),
       ],
+      'unsigned_prefix' => [
+        'state' => 'warn',
+        'label' => (string) $this->t('Unsigned prefix'),
+        'detail' => (string) $this->t('A leading unsigned prefix is retained and is not re-signed. Signed rows after it are the authoritative chain. Last scheduled verification @when.', [
+          '@when' => $when,
+        ]),
+      ],
       'overdue' => [
         'state' => 'warn',
         'label' => (string) $this->t('Overdue'),

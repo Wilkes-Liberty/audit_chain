@@ -95,7 +95,8 @@ interface AuditChainLoggerInterface {
    *   unkeyed_through: int|null,
    *   verified_from: int|null,
    *   sealed_through: int|null,
-   *   seal_intact: bool|null
+   *   seal_intact: bool|null,
+   *   unsigned_prefix: bool
    *   }
    *   Additive shape: read the keys you need. 'sealed_through' / 'seal_intact'
    *   describe an operator seal over a historical unverifiable prefix (#5).
@@ -103,6 +104,10 @@ interface AuditChainLoggerInterface {
    *   inspect `reason` to distinguish them.
    *   'verified_from' is the first post-seal row id that was content-checked,
    *   or NULL when the chain is empty / fully sealed.
+   *   `unsigned_prefix` is TRUE only for a leading unsigned run that is
+   *   followed by at least one row verified under a signing key. The verdict
+   *   stays unsuccessful. Unsigned rows after that signed successor, a missing
+   *   key, and an edited signed row do not set it.
    */
   public function verify(): array;
 

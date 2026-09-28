@@ -131,6 +131,11 @@ final class ScheduledVerifier {
         'Scheduled audit-chain verification found a FOREIGN SEAL. The sealed prefix hashes are unchanged, but this environment cannot authenticate the seal MAC. The run remains unverified and evidence export stays blocked; verify on the source environment or configure its key as retired if policy permits.',
       );
     }
+    elseif (!$run['ok'] && $this->documentedUnsignedPrefix($run)) {
+      $this->logger->warning(
+        'Scheduled audit-chain verification found a documented unsigned prefix. Those rows stay in the log and are not re-signed. The signed rows after the prefix are the authoritative chain. Whole-history verification stays unsuccessful.',
+      );
+    }
     elseif (!$run['ok']) {
       $this->logger->error(
         'Scheduled audit-chain verification FAILED: @reason. The chain was not modified; investigate before trusting new entries. See the status report for details.',
@@ -143,6 +148,23 @@ final class ScheduledVerifier {
     }
 
     return $run;
+  }
+
+  /**
+   * Whether this run is a leading unsigned prefix with a signed successor.
+   *
+   * @param array $run
+   *   The recorded scheduled-verification run.
+   *
+   * @return bool
+   *   TRUE only when verify() marked the unsigned rows as that prefix.
+   */
+  private function documentedUnsignedPrefix(array $run): bool {
+    if (($run['reason'] ?? NULL) !== AuditChainLogger::REASON_WRITTEN_UNKEYED) {
+      return FALSE;
+    }
+    $verdict = $run['verdict'] ?? NULL;
+    return is_array($verdict) && ($verdict['unsigned_prefix'] ?? FALSE) === TRUE;
   }
 
 }

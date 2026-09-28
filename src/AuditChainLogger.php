@@ -350,6 +350,8 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
 
     $unkeyedRows = 0;
     $unkeyedThrough = NULL;
+    $seenKeyed = FALSE;
+    $unkeyedAfterKeyed = FALSE;
     foreach ($result as $record) {
       $record = (array) $record;
       $id = (int) $record['id'];
@@ -390,6 +392,7 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
       // under some key the site actually has.
       $stored = (string) $record['row_hash'];
       if ($this->matchesAnyKey($stored, $storedPrev, $canonical, $keys, (string) ($record['key_id'] ?? ''))) {
+        $seenKeyed = TRUE;
         $prevRowHash = $stored;
         continue;
       }
@@ -405,6 +408,9 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
           $prevRowHash = $stored;
           continue;
         }
+        if ($seenKeyed) {
+          $unkeyedAfterKeyed = TRUE;
+        }
         $unkeyedRows++;
         $unkeyedThrough = $id;
         $prevRowHash = $stored;
@@ -415,7 +421,10 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
     }
 
     if ($unkeyedRows > 0) {
-      return $this->verdict(FALSE, NULL, self::REASON_WRITTEN_UNKEYED, $unkeyedRows, $unkeyedThrough, $verifiedFrom, $sealedThrough, $sealIntact);
+      // A leading unsigned run with a keyed successor is annotated, not
+      // repaired. Unsigned rows after that successor stay an ordinary failure.
+      $unsignedPrefix = $seenKeyed && !$unkeyedAfterKeyed;
+      return $this->verdict(FALSE, NULL, self::REASON_WRITTEN_UNKEYED, $unkeyedRows, $unkeyedThrough, $verifiedFrom, $sealedThrough, $sealIntact, $unsignedPrefix);
     }
 
     return $this->verdict(TRUE, NULL, NULL, 0, NULL, $verifiedFrom, $sealedThrough, $sealIntact);
@@ -942,6 +951,8 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
    *   Active seal's sealed_through_id, or NULL.
    * @param bool|null $sealIntact
    *   Whether both the seal digest and MAC verify; NULL when no seal.
+   * @param bool $unsignedPrefix
+   *   TRUE when unsigned rows are only a leading prefix before a keyed row.
    *
    * @return array{
    *   ok: bool,
@@ -951,9 +962,11 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
    *   unkeyed_through: int|null,
    *   verified_from: int|null,
    *   sealed_through: int|null,
-   *   seal_intact: bool|null
+   *   seal_intact: bool|null,
+   *   unsigned_prefix: bool
    *   }
-   *   The verdict.
+   *   The verdict. unsigned_prefix is TRUE only when every unsigned row is a
+   *   leading prefix and at least one later row verifies under a signing key.
    */
   private function verdict(
     bool $ok,
@@ -964,6 +977,7 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
     ?int $verifiedFrom = NULL,
     ?int $sealedThrough = NULL,
     ?bool $sealIntact = NULL,
+    bool $unsignedPrefix = FALSE,
   ): array {
     return [
       'ok' => $ok,
@@ -974,6 +988,7 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
       'verified_from' => $verifiedFrom,
       'sealed_through' => $sealedThrough,
       'seal_intact' => $sealIntact,
+      'unsigned_prefix' => $unsignedPrefix,
     ];
   }
 

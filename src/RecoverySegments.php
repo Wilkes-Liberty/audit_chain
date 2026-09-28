@@ -298,7 +298,10 @@ final class RecoverySegments {
       'head_hash' => $head,
       'content_digest' => hash_final($digest),
       'seal_digest' => hash('sha256', self::encode($this->chain->getSeal())),
-      'historical_verdict' => $this->chain->verify(),
+      // unsigned_prefix is a status-report annotation. It is not part of the
+      // recovery anchor. Leaving it in this array would change snapshot_digest
+      // for every existing successor.
+      'historical_verdict' => $this->recoveryVerdict(),
       'branch_tips' => $tips,
     ];
   }
@@ -359,6 +362,18 @@ final class RecoverySegments {
    */
   private function failure(string $reason): array {
     return ['segment_ok' => FALSE, 'historical_ok' => FALSE, 'reason' => $reason];
+  }
+
+  /**
+   * Returns the whole-history verdict without status-report annotation.
+   *
+   * @return array
+   *   The verify() verdict with unsigned_prefix removed.
+   */
+  private function recoveryVerdict(): array {
+    $verdict = $this->chain->verify();
+    unset($verdict['unsigned_prefix']);
+    return $verdict;
   }
 
   /**

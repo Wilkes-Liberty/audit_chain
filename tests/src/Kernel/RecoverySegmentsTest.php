@@ -78,6 +78,8 @@ final class RecoverySegmentsTest extends KernelTestBase {
     $prepared = $this->recovery->prepare();
     $this->assertCount(2, $prepared['snapshot']['branch_tips']);
     $this->assertSame($prepared['snapshot']['historical_verdict'], $prepared['historical_verdict']);
+    $this->assertArrayNotHasKey('unsigned_prefix', $prepared['snapshot']['historical_verdict'],
+      'The recovery anchor must not absorb a status-report annotation.');
     $record = $this->recovery->activate(self::SEGMENT, $prepared['snapshot_digest'], $this->context());
     $manifest = json_decode($record['manifest'], TRUE, 64, JSON_THROW_ON_ERROR);
     $this->assertSame($prepared['snapshot']['historical_verdict'], $manifest['historical_verdict']);

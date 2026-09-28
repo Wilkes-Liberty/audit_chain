@@ -350,6 +350,115 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
     $this->assertFalse($run['ok'],
       'Unkeyed history must not pass the assurance profile.');
     $this->assertSame('written_unkeyed', $run['reason']);
+    $this->assertFalse($run['verdict']['unsigned_prefix']);
+    $requirements = $this->runtimeRequirements();
+    $this->assertSame(REQUIREMENT_ERROR, $requirements['audit_chain_scheduled_verification']['severity'],
+      'Unkeyed history with no signed successor stays an error under the assurance profile.');
+  }
+
+  /**
+   * A leading unsigned prefix is annotated; a tampered signed row still fails.
+   *
+   * The prefix is not re-signed and is not deleted. Whole-history verification
+   * stays unsuccessful. Editing a later signed row is still an integrity error.
+   */
+  public function testKnownUnsignedPrefixStaysAnnotatedAndTamperedSignedRowFails(): void {
+    $chain = \Drupal::service('audit_chain.logger');
+    $chain->log('personnel', 'field_read', ['id' => 'legacy']);
+
+    $this->makeKey('chain_key');
+    $this->config('audit_chain.settings')
+      ->set('hash_key', 'chain_key')
+      ->set('verify_interval', 3600)
+      ->save();
+    $chain->log('personnel', 'field_read', ['id' => 'successor']);
+    $this->assertNull($chain->getSeal());
+
+    $spy = $this->spyChannel();
+    $captured = [];
+    \Drupal::service('event_dispatcher')->addListener(
+      AuditChainVerificationFailedEvent::EVENT_NAME,
+      function (AuditChainVerificationFailedEvent $event) use (&$captured): void {
+        $captured[] = $event->run;
+      }
+    );
+
+    $before = $this->chainSnapshot();
+    $this->runCron();
+    $run = $this->lastRun();
+    $this->assertIsArray($run);
+    $this->assertFalse($run['ok'], 'A leading unsigned prefix is not a whole-history pass.');
+    $this->assertSame(AuditChainLogger::REASON_WRITTEN_UNKEYED, $run['reason']);
+    $this->assertTrue($run['verdict']['unsigned_prefix']);
+    $this->assertSame($before, $this->chainSnapshot(), 'Annotation must not rewrite or delete rows.');
+    $this->assertSame([], $captured, 'A documented prefix is not a tampering alert.');
+    $this->assertEmpty(
+      array_filter($spy->records, fn (array $record): bool => $record['level'] === 'error'),
+      'A documented prefix must not be logged as an integrity failure.'
+    );
+    $this->assertNotEmpty(
+      array_filter($spy->records, fn (array $record): bool => $record['level'] === 'warning'),
+      'The prefix must stay visible as a warning.'
+    );
+
+    $requirements = $this->runtimeRequirements();
+    $this->assertSame(REQUIREMENT_WARNING, $requirements['audit_chain_scheduled_verification']['severity']);
+    $description = (string) $requirements['audit_chain_scheduled_verification']['description'];
+    $this->assertStringContainsString('not re-signed', $description);
+    $this->assertStringContainsString('authoritative chain', $description);
+    $this->assertStringContainsString(
+      'Documented unsigned prefix',
+      (string) $requirements['audit_chain_scheduled_verification']['value'],
+    );
+
+    $signedId = (int) \Drupal::database()->select('audit_chain_log', 'l')
+      ->fields('l', ['id'])
+      ->orderBy('id', 'DESC')
+      ->range(0, 1)
+      ->execute()
+      ->fetchField();
+    \Drupal::database()->update('audit_chain_log')
+      ->fields(['operation' => 'tampered_operation'])
+      ->condition('id', $signedId)
+      ->execute();
+
+    \Drupal::service('audit_chain.scheduled_verifier')->runNow();
+    $run = $this->lastRun();
+    $this->assertFalse($run['ok']);
+    $this->assertSame(AuditChainLogger::REASON_TAMPERED, $run['reason']);
+    $this->assertSame($signedId, $run['verdict']['broken_at']);
+    $requirements = $this->runtimeRequirements();
+    $this->assertSame(
+      REQUIREMENT_ERROR,
+      $requirements['audit_chain_scheduled_verification']['severity'],
+      'An edited signed row must still fail the status report.',
+    );
+    $this->assertNotEmpty($captured, 'Tampering must still dispatch the failure event.');
+  }
+
+  /**
+   * An unsigned row written after the signed successor is not the known prefix.
+   */
+  public function testUnsignedRowAfterSignedSuccessorStaysAnError(): void {
+    $this->makeKey('chain_key');
+    $this->config('audit_chain.settings')
+      ->set('hash_key', 'chain_key')
+      ->set('verify_interval', 3600)
+      ->save();
+    $chain = \Drupal::service('audit_chain.logger');
+    $chain->log('personnel', 'field_read', ['id' => 'signed']);
+
+    $this->config('audit_chain.settings')->set('hash_key', '')->save();
+    $chain->log('personnel', 'field_read', ['id' => 'later-unsigned']);
+    $this->config('audit_chain.settings')->set('hash_key', 'chain_key')->save();
+
+    $this->runCron();
+    $run = $this->lastRun();
+    $this->assertFalse($run['ok']);
+    $this->assertSame(AuditChainLogger::REASON_WRITTEN_UNKEYED, $run['reason']);
+    $this->assertFalse($run['verdict']['unsigned_prefix']);
+    $requirements = $this->runtimeRequirements();
+    $this->assertSame(REQUIREMENT_ERROR, $requirements['audit_chain_scheduled_verification']['severity']);
   }
 
   /**

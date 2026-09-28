@@ -96,6 +96,18 @@ final class AuditChainCommands extends DrushCommands {
       return self::EXIT_FAILURE;
     }
 
+    if ($result['reason'] === AuditChainLogger::REASON_WRITTEN_UNKEYED && !empty($result['unsigned_prefix'])) {
+      $this->logger()->warning(sprintf(
+        'Audit chain documented unsigned prefix — %d entries through row id %d were hashed with unkeyed SHA-256 and are not cryptographically verifiable. '
+        . 'Those rows stay in the log. Do not re-sign them and do not delete them. '
+        . 'The signed rows after that prefix are the authoritative chain. '
+        . 'Whole-history verification stays unsuccessful.',
+        (int) $result['unkeyed_rows'],
+        (int) $result['unkeyed_through'],
+      ));
+      return self::EXIT_FAILURE;
+    }
+
     if ($result['reason'] === AuditChainLogger::REASON_WRITTEN_UNKEYED) {
       $this->logger()->error(sprintf(
         'Audit chain UNSIGNED — %d of %d entries (through row id %d) were hashed without the configured signing key. '
@@ -103,10 +115,9 @@ final class AuditChainCommands extends DrushCommands {
         . 'so those rows can be rewritten by anyone with database access. '
         . 'This usually means the Key entity did not resolve in the environment that wrote them. '
         . 'Entries already written cannot be signed retrospectively. '
-        . 'To mark a historical unkeyed prefix without re-chaining, use: drush audit-chain:seal --through=%d --reason="…".',
+        . 'An unsigned row after a signed successor, or a chain with no signed successor, stays an error.',
         (int) $result['unkeyed_rows'],
         $rows,
-        (int) $result['unkeyed_through'],
         (int) $result['unkeyed_through'],
       ));
       return self::EXIT_FAILURE;

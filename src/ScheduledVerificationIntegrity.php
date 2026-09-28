@@ -55,6 +55,18 @@ final class ScheduledVerificationIntegrity {
       ];
     }
 
+    // A leading unsigned prefix is retained history. It is not a pass, and it
+    // is not an unexplained integrity failure when a signed successor verifies.
+    $verdict = is_array($run['verdict'] ?? NULL) ? $run['verdict'] : [];
+    $unsignedPrefix = ($verdict['unsigned_prefix'] ?? FALSE) === TRUE;
+    if (!$ok && $reason === AuditChainLogger::REASON_WRITTEN_UNKEYED && $unsignedPrefix) {
+      return [
+        'status' => 'warn',
+        'reason' => 'unsigned_prefix',
+        'time' => $time,
+      ];
+    }
+
     if (!$ok) {
       return [
         'status' => 'crit',

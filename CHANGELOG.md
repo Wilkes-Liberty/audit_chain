@@ -6,6 +6,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- A leading unsigned prefix followed by signed rows is a documented
+  status-report warning. Those rows stay in the log and are not re-signed
+  or deleted. Whole-history verification stays unsuccessful. An edited
+  signed row, a missing signing key, and an unsigned row after the signed
+  successor remain errors. A foreign seal is unchanged.
+
 ## [1.10.2] - 2026-09-28
 
 ### Fixed

@@ -88,6 +88,38 @@ final class ScheduledVerificationIntegrityTest extends KernelTestBase {
       ],
       [
         [
+          'time' => $now,
+          'ok' => FALSE,
+          'reason' => AuditChainLogger::REASON_WRITTEN_UNKEYED,
+          'verdict' => ['unsigned_prefix' => TRUE],
+        ],
+        3600,
+        'unsigned_prefix',
+        'warn',
+      ],
+      [
+        [
+          'time' => $now,
+          'ok' => FALSE,
+          'reason' => AuditChainLogger::REASON_WRITTEN_UNKEYED,
+          'verdict' => ['unsigned_prefix' => FALSE],
+        ],
+        3600,
+        'failed',
+        'crit',
+      ],
+      [
+        [
+          'time' => $now,
+          'ok' => FALSE,
+          'reason' => ScheduledVerifier::REASON_KEY_REQUIRED,
+        ],
+        3600,
+        'failed',
+        'crit',
+      ],
+      [
+        [
           'time' => $now - 7300,
           'ok' => TRUE,
           'reason' => NULL,
@@ -146,6 +178,25 @@ final class ScheduledVerificationIntegrityTest extends KernelTestBase {
           'time' => $now,
           'ok' => FALSE,
           'reason' => AuditChainLogger::REASON_TAMPERED,
+        ],
+      ],
+      [
+        'interval' => 3600,
+        'require_keyed' => FALSE,
+        'run' => [
+          'time' => $now,
+          'ok' => FALSE,
+          'reason' => AuditChainLogger::REASON_WRITTEN_UNKEYED,
+          'verdict' => ['unsigned_prefix' => TRUE],
+        ],
+      ],
+      [
+        'interval' => 3600,
+        'require_keyed' => TRUE,
+        'run' => [
+          'time' => $now,
+          'ok' => FALSE,
+          'reason' => ScheduledVerifier::REASON_KEY_REQUIRED,
         ],
       ],
       [

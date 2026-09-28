@@ -52,6 +52,7 @@ abstract class AuditChainToolBase extends McpGovernedToolBase {
    * Successor reasons the module defines. Anything else reports as "other".
    */
   private const SUCCESSOR_REASONS = [
+    'awaiting_verification',
     'historical_anchor_changed',
     'recovery_receipt_missing',
     'recovery_record_invalid',

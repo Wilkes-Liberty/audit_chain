@@ -5,6 +5,7 @@
  *
  * Available variables:
  * - chain: chain-integrity card (state, label, detail).
+ * - recovery: successor-segment card (segment_ok, reason, segment_id).
  * - tiles: a list of status tiles (label, value, sub, state).
  * - charts: a list of chart render arrays.
  * - quick_actions: a list of quick-action links (title, url).
@@ -41,9 +42,16 @@
   {% endif %}
 
   {% if recovery %}
-    <div class="audit-chain-card audit-chain-card--{{ recovery.segment_ok ? 'warn' : 'crit' }}">
+    {% set awaiting = recovery.reason == 'awaiting_verification' %}
+    <div class="audit-chain-card audit-chain-card--{{ recovery.segment_ok or awaiting ? 'warn' : 'crit' }}">
       <span class="audit-chain-card__label">{{ 'Successor segment'|t }}:
-        {{ recovery.segment_ok ? 'Verified with historical exception'|t : 'Verification failed'|t }}
+        {% if recovery.segment_ok %}
+          {{ 'Verified with historical exception'|t }}
+        {% elseif awaiting %}
+          {{ 'Awaiting verification'|t }}
+        {% else %}
+          {{ 'Verification failed'|t }}
+        {% endif %}
       </span>
       <span class="audit-chain-card__detail">
         {{ 'The original history remains failed. This result covers only the separately identified successor and its retained historical anchor.'|t }}

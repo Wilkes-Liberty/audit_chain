@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.10.3] - 2026-09-28
+
 ### Changed
 - A leading unsigned prefix followed by signed rows is a documented
   status-report warning. Those rows stay in the log and are not re-signed

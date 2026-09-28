@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.10.2] - 2026-09-28
+
 ### Fixed
 - MCP successor allowlist includes `awaiting_verification` so status and
   verify-now report the post-activate pending key instead of `other`. The

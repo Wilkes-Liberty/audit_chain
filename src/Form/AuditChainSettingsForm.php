@@ -90,7 +90,7 @@ final class AuditChainSettingsForm extends ConfigFormBase {
       '#title' => $this->t('Encrypt metadata at rest'),
       '#options' => $profileOptions,
       '#default_value' => (string) ($config->get('encryption_profile') ?? ''),
-      '#description' => $this->t('<strong>Rotating this orphans existing rows.</strong> Metadata encrypted under one profile cannot be decrypted after switching to another, and the chain is computed over the plaintext — so those rows stop verifying. Export or re-encrypt before changing it.'),
+      '#description' => $this->t('<strong>Rotating this orphans metadata readability until you re-encrypt, not the hashes.</strong> Metadata encrypted under one profile cannot be read with another alone. The chain is computed over the plaintext, so verification still succeeds when the previous profile remains loadable — each row records which profile produced its ciphertext, and the status report warns when any row still names a retired one. Run <code>drush audit-chain:reencrypt --from=A --to=B</code> to rewrite ciphertext in place without touching hashes. Keep the previous profile loadable until that finishes.'),
     ];
 
     $form['stream_enabled'] = [
@@ -149,6 +149,29 @@ final class AuditChainSettingsForm extends ConfigFormBase {
     ];
 
     return parent::buildForm($form, $form_state);
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function validateForm(array &$form, FormStateInterface $form_state): void {
+    parent::validateForm($form, $form_state);
+
+    $enabled = (bool) $form_state->getValue('export_enabled');
+    $destination = trim((string) $form_state->getValue('export_destination'));
+
+    if ($enabled && $destination === '') {
+      $form_state->setErrorByName('export_destination', $this->t('Export evidence off-system on cron requires a destination.'));
+    }
+
+    // Same rule as EvidenceExporter::exportTo(): evidence must not travel
+    // plain HTTP off-host. Loopback stays allowed for on-host collectors.
+    if ($destination !== '' && str_starts_with($destination, 'http://')) {
+      $host = parse_url($destination, PHP_URL_HOST);
+      if (!\in_array($host, ['127.0.0.1', '::1', '[::1]', 'localhost'], TRUE)) {
+        $form_state->setErrorByName('export_destination', $this->t('Plain HTTP off-host would expose evidence in transit. Use https:// or a loopback collector.'));
+      }
+    }
   }
 
   /**

@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.10.4] - 2026-09-29
+
 ### Fixed
 - Settings form no longer claims encryption-profile rotation makes existing
   rows stop verifying. The chain is over plaintext; hashes stay valid while

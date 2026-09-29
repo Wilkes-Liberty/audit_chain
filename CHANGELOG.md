@@ -6,6 +6,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- Settings form no longer claims encryption-profile rotation makes existing
+  rows stop verifying. The chain is over plaintext; hashes stay valid while
+  the old profile remains loadable. Cron export now refuses an empty
+  destination or off-host `http://` at save time, matching EvidenceExporter.
+
 ## [1.10.3] - 2026-09-28
 
 ### Changed

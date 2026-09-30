@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.10.6] - 2026-09-30
+
 ### Changed
 - A disclosed historical fork with a verifying successor segment is a
   documented status-report warning. Whole-history verification stays

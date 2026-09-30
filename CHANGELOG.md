@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.10.5] - 2026-09-30
+
 ### Fixed
 - `hook_help()` accepts the two-argument core contract and builds settings
   and dashboard hrefs from routes instead of hardcoded paths.

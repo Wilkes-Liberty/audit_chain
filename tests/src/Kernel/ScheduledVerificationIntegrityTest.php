@@ -51,9 +51,10 @@ final class ScheduledVerificationIntegrityTest extends KernelTestBase {
   }
 
   /**
-   * The six mirrored states live in one function.
+   * Classifier states live in one function.
    *
    * @covers ::classify
+   * @covers ::isDocumentedHistoricalException
    */
   public function testClassifierStates(): void {
     $now = 1700000000;
@@ -62,6 +63,7 @@ final class ScheduledVerificationIntegrityTest extends KernelTestBase {
       'ok' => TRUE,
       'reason' => NULL,
     ];
+    $documented = $this->documentedExceptionRun($now);
     $cases = [
       [NULL, 0, 'disabled', 'warn'],
       [$passing, 0, 'disabled', 'warn'],
@@ -82,6 +84,44 @@ final class ScheduledVerificationIntegrityTest extends KernelTestBase {
           'ok' => FALSE,
           'reason' => AuditChainLogger::REASON_TAMPERED,
         ],
+        3600,
+        'failed',
+        'crit',
+      ],
+      [
+        $documented,
+        3600,
+        'historical_exception',
+        'warn',
+      ],
+      [
+        $this->documentedExceptionRun($now, [
+          'successor' => ['segment_ok' => FALSE],
+        ]),
+        3600,
+        'failed',
+        'crit',
+      ],
+      [
+        $this->documentedExceptionRun($now, [
+          'verdict' => ['broken_at' => 99],
+        ]),
+        3600,
+        'failed',
+        'crit',
+      ],
+      [
+        $this->documentedExceptionRun($now, [
+          'successor' => ['segment_id' => ''],
+        ]),
+        3600,
+        'failed',
+        'crit',
+      ],
+      [
+        $this->documentedExceptionRun($now, [
+          'successor' => ['historical_ok' => TRUE],
+        ]),
         3600,
         'failed',
         'crit',
@@ -143,6 +183,7 @@ final class ScheduledVerificationIntegrityTest extends KernelTestBase {
    * Metrics and hook_requirements both consume the shared classifier.
    *
    * @covers ::classify
+   * @covers ::isDocumentedHistoricalException
    */
   public function testSurfacesShareClassifier(): void {
     $now = \Drupal::time()->getRequestTime();
@@ -179,6 +220,18 @@ final class ScheduledVerificationIntegrityTest extends KernelTestBase {
           'ok' => FALSE,
           'reason' => AuditChainLogger::REASON_TAMPERED,
         ],
+      ],
+      [
+        'interval' => 3600,
+        'require_keyed' => FALSE,
+        'run' => $this->documentedExceptionRun($now),
+      ],
+      [
+        'interval' => 3600,
+        'require_keyed' => FALSE,
+        'run' => $this->documentedExceptionRun($now, [
+          'successor' => ['segment_ok' => FALSE],
+        ]),
       ],
       [
         'interval' => 3600,
@@ -264,7 +317,62 @@ final class ScheduledVerificationIntegrityTest extends KernelTestBase {
         $requirements['audit_chain_scheduled_verification']['severity'],
         "requirements case $index",
       );
+      if ($classified['reason'] === 'historical_exception') {
+        $value = (string) $requirements['audit_chain_scheduled_verification']['value'];
+        $description = (string) $requirements['audit_chain_scheduled_verification']['description'];
+        $this->assertStringContainsString('Documented historical exception at row 11425', $value);
+        $this->assertStringContainsString('Audit Chain', $description);
+        $this->assertStringContainsString('11425', $description);
+        $this->assertStringContainsString('957345ba-a0c8-42d5-9dcb-92ba4430a820', $description);
+        $this->assertStringContainsString('historical_ok=false', $description);
+        $this->assertStringContainsString('segment_ok=true', $description);
+        $this->assertStringContainsString('documented preserved failure', $description);
+        $this->assertStringContainsString('drush audit-chain:verify', $description);
+        $this->assertStringContainsString('recovery-verify', $description);
+      }
     }
+  }
+
+  /**
+   * Builds a disclosed historical-exception run, with optional overlays.
+   *
+   * @param int $now
+   *   Stored run time.
+   * @param array $overrides
+   *   Shallow replacements. Nested successor/verdict keys are merged.
+   *
+   * @return array
+   *   A scheduled-verification run record.
+   */
+  private function documentedExceptionRun(int $now, array $overrides = []): array {
+    $run = [
+      'time' => $now,
+      'ok' => FALSE,
+      'reason' => AuditChainLogger::REASON_TAMPERED,
+      'verdict' => [
+        'ok' => FALSE,
+        'reason' => AuditChainLogger::REASON_TAMPERED,
+        'broken_at' => 11425,
+      ],
+      'successor' => [
+        'segment_ok' => TRUE,
+        'historical_ok' => FALSE,
+        'reason' => NULL,
+        'segment_id' => '957345ba-a0c8-42d5-9dcb-92ba4430a820',
+        'historical_verdict' => [
+          'ok' => FALSE,
+          'reason' => AuditChainLogger::REASON_TAMPERED,
+          'broken_at' => 11425,
+        ],
+      ],
+    ];
+    foreach (['verdict', 'successor'] as $key) {
+      if (isset($overrides[$key]) && is_array($overrides[$key])) {
+        $run[$key] = array_replace($run[$key], $overrides[$key]);
+        unset($overrides[$key]);
+      }
+    }
+    return array_replace($run, $overrides);
   }
 
   /**

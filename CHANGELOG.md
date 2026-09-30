@@ -6,6 +6,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- A disclosed historical fork with a verifying successor segment is a
+  documented status-report warning. Whole-history verification stays
+  unsuccessful and rows are not rewritten. A missing successor or a
+  successor that no longer verifies remains an error. Unsigned-prefix
+  and foreign-seal warnings are unchanged.
+
 ## [1.10.5] - 2026-09-30
 
 ### Fixed

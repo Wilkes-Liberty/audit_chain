@@ -136,6 +136,17 @@ final class ScheduledVerifier {
         'Scheduled audit-chain verification found a documented unsigned prefix. Those rows stay in the log and are not re-signed. The signed rows after the prefix are the authoritative chain. Whole-history verification stays unsuccessful.',
       );
     }
+    elseif (!$run['ok'] && ScheduledVerificationIntegrity::isDocumentedHistoricalException($run)) {
+      $verdict = is_array($run['verdict'] ?? NULL) ? $run['verdict'] : [];
+      $successor = is_array($run['successor'] ?? NULL) ? $run['successor'] : [];
+      $this->logger->warning(
+        'Scheduled audit-chain verification found a documented historical exception at row @broken_at. Successor segment @segment_id verifies (segment_ok=true, historical_ok=false). This is a preserved failure, not a new break. Whole-history verification stays unsuccessful.',
+        [
+          '@broken_at' => (string) ($verdict['broken_at'] ?? 'unknown'),
+          '@segment_id' => (string) ($successor['segment_id'] ?? 'unknown'),
+        ],
+      );
+    }
     elseif (!$run['ok']) {
       $this->logger->error(
         'Scheduled audit-chain verification FAILED: @reason. The chain was not modified; investigate before trusting new entries. See the status report for details.',

@@ -67,6 +67,16 @@ final class ScheduledVerificationIntegrity {
       ];
     }
 
+    // A disclosed historical fork with a verifying successor is retained
+    // evidence. It is not a pass, and it is not a new unexplained break.
+    if (!$ok && self::isDocumentedHistoricalException($run)) {
+      return [
+        'status' => 'warn',
+        'reason' => 'historical_exception',
+        'time' => $time,
+      ];
+    }
+
     if (!$ok) {
       return [
         'status' => 'crit',
@@ -88,6 +98,53 @@ final class ScheduledVerificationIntegrity {
       'reason' => 'passing',
       'time' => $time,
     ];
+  }
+
+  /**
+   * Whether a failing run is the disclosed historical fork, not a new break.
+   *
+   * Whole-history verification stays unsuccessful. A missing successor, a
+   * successor that no longer verifies, or a broken_at that is not the
+   * disclosed exception stays a critical failure.
+   *
+   * @param mixed $run
+   *   The scheduled-verification state value.
+   *
+   * @return bool
+   *   TRUE only when reason is tampered, the successor segment verifies,
+   *   historical_ok is explicitly false, and broken_at matches the
+   *   disclosed historical verdict.
+   */
+  public static function isDocumentedHistoricalException(mixed $run): bool {
+    if (!is_array($run) || ($run['ok'] ?? TRUE) === TRUE) {
+      return FALSE;
+    }
+    if (($run['reason'] ?? '') !== AuditChainLogger::REASON_TAMPERED) {
+      return FALSE;
+    }
+    $successor = $run['successor'] ?? NULL;
+    if (!is_array($successor)
+      || ($successor['segment_ok'] ?? FALSE) !== TRUE
+      || ($successor['historical_ok'] ?? TRUE) !== FALSE) {
+      return FALSE;
+    }
+    $segmentId = $successor['segment_id'] ?? NULL;
+    if (!is_string($segmentId) || $segmentId === '') {
+      return FALSE;
+    }
+    $verdict = is_array($run['verdict'] ?? NULL) ? $run['verdict'] : [];
+    $historical = is_array($successor['historical_verdict'] ?? NULL)
+      ? $successor['historical_verdict']
+      : [];
+    if (($historical['reason'] ?? '') !== AuditChainLogger::REASON_TAMPERED) {
+      return FALSE;
+    }
+    $brokenAt = $verdict['broken_at'] ?? NULL;
+    $disclosedAt = $historical['broken_at'] ?? NULL;
+    if (!is_numeric($brokenAt) || !is_numeric($disclosedAt)) {
+      return FALSE;
+    }
+    return (int) $brokenAt === (int) $disclosedAt && (int) $brokenAt > 0;
   }
 
 }

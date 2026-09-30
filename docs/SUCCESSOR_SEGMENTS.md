@@ -71,9 +71,10 @@ be interpreted. Bulk re-encryption and resealing are refused once a recovery
 record exists. Retain the historical decryption keys; future archival and
 re-encryption need their own reviewed evidence-preservation protocol.
 
-Scheduled monitoring continues to report the historical exception and reports
-new successor defects separately. The dashboard never collapses the combined
-result to a green whole-history badge.
+Scheduled monitoring reports the disclosed historical exception as a warning
+when the successor verifies, and reports new successor defects separately.
+The dashboard never collapses the combined result to a green whole-history
+badge. Whole-history verification stays unsuccessful.
 
 ## Retention prerequisite
 

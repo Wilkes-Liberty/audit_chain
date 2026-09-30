@@ -129,6 +129,7 @@ final class AuditChainDashboardController extends ControllerBase {
           '@when' => $when,
         ]),
       ],
+      'historical_exception' => $this->historicalExceptionCard($when),
       'overdue' => [
         'state' => 'warn',
         'label' => (string) $this->t('Overdue'),
@@ -152,6 +153,40 @@ final class AuditChainDashboardController extends ControllerBase {
         ]),
       ],
     };
+  }
+
+  /**
+   * Builds the documented historical-exception integrity card.
+   *
+   * @param string $when
+   *   Formatted last-run time, or the dashboard placeholder.
+   *
+   * @return array{state: string, label: string, detail: string}
+   *   The chain card.
+   */
+  private function historicalExceptionCard(string $when): array {
+    $successor = $this->metrics->recoveryStatus() ?? [];
+    $verdict = is_array($successor['historical_verdict'] ?? NULL)
+      ? $successor['historical_verdict']
+      : [];
+    $brokenAt = is_numeric($verdict['broken_at'] ?? NULL)
+      ? (int) $verdict['broken_at']
+      : NULL;
+    $segmentId = is_string($successor['segment_id'] ?? NULL) && $successor['segment_id'] !== ''
+      ? $successor['segment_id']
+      : NULL;
+
+    return [
+      'state' => 'warn',
+      'label' => (string) $this->t('Historical exception'),
+      'detail' => (string) $this->t('Audit Chain preserved failure at row @broken_at. Successor @segment_id verifies (historical_ok=@historical_ok, segment_ok=@segment_ok). This is a documented preserved failure, not a new break. Last scheduled verification @when. A missing successor or segment_ok=false is still a critical failure; run drush audit-chain:verify and drush audit-chain:recovery-verify.', [
+        '@broken_at' => $brokenAt ?? (string) $this->t('unknown'),
+        '@segment_id' => $segmentId ?? (string) $this->t('unknown'),
+        '@historical_ok' => !empty($successor['historical_ok']) ? 'true' : 'false',
+        '@segment_ok' => !empty($successor['segment_ok']) ? 'true' : 'false',
+        '@when' => $when,
+      ]),
+    ];
   }
 
   /**

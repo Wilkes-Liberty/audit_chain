@@ -127,6 +127,53 @@ final class AuditChainDashboardTest extends KernelTestBase {
   }
 
   /**
+   * A disclosed historical fork with a healthy successor is a warning.
+   *
+   * @covers ::dashboard
+   */
+  public function testDocumentedHistoricalExceptionIsWarningNotFailed(): void {
+    $this->config('audit_chain.settings')->set('verify_interval', 3600)->save();
+    $this->container->get('state')->set(ScheduledVerifier::STATE_KEY, [
+      'time' => \Drupal::time()->getRequestTime(),
+      'ok' => FALSE,
+      'reason' => 'tampered',
+      'verdict' => [
+        'ok' => FALSE,
+        'reason' => 'tampered',
+        'broken_at' => 11425,
+      ],
+      'successor' => [
+        'segment_ok' => TRUE,
+        'historical_ok' => FALSE,
+        'reason' => NULL,
+        'segment_id' => '957345ba-a0c8-42d5-9dcb-92ba4430a820',
+        'historical_verdict' => [
+          'ok' => FALSE,
+          'reason' => 'tampered',
+          'broken_at' => 11425,
+        ],
+      ],
+    ]);
+
+    $request = Request::create('/admin/reports/audit-chain');
+    $controller = AuditChainDashboardController::create($this->container);
+    $build = $controller->dashboard($request);
+    $rendered = (string) $this->container->get('renderer')->renderRoot($build);
+
+    $this->assertSame('warn', $build['#chain']['state']);
+    $this->assertSame('Historical exception', $build['#chain']['label']);
+    $this->assertStringContainsString('11425', $build['#chain']['detail']);
+    $this->assertStringContainsString('957345ba-a0c8-42d5-9dcb-92ba4430a820', $build['#chain']['detail']);
+    $this->assertStringContainsString('historical_ok=false', $build['#chain']['detail']);
+    $this->assertStringContainsString('segment_ok=true', $build['#chain']['detail']);
+    $this->assertStringContainsString('documented preserved failure', $build['#chain']['detail']);
+    $this->assertStringContainsString('audit-chain:verify', $build['#chain']['detail']);
+    $this->assertStringContainsString('Historical exception', $rendered);
+    $this->assertStringContainsString('audit-chain-card--warn', $rendered);
+    $this->assertStringNotContainsString('Hash chain: Failed', $rendered);
+  }
+
+  /**
    * An unknown window query argument is ignored.
    *
    * @covers ::dashboard

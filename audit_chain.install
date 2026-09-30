@@ -372,11 +372,15 @@ function audit_chain_update_10002(): string {
  *
  * An integrity or assurance failure is an ERROR. A leading unsigned prefix
  * with a verifying signed successor is a documented WARNING: those rows stay
- * in the log and are not re-signed. A foreign seal is a WARNING: it remains
- * unverified, but its copied prefix hashes have not changed. A schedule that
- * has gone quiet (no run within twice its interval) is a WARNING — silence is
- * not health. Requiring keyed verification while never scheduling it is also
- * a WARNING: the assurance profile is only as strong as its cadence.
+ * in the log and are not re-signed. A disclosed historical fork whose
+ * successor segment verifies is a documented WARNING: whole-history
+ * verification stays unsuccessful and rows are not rewritten. A missing
+ * successor or segment_ok=false stays an ERROR. A foreign seal is a WARNING:
+ * it remains unverified, but its copied prefix hashes have not changed. A
+ * schedule that has gone quiet (no run within twice its interval) is a
+ * WARNING — silence is not health. Requiring keyed verification while never
+ * scheduling it is also a WARNING: the assurance profile is only as strong as
+ * its cadence.
  *
  * @param array $requirements
  *   The requirements array, added to by reference.
@@ -404,6 +408,7 @@ function _audit_chain_requirements_scheduled_verification(array &$requirements):
   $when = in_array($classified['reason'], [
     'seal_foreign',
     'unsigned_prefix',
+    'historical_exception',
     'failed',
     'overdue',
     'passing',
@@ -440,6 +445,12 @@ function _audit_chain_requirements_scheduled_verification(array &$requirements):
       'severity' => $severity,
       'description' => t('A leading run of entries was hashed with unkeyed SHA-256. Those rows stay in the log. They are not cryptographically verifiable, and they are not re-signed or deleted. The signed rows after that prefix are the authoritative chain. An edited signed row, a missing signing key, or an unsigned row after the signed successor is still an error.'),
     ],
+    'historical_exception' => _audit_chain_requirements_historical_exception(
+      $title,
+      $severity,
+      $when,
+      is_array($run) ? $run : [],
+    ),
     'failed' => [
       'title' => $title,
       'value' => t('FAILED — @reason (last run @time)', [
@@ -470,6 +481,48 @@ function _audit_chain_requirements_scheduled_verification(array &$requirements):
   if ($requirement !== NULL) {
     $requirements['audit_chain_scheduled_verification'] = $requirement;
   }
+}
+
+/**
+ * Builds the documented historical-exception status-report row.
+ *
+ * @param \Drupal\Core\StringTranslation\TranslatableMarkup $title
+ *   Shared scheduled-verification title.
+ * @param int $severity
+ *   Classified severity.
+ * @param string|\Drupal\Core\StringTranslation\TranslatableMarkup|null $when
+ *   Formatted last-run time.
+ * @param array $run
+ *   The stored scheduled-verification run.
+ *
+ * @return array
+ *   A hook_requirements row.
+ */
+function _audit_chain_requirements_historical_exception(mixed $title, int $severity, mixed $when, array $run): array {
+  $successor = is_array($run['successor'] ?? NULL) ? $run['successor'] : [];
+  $verdict = is_array($run['verdict'] ?? NULL) ? $run['verdict'] : [];
+  $historical = is_array($successor['historical_verdict'] ?? NULL)
+    ? $successor['historical_verdict']
+    : [];
+  $broken_at = is_numeric($verdict['broken_at'] ?? NULL)
+    ? (int) $verdict['broken_at']
+    : (is_numeric($historical['broken_at'] ?? NULL) ? (int) $historical['broken_at'] : NULL);
+  $segment_id = is_string($successor['segment_id'] ?? NULL) && $successor['segment_id'] !== ''
+    ? $successor['segment_id']
+    : NULL;
+  $placeholders = [
+    '@broken_at' => $broken_at ?? (string) t('unknown'),
+    '@segment_id' => $segment_id ?? (string) t('unknown'),
+    '@historical_ok' => !empty($successor['historical_ok']) ? 'true' : 'false',
+    '@segment_ok' => !empty($successor['segment_ok']) ? 'true' : 'false',
+    '@time' => $when,
+  ];
+  return [
+    'title' => $title,
+    'value' => t('Documented historical exception at row @broken_at (last run @time)', $placeholders),
+    'severity' => $severity,
+    'description' => t('Audit Chain whole-history verification still reports the preserved failure at row @broken_at (historical_ok=@historical_ok). Successor segment @segment_id verifies independently (segment_ok=@segment_ok). This is a documented preserved failure, not a new break. Rows were not rewritten. A missing successor, or a successor that no longer verifies (segment_ok=false), is still a critical failure — investigate with <code>drush audit-chain:verify</code> and <code>drush audit-chain:recovery-verify</code>.', $placeholders),
+  ];
 }
 
 /**

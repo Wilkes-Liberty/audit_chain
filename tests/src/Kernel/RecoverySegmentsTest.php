@@ -8,6 +8,7 @@ use Composer\Autoload\ClassLoader;
 use Drupal\audit_chain\Exception\AuditChainAppendException;
 use Drupal\audit_chain\Exception\AuditChainSigningUnavailableException;
 use Drupal\audit_chain\AuditChainLogger;
+use Drupal\audit_chain\Event\AuditChainVerificationFailedEvent;
 use Drupal\audit_chain\RecoverySegments;
 use Drupal\Core\Site\Settings;
 use Drupal\KernelTests\KernelTestBase;
@@ -15,6 +16,7 @@ use Drupal\key\Entity\Key;
 use Drupal\encrypt\EncryptServiceInterface;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
+use Psr\Log\AbstractLogger;
 use Symfony\Component\Process\Process;
 
 /**
@@ -279,12 +281,53 @@ final class RecoverySegmentsTest extends KernelTestBase {
     $prepared = $this->recovery->prepare();
     $this->recovery->activate(self::SEGMENT, $prepared['snapshot_digest'], $this->context());
     $this->assertFalse($this->container->get('state')->get('audit_chain.scheduled_verification')['ok']);
+
+    $spy = new class() extends AbstractLogger {
+
+      /**
+       * Captured log records.
+       *
+       * @var array<int, array{level: mixed, message: string}>
+       */
+      public array $records = [];
+
+      /**
+       * {@inheritdoc}
+       */
+      public function log($level, string|\Stringable $message, array $context = []): void {
+        $this->records[] = ['level' => $level, 'message' => (string) $message];
+      }
+
+    };
+    $this->container->set('logger.channel.audit_chain', $spy);
+    $this->container->set('audit_chain.scheduled_verifier', NULL);
+    $captured = [];
+    \Drupal::service('event_dispatcher')->addListener(
+      AuditChainVerificationFailedEvent::EVENT_NAME,
+      function (AuditChainVerificationFailedEvent $event) use (&$captured): void {
+        $captured[] = $event->run;
+      }
+    );
+
     $run = $this->container->get('audit_chain.scheduled_verifier')->runNow();
     $this->assertFalse($run['ok']);
+    $this->assertFalse($run['verdict']['ok']);
     $this->assertTrue($run['successor']['segment_ok']);
     $this->assertFalse($run['successor']['historical_ok']);
-    $this->assertSame('failed', $this->container->get('audit_chain.metrics')->integrity()['reason']);
+    $this->assertFalse($this->chain->verify()['ok']);
+    $integrity = $this->container->get('audit_chain.metrics')->integrity();
+    $this->assertSame('historical_exception', $integrity['reason']);
+    $this->assertSame('warn', $integrity['status']);
     $this->assertTrue($this->container->get('audit_chain.metrics')->recoveryStatus()['segment_ok']);
+    $this->assertSame([], $captured, 'A documented historical exception is not a tampering alert.');
+    $this->assertEmpty(
+      array_filter($spy->records, fn (array $record): bool => $record['level'] === 'error'),
+      'A documented historical exception must not be logged as an integrity failure.',
+    );
+    $this->assertNotEmpty(
+      array_filter($spy->records, fn (array $record): bool => $record['level'] === 'warning'),
+      'The disclosed fork must stay visible as a warning.',
+    );
     $destination = sys_get_temp_dir() . '/audit-recovery-export-' . bin2hex(random_bytes(8));
     try {
       // Even stale success state must not override the explicit exception.
@@ -299,6 +342,24 @@ final class RecoverySegmentsTest extends KernelTestBase {
         unlink($destination);
       }
     }
+  }
+
+  /**
+   * A successor that no longer verifies stays a critical monitoring failure.
+   */
+  public function testSuccessorDefectStaysCritical(): void {
+    $this->config('audit_chain.settings')->set('verify_interval', 60)->save();
+    $prepared = $this->recovery->prepare();
+    $this->recovery->activate(self::SEGMENT, $prepared['snapshot_digest'], $this->context());
+    $this->container->get('database')->update('audit_chain_log')
+      ->fields(['entity_label' => 'changed after review'])
+      ->condition('id', 1)->execute();
+    $run = $this->container->get('audit_chain.scheduled_verifier')->runNow();
+    $this->assertFalse($run['ok']);
+    $this->assertFalse($run['successor']['segment_ok']);
+    $integrity = $this->container->get('audit_chain.metrics')->integrity();
+    $this->assertSame('failed', $integrity['reason']);
+    $this->assertSame('crit', $integrity['status']);
   }
 
   /**

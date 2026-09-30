@@ -7,15 +7,18 @@
 
 declare(strict_types=1);
 
+use Drupal\Core\Routing\RouteMatchInterface;
+use Drupal\Core\Url;
+
 /**
  * Implements hook_help().
  */
-function audit_chain_help(string $route_name): string {
+function audit_chain_help(string $route_name, RouteMatchInterface $route_match): string {
   switch ($route_name) {
     case 'help.page.audit_chain':
       return '<p>' . t('Tamper-evident, hash-chained audit logging. Settings live at <a href=":settings">Configuration → System → Audit Chain</a>. Integrity and keyed-vs-unkeyed status are at <a href=":reports">Reports → Audit Chain</a>.', [
-        ':settings' => '/admin/config/system/audit-chain',
-        ':reports' => '/admin/reports/audit-chain',
+        ':settings' => Url::fromRoute('audit_chain.settings')->toString(),
+        ':reports' => Url::fromRoute('audit_chain.dashboard')->toString(),
       ]) . '</p>';
 
     case 'audit_chain.dashboard':

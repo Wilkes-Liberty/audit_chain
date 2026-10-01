@@ -6,6 +6,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- The dashboard's single "Keyed vs unkeyed" chart no longer fills the
+  page. The chart grid uses fixed-width tracks, the Charts API element
+  sets a 200px height, and canvas and SVG charts are capped at 200px tall.
+
 ## [1.10.6] - 2026-09-30
 
 ### Changed

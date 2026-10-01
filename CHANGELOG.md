@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.10.7] - 2026-10-01
+
 ### Fixed
 - The dashboard's single "Keyed vs unkeyed" chart no longer fills the
   page. The chart grid uses fixed-width tracks, the Charts API element

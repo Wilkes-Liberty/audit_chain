@@ -288,14 +288,12 @@ final class AuditChainDashboardController extends ControllerBase {
    */
   private function buildQuickActions(): array {
     $actions = [];
-    try {
+    $settings = Url::fromRoute('audit_chain.settings');
+    if ($settings->access()) {
       $actions[] = [
         'title' => (string) $this->t('Settings'),
-        'url' => Url::fromRoute('audit_chain.settings')->toString(),
+        'url' => $settings->toString(),
       ];
-    }
-    catch (\Throwable $e) {
-      // Settings route missing would be a broken install; skip the link.
     }
     return $actions;
   }

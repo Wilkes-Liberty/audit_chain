@@ -101,6 +101,37 @@ final class AuditChainChartRendererTest extends KernelTestBase {
     $build = $renderer->render('donut', ['Keyed' => 3], ['title' => 'Keyed vs unkeyed']);
     $this->assertSame('chart', $build['#type']);
     $this->assertSame('pie', $build['#chart_type']);
+    // Charts_chartjs adds its sizing wrapper only when #height or #width is
+    // set. Without one the donut is drawn as wide and as tall as the page.
+    $this->assertSame(AuditChainChartRenderer::CHART_HEIGHT, $build['#height']);
+    $this->assertSame('px', $build['#height_units']);
+    $this->assertSame(100, $build['#width']);
+    $this->assertSame('%', $build['#width_units']);
+  }
+
+  /**
+   * The dashboard stylesheet caps chart width and height.
+   *
+   * The dashboard has one chart. A grid with auto-fit and a 1fr maximum
+   * stretches it across the row, and Chart.js then draws a square canvas.
+   * Kernel tests do not run Chart.js, so the rules are asserted here.
+   */
+  public function testDashboardCssCapsChartSize(): void {
+    $path = \Drupal::service('extension.list.module')->getPath('audit_chain');
+    $css = file_get_contents(DRUPAL_ROOT . '/' . $path . '/css/dashboard.css');
+    if (!is_string($css)) {
+      $this->fail('dashboard.css is not readable.');
+    }
+    $grid = '/\.audit-chain-charts \{[^}]*grid-template-columns:\s*'
+      . 'repeat\(auto-fill,\s*minmax\(280px,\s*400px\)\)/s';
+    $this->assertMatchesRegularExpression($grid, $css);
+
+    $height = preg_quote(AuditChainChartRenderer::CHART_HEIGHT . 'px', '/');
+    $canvas = '/\.audit-chain-chart-cell canvas \{[^}]*max-height:\s*'
+      . $height . '/s';
+    $svg = '/\.audit-chain-chart__svg \{[^}]*max-height:\s*' . $height . '/s';
+    $this->assertMatchesRegularExpression($canvas, $css);
+    $this->assertMatchesRegularExpression($svg, $css);
   }
 
   /**

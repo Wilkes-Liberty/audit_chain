@@ -220,8 +220,11 @@ final class AuditChainDashboardTest extends KernelTestBase {
    * @covers ::dashboard
    */
   public function testReportsOnlyUserDoesNotGetSettingsHref(): void {
-    $account = $this->createUser(['view audit chain reports']);
-    $this->setCurrentUser($account);
+    // setUpCurrentUser() creates uid 1 first so this account is not the
+    // superuser, which would bypass the settings-route access check.
+    $account = $this->setUpCurrentUser([], ['view audit chain reports']);
+    $this->assertGreaterThan(1, (int) $account->id());
+    $this->assertFalse($account->hasPermission('administer site configuration'));
 
     $request = Request::create('/admin/reports/audit-chain');
     $controller = AuditChainDashboardController::create($this->container);
@@ -240,11 +243,12 @@ final class AuditChainDashboardTest extends KernelTestBase {
    * @covers ::dashboard
    */
   public function testSettingsCapableUserGetsSettingsHref(): void {
-    $account = $this->createUser([
+    $account = $this->setUpCurrentUser([], [
       'view audit chain reports',
       'administer site configuration',
     ]);
-    $this->setCurrentUser($account);
+    $this->assertGreaterThan(1, (int) $account->id());
+    $this->assertTrue($account->hasPermission('administer site configuration'));
 
     $request = Request::create('/admin/reports/audit-chain');
     $controller = AuditChainDashboardController::create($this->container);

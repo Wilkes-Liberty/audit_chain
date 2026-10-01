@@ -6,6 +6,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- The reports dashboard Settings quick-action is omitted unless the
+  viewer can administer site configuration. Reports-only users no
+  longer receive an href they cannot open.
+
 ## [1.10.7] - 2026-10-01
 
 ### Fixed

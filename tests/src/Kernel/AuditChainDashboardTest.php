@@ -7,6 +7,7 @@ namespace Drupal\Tests\audit_chain\Kernel;
 use Drupal\audit_chain\Controller\AuditChainDashboardController;
 use Drupal\audit_chain\ScheduledVerifier;
 use Drupal\Core\Session\AnonymousUserSession;
+use Drupal\Core\Url;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\Tests\user\Traits\UserCreationTrait;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -211,6 +212,51 @@ final class AuditChainDashboardTest extends KernelTestBase {
     $definitions = $this->container->get('user.permissions')->getPermissions();
     $this->assertArrayHasKey('view audit chain reports', $definitions);
     $this->assertTrue(!empty($definitions['view audit chain reports']['restrict access']));
+  }
+
+  /**
+   * Reports-only users do not receive a Settings href.
+   *
+   * @covers ::dashboard
+   */
+  public function testReportsOnlyUserDoesNotGetSettingsHref(): void {
+    $account = $this->createUser(['view audit chain reports']);
+    $this->setCurrentUser($account);
+
+    $request = Request::create('/admin/reports/audit-chain');
+    $controller = AuditChainDashboardController::create($this->container);
+    $build = $controller->dashboard($request);
+    $rendered = (string) $this->container->get('renderer')->renderRoot($build);
+
+    $settingsUrl = Url::fromRoute('audit_chain.settings')->toString();
+    $this->assertSame([], $build['#quick_actions']);
+    $this->assertStringNotContainsString('Settings', $rendered);
+    $this->assertStringNotContainsString($settingsUrl, $rendered);
+  }
+
+  /**
+   * Settings-capable users receive the Settings href.
+   *
+   * @covers ::dashboard
+   */
+  public function testSettingsCapableUserGetsSettingsHref(): void {
+    $account = $this->createUser([
+      'view audit chain reports',
+      'administer site configuration',
+    ]);
+    $this->setCurrentUser($account);
+
+    $request = Request::create('/admin/reports/audit-chain');
+    $controller = AuditChainDashboardController::create($this->container);
+    $build = $controller->dashboard($request);
+    $rendered = (string) $this->container->get('renderer')->renderRoot($build);
+    $settingsUrl = Url::fromRoute('audit_chain.settings')->toString();
+
+    $this->assertCount(1, $build['#quick_actions']);
+    $this->assertSame('Settings', $build['#quick_actions'][0]['title']);
+    $this->assertSame($settingsUrl, $build['#quick_actions'][0]['url']);
+    $this->assertStringContainsString('Settings', $rendered);
+    $this->assertStringContainsString($settingsUrl, $rendered);
   }
 
 }

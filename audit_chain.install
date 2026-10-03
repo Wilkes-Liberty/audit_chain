@@ -45,20 +45,21 @@ function audit_chain_requirements(string $phase): array {
   _audit_chain_requirements_seal($requirements);
   _audit_chain_requirements_scheduled_verification($requirements);
 
-  $keyId = (string) (\Drupal::config('audit_chain.settings')->get('hash_key') ?? '');
-  if ($keyId === '') {
+  /** @var \Drupal\audit_chain\AuditChainLoggerInterface $logger */
+  $logger = \Drupal::service('audit_chain.logger');
+  $status = $logger->signingStatus();
+  if ($status['key_id'] === '') {
     // Unkeyed by choice. Documented behaviour, not a fault.
     return $requirements;
   }
 
-  $key = \Drupal::service('key.repository')->getKey($keyId);
-  if ($key !== NULL && (string) $key->getKeyValue() !== '') {
+  if ($status['keyed']) {
     return $requirements;
   }
 
   $requirements['audit_chain_hash_key'] = [
     'title' => t('Audit Chain: signing key unresolvable'),
-    'value' => t("Key '@key' is configured but resolves to nothing", ['@key' => $keyId]),
+    'value' => t("Key '@key' is configured but resolves to nothing", ['@key' => $status['key_id']]),
     'severity' => REQUIREMENT_ERROR,
     'description' => t("Every entry written while this holds is hashed with unkeyed SHA-256, so anyone with database access can edit a row and recompute the chain over it. Entries already written this way cannot be signed retrospectively — fix the Key entity, then run <code>drush audit-chain:verify</code>, which reports rows written unkeyed separately from tampering."),
   ];

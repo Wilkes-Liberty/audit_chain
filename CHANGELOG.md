@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.10.9] - 2026-10-03
+
 ### Changed
 - Scheduled verification and the hash-key status report now use
   `AuditChainLogger::signingStatus()` for key resolution instead of

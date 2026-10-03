@@ -51,7 +51,6 @@ services:
       - '@datetime.time'
       - '@event_dispatcher'
       - '@logger.channel.audit_chain'
-      - '@key.repository'
       - '@audit_chain.recovery'
 
   audit_chain.evidence_exporter:

@@ -1263,6 +1263,32 @@ final class AuditChainLoggerTest extends KernelTestBase {
   }
 
   /**
+   * A configured-but-missing key is an ERROR; empty hash_key is not.
+   */
+  public function testConfiguredMissingKeyIsRequirementsError(): void {
+    $this->container->get('module_handler')->loadInclude('audit_chain', 'install');
+
+    $requirements = audit_chain_requirements('runtime');
+    $this->assertArrayNotHasKey(
+      'audit_chain_hash_key',
+      $requirements,
+      'Empty hash_key is unkeyed by choice and adds no hash-key requirement.',
+    );
+
+    $this->config('audit_chain.settings')->set('hash_key', 'missing_key')->save();
+    $requirements = audit_chain_requirements('runtime');
+    $this->assertArrayHasKey('audit_chain_hash_key', $requirements);
+    $this->assertSame(
+      REQUIREMENT_ERROR,
+      $requirements['audit_chain_hash_key']['severity'],
+    );
+    $this->assertStringContainsString(
+      'missing_key',
+      (string) $requirements['audit_chain_hash_key']['value'],
+    );
+  }
+
+  /**
    * Keyed append refuses when unsigned (#25).
    */
   public function testKeyedAppendRequiresResolvableSigningKey(): void {

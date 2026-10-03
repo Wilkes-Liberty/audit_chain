@@ -1265,7 +1265,7 @@ final class AuditChainLoggerTest extends KernelTestBase {
   /**
    * A configured-but-missing key is an ERROR; empty hash_key is not.
    */
-  public function testConfiguredMissingKeyIsARequirementsError(): void {
+  public function testConfiguredMissingKeyIsRequirementsError(): void {
     $this->container->get('module_handler')->loadInclude('audit_chain', 'install');
 
     $requirements = audit_chain_requirements('runtime');

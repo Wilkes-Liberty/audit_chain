@@ -310,6 +310,48 @@ function audit_chain_update_10005(): string {
 }
 
 /**
+ * Adds witness client settings without contacting a witness or changing rows.
+ */
+function audit_chain_update_10006(): string {
+  $config = \Drupal::configFactory()->getEditable('audit_chain.settings');
+  $defaults = [
+    'witness_opentimestamps' => [
+      'calendars' => [
+        'https://a.pool.opentimestamps.org',
+        'https://b.pool.opentimestamps.org',
+      ],
+      'upgrade_allowlist' => [
+        'https://a.pool.opentimestamps.org',
+        'https://b.pool.opentimestamps.org',
+        'https://alice.btc.calendar.opentimestamps.org',
+        'https://bob.btc.calendar.opentimestamps.org',
+        'https://finney.calendar.eternitywall.com',
+      ],
+      'header_url' => 'https://blockstream.info/api',
+      'min_depth' => 6,
+    ],
+    'witness_xrpl' => [
+      'relay_url' => '',
+      'read_url' => '',
+      'network' => '',
+      'sink_address' => '',
+      'witness_account' => '',
+    ],
+  ];
+  $changed = FALSE;
+  foreach ($defaults as $key => $value) {
+    if ($config->get($key) === NULL) {
+      $config->set($key, $value);
+      $changed = TRUE;
+    }
+  }
+  if ($changed) {
+    $config->save();
+  }
+  return 'Added inactive witness client settings. No witness was contacted and no audit row changed.';
+}
+
+/**
  * Implements hook_install().
  */
 function audit_chain_install(): void {

@@ -6,6 +6,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Optional OpenTimestamps and XRPL witness clients for a persisted
+  checkpoint digest. Both are inactive until `witness_backend` names one
+  of them. OpenTimestamps confirmation requires a checked Bitcoin header.
+  The XRPL client holds no seed, refuses mainnet, and confirms only from
+  a separate validated read. Receipts stay off the audit chain.
+
 ## [1.10.9] - 2026-10-03
 
 ### Changed

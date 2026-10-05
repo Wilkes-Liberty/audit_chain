@@ -194,11 +194,15 @@ The v1 canonicalization and offline verification recipe are fixed in
 field order, Merkle rule, domain separators, or digest algorithm requires a new
 contract version.
 
-`WitnessBackendInterface` is a digest-only seam for later backends. The shipped
-NoOp backend performs no network request, leaves receipts pending, and always
-fails verification with `backend_not_configured`. Witness operations never add
-rows to the audit chain. No timestamp-authority, OpenTimestamps, Bitcoin, XRPL,
-or wallet backend ships in 1.10.
+`WitnessBackendInterface` is a digest-only seam. The shipped NoOp backend
+performs no network request, leaves receipts pending, and always fails
+verification with `backend_not_configured`. Witness operations never add rows
+to the audit chain. No timestamp authority or wallet ships in this module.
+
+An OpenTimestamps client and an XRPL receipt client can be selected explicitly.
+Neither runs while `witness_backend` is empty. The XRPL client does not hold a
+seed and does not submit a mainnet transaction. See
+[docs/WITNESS.md](docs/WITNESS.md).
 
 ### Rotating the signing key
 

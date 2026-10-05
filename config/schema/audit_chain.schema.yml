@@ -35,3 +35,44 @@ audit_chain.settings:
     witness_backend:
       type: string
       label: 'Witness backend service identifier (empty = fail-closed NoOp backend)'
+    witness_opentimestamps:
+      type: mapping
+      label: 'OpenTimestamps witness'
+      mapping:
+        calendars:
+          type: sequence
+          label: 'Calendar submit URLs'
+          sequence:
+            type: string
+            label: 'Calendar URL'
+        upgrade_allowlist:
+          type: sequence
+          label: 'Calendar origins accepted inside proofs'
+          sequence:
+            type: string
+            label: 'Calendar origin'
+        header_url:
+          type: string
+          label: 'Bitcoin header API base URL'
+        min_depth:
+          type: integer
+          label: 'Minimum Bitcoin confirmations before a receipt is final'
+    witness_xrpl:
+      type: mapping
+      label: 'XRPL witness client'
+      mapping:
+        relay_url:
+          type: string
+          label: 'Witness relay URL'
+        read_url:
+          type: string
+          label: 'Read-only transaction URL'
+        network:
+          type: string
+          label: 'XRPL network (testnet or devnet)'
+        sink_address:
+          type: string
+          label: 'Dedicated witness sink account'
+        witness_account:
+          type: string
+          label: 'Dedicated witness account'

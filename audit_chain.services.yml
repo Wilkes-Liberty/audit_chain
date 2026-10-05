@@ -70,12 +70,46 @@ services:
       - '@audit_chain.recovery'
       - '@datetime.time'
 
+  audit_chain.witness_transport:
+    class: Drupal\audit_chain\Witness\GuzzleWitnessTransport
+    arguments:
+      - '@http_client'
+
+  audit_chain.witness_dns:
+    class: Drupal\audit_chain\Witness\PhpWitnessDnsResolver
+
   audit_chain.witness_backend.null:
     class: Drupal\audit_chain\NullWitnessBackend
     arguments:
       - '@uuid'
     tags:
       - { name: audit_chain.witness_backend }
+
+  audit_chain.witness_backend.opentimestamps:
+    class: Drupal\audit_chain\OpenTimestampsWitnessBackend
+    arguments:
+      - '@config.factory'
+      - '@audit_chain.witness_transport'
+      - '@audit_chain.witness_dns'
+      - '@uuid'
+    tags:
+      - { name: audit_chain.witness_backend }
+
+  audit_chain.witness_backend.xrpl:
+    class: Drupal\audit_chain\XrplWitnessBackend
+    arguments:
+      - '@config.factory'
+      - '@audit_chain.witness_transport'
+      - '@audit_chain.witness_dns'
+      - '@uuid'
+      - '@settings'
+    tags:
+      - { name: audit_chain.witness_backend }
+
+  audit_chain.witness_operator:
+    class: Drupal\audit_chain\WitnessOperator
+    arguments:
+      - '@audit_chain.witness_manager'
 
   audit_chain.witness_manager:
     class: Drupal\audit_chain\WitnessManager

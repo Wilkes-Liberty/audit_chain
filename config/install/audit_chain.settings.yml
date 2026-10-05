@@ -8,3 +8,21 @@ export_enabled: false
 export_destination: ''
 export_channel: ''
 witness_backend: ''
+witness_opentimestamps:
+  calendars:
+    - 'https://a.pool.opentimestamps.org'
+    - 'https://b.pool.opentimestamps.org'
+  upgrade_allowlist:
+    - 'https://a.pool.opentimestamps.org'
+    - 'https://b.pool.opentimestamps.org'
+    - 'https://alice.btc.calendar.opentimestamps.org'
+    - 'https://bob.btc.calendar.opentimestamps.org'
+    - 'https://finney.calendar.eternitywall.com'
+  header_url: 'https://blockstream.info/api'
+  min_depth: 6
+witness_xrpl:
+  relay_url: ''
+  read_url: ''
+  network: ''
+  sink_address: ''
+  witness_account: ''

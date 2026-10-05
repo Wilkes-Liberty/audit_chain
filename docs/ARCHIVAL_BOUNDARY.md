@@ -149,10 +149,22 @@ in `audit_chain.settings:witness_backend`.
 The shipped `null` backend remains pending and always returns the fail-closed
 `backend_not_configured` verdict. It performs no network request. Witness
 submission, upgrade, and verification do not call `log()` or `logKeyed()` and
-therefore do not add row-level witness events to the global chain.
+therefore do not add row-level witness events to the global chain. An empty
+`witness_backend` setting keeps this backend. Naming a backend that is not
+registered fails closed instead of silently selecting `null`.
 
-A future witness can prove that a checkpoint digest existed before some time
-recognized by the verifier. It does not prove authorship, legal time by itself,
-or that the live Drupal table is the archive. A public chain, if a future
-backend uses one, is a witness transport rather than the Audit Chain ledger.
-No wallet belongs in this module.
+`opentimestamps` posts the 32-byte digest to a calendar and stores a detached
+proof. It is confirmed only after the Bitcoin branch checks against a block
+header in the best chain at the configured depth. `xrpl` stores a separate
+receipt for the same digest. Its relay sees the digest and a request id, not
+the audit rows. A relay acknowledgement is not confirmation. One confirmed
+receipt does not confirm the other. See [WITNESS.md](WITNESS.md).
+
+A witness can show that a checkpoint digest was presented to that witness.
+It does not prove authorship, legal time, or that the live Drupal table is the
+archive. It does not accept work or authorize settlement. An application that
+needs a verifiable association writes the versioned agreement or statement
+through the normal audit log. The checkpoint commits to that row, and each
+witness receipt commits to the checkpoint digest. The receipt has no agreement
+identifier. A correction is a new audit-log version. No wallet belongs in this
+module.

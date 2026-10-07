@@ -12,6 +12,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   live row fails as `chain_rewound` (#3627532). A witness that cannot be
   read is reported separately and does not by itself fail the hash-chain
   result. OpenTimestamps cannot rediscover a proof lost with the database.
+- A known gap can be recorded with `drush audit-chain:record-gap` after
+  `audit-chain:gap-prepare`, including when a recovery segment already
+  exists. The dashboard lists it as a documented exception.
+  `audit-chain:gap-check` checks an archived branch file. The surviving
+  chain is not rewritten (#3627534).
 
 ## [1.11.0] - 2026-10-05
 

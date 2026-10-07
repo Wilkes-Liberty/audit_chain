@@ -167,9 +167,10 @@ same:
   state.
 - **Data-minimized.** Exported rows carry identifiers and the hash-chain
   columns only — `metadata`, IP addresses, user agents and entity labels never
-  leave the system. The trade is deliberate: the off-system copy cannot
-  recompute `row_hash` (the canonical payload includes metadata), so chain
-  verification stays an on-system duty.
+  leave the system. A recorded chain gap adds a `gap` object of ids and
+  hashes on that row only. It is not the metadata column. The trade is
+  deliberate: the off-system copy cannot recompute `row_hash` (the canonical
+  payload includes metadata), so chain verification stays an on-system duty.
 - **Verification-gated.** While the last scheduled verification is failing,
   export refuses rather than presenting unverified rows as evidence. Resolve
   the integrity failure first.
@@ -323,8 +324,9 @@ though verification never changes the chain.
 
 Not available as tools, by design:
 
-- Sealing a prefix, preparing or activating recovery, re-encryption and
-  pruning. Each is permanent and is built around a person confirming it.
+- Sealing a prefix, preparing or activating recovery, recording a known
+  chain gap, re-encryption and pruning. Each is permanent and is built
+  around a person confirming it.
 - Export to a destination the caller supplies. That would send evidence
   wherever an agent names.
 - Writing a log entry. An agent must not be able to forge evidence.
@@ -412,6 +414,19 @@ confirmed proof that is still stored. A proof lost with the database cannot
 be rediscovered. The mark is the latest confirmed checkpoint's head. Rows
 appended after that checkpoint are outside it. See
 [docs/WITNESS.md](docs/WITNESS.md).
+
+### Recording a known gap
+
+A later loss can be named without opening a second recovery segment.
+`drush audit-chain:gap-prepare` reviews a statement.
+`drush audit-chain:record-gap` appends one keyed `chain_gap_recorded` row
+after confirmation. It does not rewrite rows. The command is allowed when
+the surviving chain verifies, and when a recovery segment exists and that
+segment verifies. Whole-history verification stays successful when the
+surviving chain still links. The dashboard lists the gap as a documented
+exception. `drush audit-chain:gap-check` checks an archived branch file, its
+manifest, and the source dump against that row. It proves the files still
+match. It does not restore rows.
 
 ## What it does not do
 

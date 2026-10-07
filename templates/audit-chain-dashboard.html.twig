@@ -11,6 +11,7 @@
  * - quick_actions: a list of quick-action links (title, url).
  * - window: the active time window key.
  * - windows: window-toggle links (key, label, url, active).
+ * - gaps: recorded chain gaps (row_id, readable, fork_id, lost range, count).
  */
 #}
 <div class="audit-chain-dashboard">
@@ -58,6 +59,27 @@
         {% if recovery.segment_id %}{{ recovery.segment_id }}{% endif %}
       </span>
     </div>
+  {% endif %}
+
+  {% if gaps %}
+    {% for gap in gaps %}
+      <div class="audit-chain-card audit-chain-card--warn">
+        <span class="audit-chain-card__label">{{ 'Recorded gap'|t }}</span>
+        <span class="audit-chain-card__detail">
+          {% if gap.readable %}
+            {{ 'Documented exception at row @row. Fork @fork. Lost rows @from through @through (@count). The surviving chain was not rewritten.'|t({
+              '@row': gap.row_id,
+              '@fork': gap.fork_id,
+              '@from': gap.lost_from_id,
+              '@through': gap.lost_through_id,
+              '@count': gap.lost_count
+            }) }}
+          {% else %}
+            {{ 'A recorded gap at row @row could not be read.'|t({'@row': gap.row_id}) }}
+          {% endif %}
+        </span>
+      </div>
+    {% endfor %}
   {% endif %}
 
   {% if quick_actions %}

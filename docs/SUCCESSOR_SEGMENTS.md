@@ -125,6 +125,10 @@ silent no-op, an unverified archive, a direct SQL delete, or a new prefix seal.
 
 Only one recovery segment is supported in this first implementation. Another
 failure is a new incident requiring review, not permission to roll over again.
+A later known gap is recorded with `drush audit-chain:gap-prepare`,
+`drush audit-chain:record-gap`, and checked with `drush audit-chain:gap-check`.
+Those commands append one keyed row and compare files the operator still
+holds. They do not create a second recovery segment.
 The recovery API is not exposed through web routes or MCP. Drush access is
 privileged host access; secure it accordingly.
 

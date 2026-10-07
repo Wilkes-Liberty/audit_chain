@@ -16,7 +16,8 @@ use Symfony\Component\HttpFoundation\Request;
 /**
  * Renders the Audit Chain reports dashboard.
  *
- * Does not decrypt metadata, list rows, chart volume, or re-verify the chain.
+ * Lists a recorded gap's fork and lost range. Does not decrypt other
+ * metadata, list ordinary rows, chart volume, or re-verify the chain.
  */
 final class AuditChainDashboardController extends ControllerBase {
 
@@ -72,6 +73,7 @@ final class AuditChainDashboardController extends ControllerBase {
       '#theme' => 'audit_chain_dashboard',
       '#chain' => $this->widget('chain', fn() => $this->buildChain(), []),
       '#recovery' => $this->widget('recovery', fn() => $this->metrics->recoveryStatus(), NULL),
+      '#gaps' => $this->widget('gaps', fn() => $this->metrics->recordedGaps(), []),
       '#tiles' => $this->widget('tiles', fn() => $this->buildTiles($window), []),
       '#charts' => $this->widget('charts', fn() => $this->buildCharts($window), []),
       '#quick_actions' => $this->widget('quick_actions', fn() => $this->buildQuickActions(), []),

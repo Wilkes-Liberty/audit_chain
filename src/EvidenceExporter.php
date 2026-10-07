@@ -22,11 +22,14 @@ use Psr\Log\LoggerInterface;
  *
  * Data minimization: exported rows carry identifiers and the hash-chain
  * columns, never content — `metadata`, `ip_address`, `user_agent`, and
- * `entity_label` stay on-system. The consequence is deliberate: the off-system
- * copy cannot re-derive `row_hash` (the canonical payload includes metadata),
- * so chain verification remains an on-system duty — which is why export is
- * gated on the scheduled verification: while the last recorded run is failing,
- * export refuses rather than presenting unverified rows as evidence.
+ * `entity_label` stay on-system. A chain_gap_recorded row adds a `gap` object
+ * of ids and hashes. That object is not the metadata column, and it is absent
+ * on every other row, so contract_version stays 1. The consequence is
+ * deliberate: the off-system copy cannot re-derive `row_hash` (the canonical
+ * payload includes metadata), so chain verification remains an on-system
+ * duty — which is why export is gated on the scheduled verification: while
+ * the last recorded run is failing, export refuses rather than presenting
+ * unverified rows as evidence.
  *
  * Delivery is at-least-once. The per-destination checkpoint (a state entry
  * keyed on the destination) advances only after a delivery succeeds, so an
@@ -69,12 +72,20 @@ final class EvidenceExporter {
    */
   public const REASON_ENCODING_FAILED = 'encoding_failed';
 
+  /**
+   * Failure reason: a recorded gap could not be included.
+   *
+   * Export stops before delivery. The checkpoint does not advance.
+   */
+  public const REASON_GAP_UNREADABLE = 'gap_unreadable';
+
   public function __construct(
     private readonly Connection $database,
     private readonly StateInterface $state,
     private readonly TimeInterface $time,
     private readonly ClientInterface $httpClient,
     private readonly LoggerInterface $logger,
+    private readonly ?ChainGap $gaps = NULL,
   ) {}
 
   /**
@@ -169,21 +180,35 @@ final class EvidenceExporter {
       // The throw is defensive: exported columns are machine data, but a
       // storage backend that admits invalid UTF-8 could still poison one row,
       // and that must fail the run with a structured reason — not fatal cron.
+      $row = [
+        'contract_version' => self::CONTRACT_VERSION,
+        'id' => (int) $record->id,
+        'channel' => (string) $record->channel,
+        'operation' => (string) $record->operation,
+        'timestamp' => (int) $record->timestamp,
+        'uid' => (int) $record->uid,
+        'entity_type' => $record->entity_type,
+        'bundle' => $record->bundle,
+        'entity_id' => $record->entity_id,
+        'prev_hash' => $record->prev_hash,
+        'row_hash' => $record->row_hash,
+        'key_id' => $record->key_id,
+      ];
+      if ((string) $record->operation === ChainGap::OPERATION) {
+        $gap = $this->exportedGap((int) $record->id);
+        if ($gap === NULL) {
+          return [
+            'ok' => FALSE,
+            'delivered' => 0,
+            'last_id' => NULL,
+            'remaining' => $this->remainingAfter($checkpointId, $channel),
+            'reason' => self::REASON_GAP_UNREADABLE,
+          ];
+        }
+        $row['gap'] = $gap;
+      }
       try {
-        $payload .= json_encode([
-          'contract_version' => self::CONTRACT_VERSION,
-          'id' => (int) $record->id,
-          'channel' => (string) $record->channel,
-          'operation' => (string) $record->operation,
-          'timestamp' => (int) $record->timestamp,
-          'uid' => (int) $record->uid,
-          'entity_type' => $record->entity_type,
-          'bundle' => $record->bundle,
-          'entity_id' => $record->entity_id,
-          'prev_hash' => $record->prev_hash,
-          'row_hash' => $record->row_hash,
-          'key_id' => $record->key_id,
-        ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n";
+        $payload .= json_encode($row, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES) . "\n";
       }
       catch (\JsonException $e) {
         $this->logger->error('Evidence export aborted: row @id could not be JSON-encoded (@message). The checkpoint is unchanged.', [
@@ -276,6 +301,37 @@ final class EvidenceExporter {
       'time' => $time,
       'remaining' => $this->remainingAfter($lastId, $channel),
     ];
+  }
+
+  /**
+   * Reads the canonical gap object for one chain_gap_recorded row.
+   *
+   * A missing reader or an undecodable row fails the export closed. The
+   * caller has not delivered the batch, so the destination file is absent
+   * and the checkpoint stays put.
+   *
+   * @param int $rowId
+   *   Chain row id.
+   *
+   * @return array<string, int|string>|null
+   *   Canonical gap fields, or NULL when the row cannot be included.
+   */
+  private function exportedGap(int $rowId): ?array {
+    if ($this->gaps === NULL) {
+      $this->logger->error('Evidence export aborted: gap row @id has no gap reader. The checkpoint is unchanged.', [
+        '@id' => $rowId,
+      ]);
+      return NULL;
+    }
+    try {
+      return $this->gaps->exportFields($rowId);
+    }
+    catch (\RuntimeException) {
+      $this->logger->error('Evidence export aborted: gap row @id could not be read. The checkpoint is unchanged.', [
+        '@id' => $rowId,
+      ]);
+      return NULL;
+    }
   }
 
   /**

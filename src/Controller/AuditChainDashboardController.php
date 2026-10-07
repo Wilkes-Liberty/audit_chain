@@ -130,6 +130,14 @@ final class AuditChainDashboardController extends ControllerBase {
         ]),
       ],
       'historical_exception' => $this->historicalExceptionCard($when),
+      'chain_rewound' => $this->rewoundCard($when),
+      'witness_unreachable' => [
+        'state' => 'warn',
+        'label' => (string) $this->t('Rewind check unavailable'),
+        'detail' => (string) $this->t('The configured witness could not be read at @when, so this run does not show whether a database restore rewound the chain.', [
+          '@when' => $when,
+        ]),
+      ],
       'overdue' => [
         'state' => 'warn',
         'label' => (string) $this->t('Overdue'),
@@ -153,6 +161,33 @@ final class AuditChainDashboardController extends ControllerBase {
         ]),
       ],
     };
+  }
+
+  /**
+   * Builds the card for a witness the live chain no longer contains.
+   *
+   * @param string $when
+   *   Formatted last-run time, or the dashboard placeholder.
+   *
+   * @return array{state: string, label: string, detail: string}
+   *   The chain card.
+   */
+  private function rewoundCard(string $when): array {
+    $rewind = $this->metrics->rewindAssessment() ?? [];
+    $through = is_numeric($rewind['through_id'] ?? NULL) ? (int) $rewind['through_id'] : NULL;
+    $detail = $through === NULL
+      ? $this->t('A confirmed witness is not in this database. A database restore can rewind the chain without breaking its hashes. Last scheduled verification @when. The chain was not modified by the check.', [
+        '@when' => $when,
+      ])
+      : $this->t('The witnessed head at row @id is not the live row. A database restore can rewind the chain without breaking its hashes. Last scheduled verification @when. The chain was not modified by the check.', [
+        '@id' => $through,
+        '@when' => $when,
+      ]);
+    return [
+      'state' => 'crit',
+      'label' => (string) $this->t('Chain rewound'),
+      'detail' => (string) $detail,
+    ];
   }
 
   /**

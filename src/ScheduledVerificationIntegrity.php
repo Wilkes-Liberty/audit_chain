@@ -46,6 +46,17 @@ final class ScheduledVerificationIntegrity {
 
     $ok = (bool) ($run['ok'] ?? FALSE);
     $reason = (string) ($run['reason'] ?? '');
+    $rewind = is_array($run['rewind'] ?? NULL) ? $run['rewind'] : [];
+
+    // A restore can leave a chain that still verifies. The witness mismatch
+    // is its own failure and is not softened into another warning.
+    if (($rewind['status'] ?? '') === RewindDetector::STATUS_REWOUND) {
+      return [
+        'status' => 'crit',
+        'reason' => RewindDetector::REASON_REWOUND,
+        'time' => $time,
+      ];
+    }
 
     if (!$ok && $reason === AuditChainLogger::REASON_SEAL_FOREIGN) {
       return [
@@ -81,6 +92,14 @@ final class ScheduledVerificationIntegrity {
       return [
         'status' => 'crit',
         'reason' => 'failed',
+        'time' => $time,
+      ];
+    }
+
+    if (($rewind['status'] ?? '') === RewindDetector::STATUS_UNCHECKED) {
+      return [
+        'status' => 'warn',
+        'reason' => RewindDetector::REASON_UNREACHABLE,
         'time' => $time,
       ];
     }

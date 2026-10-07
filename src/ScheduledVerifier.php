@@ -46,6 +46,7 @@ final class ScheduledVerifier {
     private readonly EventDispatcherInterface $eventDispatcher,
     private readonly LoggerInterface $logger,
     private readonly ?RecoverySegments $recovery = NULL,
+    private readonly ?RewindDetector $rewind = NULL,
   ) {}
 
   /**
@@ -114,6 +115,13 @@ final class ScheduledVerifier {
 
     // Never substitute successor health for the whole-history verdict.
     $run['successor'] = $this->recovery?->currentStatus();
+    // A confirmed witness lives outside the database. Compare it before the
+    // run is recorded so a restore cannot look like a pass.
+    $run['rewind'] = $this->assessRewind();
+    if ($run['rewind']['status'] === RewindDetector::STATUS_REWOUND) {
+      $run['ok'] = FALSE;
+      $run['reason'] = RewindDetector::REASON_REWOUND;
+    }
     $this->state->set(self::STATE_KEY, $run);
     if ($run['successor'] !== NULL && !$run['successor']['segment_ok']) {
       $this->logger->error(
@@ -155,6 +163,34 @@ final class ScheduledVerifier {
     }
 
     return $run;
+  }
+
+  /**
+   * Reads the configured witness without letting a transport failure escape.
+   *
+   * @return array{status: string, reason: string, digest: string|null, through_id: int|null}
+   *   The rewind assessment. A missing detector is treated as not configured.
+   */
+  private function assessRewind(): array {
+    if ($this->rewind === NULL) {
+      return [
+        'status' => RewindDetector::STATUS_NOT_CONFIGURED,
+        'reason' => 'witness_not_configured',
+        'digest' => NULL,
+        'through_id' => NULL,
+      ];
+    }
+    try {
+      return $this->rewind->assess();
+    }
+    catch (\Throwable) {
+      return [
+        'status' => RewindDetector::STATUS_UNCHECKED,
+        'reason' => RewindDetector::REASON_UNREACHABLE,
+        'digest' => NULL,
+        'through_id' => NULL,
+      ];
+    }
   }
 
   /**

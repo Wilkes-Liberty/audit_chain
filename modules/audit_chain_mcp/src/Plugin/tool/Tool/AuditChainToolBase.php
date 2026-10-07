@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\audit_chain_mcp\Plugin\tool\Tool;
 
 use Drupal\audit_chain\AuditChainLogger;
+use Drupal\audit_chain\RewindDetector;
 use Drupal\audit_chain\ScheduledVerifier;
 use Drupal\Core\Access\AccessResult;
 use Drupal\Core\Access\AccessResultInterface;
@@ -46,6 +47,7 @@ abstract class AuditChainToolBase extends McpGovernedToolBase {
     AuditChainLogger::REASON_SEAL_BROKEN,
     AuditChainLogger::REASON_SEAL_FOREIGN,
     ScheduledVerifier::REASON_KEY_REQUIRED,
+    RewindDetector::REASON_REWOUND,
   ];
 
   /**

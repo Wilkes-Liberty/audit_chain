@@ -6,6 +6,7 @@ namespace Drupal\Tests\audit_chain\Kernel;
 
 use Drupal\audit_chain\AuditChainLogger;
 use Drupal\audit_chain\AuditChainMetrics;
+use Drupal\audit_chain\RewindDetector;
 use Drupal\audit_chain\ScheduledVerificationIntegrity;
 use Drupal\audit_chain\ScheduledVerifier;
 use Drupal\KernelTests\KernelTestBase;
@@ -169,6 +170,28 @@ final class ScheduledVerificationIntegrityTest extends KernelTestBase {
         'warn',
       ],
       [$passing, 3600, 'passing', 'ok'],
+      [
+        [
+          'time' => $now,
+          'ok' => FALSE,
+          'reason' => RewindDetector::REASON_REWOUND,
+          'rewind' => ['status' => RewindDetector::STATUS_REWOUND],
+        ],
+        3600,
+        'chain_rewound',
+        'crit',
+      ],
+      [
+        [
+          'time' => $now - 60,
+          'ok' => TRUE,
+          'reason' => NULL,
+          'rewind' => ['status' => RewindDetector::STATUS_UNCHECKED],
+        ],
+        3600,
+        'witness_unreachable',
+        'warn',
+      ],
     ];
 
     foreach ($cases as $case) {
@@ -268,6 +291,26 @@ final class ScheduledVerificationIntegrityTest extends KernelTestBase {
           'time' => $now,
           'ok' => TRUE,
           'reason' => NULL,
+        ],
+      ],
+      [
+        'interval' => 3600,
+        'require_keyed' => FALSE,
+        'run' => [
+          'time' => $now,
+          'ok' => FALSE,
+          'reason' => RewindDetector::REASON_REWOUND,
+          'rewind' => ['status' => RewindDetector::STATUS_REWOUND],
+        ],
+      ],
+      [
+        'interval' => 3600,
+        'require_keyed' => FALSE,
+        'run' => [
+          'time' => $now,
+          'ok' => TRUE,
+          'reason' => NULL,
+          'rewind' => ['status' => RewindDetector::STATUS_UNCHECKED],
         ],
       ],
     ];

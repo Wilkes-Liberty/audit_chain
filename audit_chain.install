@@ -421,9 +421,12 @@ function audit_chain_update_10002(): string {
  * successor or segment_ok=false stays an ERROR. A foreign seal is a WARNING:
  * it remains unverified, but its copied prefix hashes have not changed. A
  * schedule that has gone quiet (no run within twice its interval) is a
- * WARNING — silence is not health. Requiring keyed verification while never
- * scheduling it is also a WARNING: the assurance profile is only as strong as
- * its cadence.
+ * WARNING — silence is not health. A confirmed witness the live chain no
+ * longer contains is an ERROR (`chain_rewound`): a database restore can leave
+ * the hashes consistent. A witness that cannot be read is a WARNING and does
+ * not by itself fail the hash-chain result. Requiring keyed verification
+ * while never scheduling it is also a WARNING: the assurance profile is only
+ * as strong as its cadence.
  *
  * @param array $requirements
  *   The requirements array, added to by reference.
@@ -455,6 +458,8 @@ function _audit_chain_requirements_scheduled_verification(array &$requirements):
     'failed',
     'overdue',
     'passing',
+    'chain_rewound',
+    'witness_unreachable',
   ], TRUE)
     ? \Drupal::service('date.formatter')->format((int) ($classified['time'] ?? 0))
     : NULL;
@@ -502,6 +507,22 @@ function _audit_chain_requirements_scheduled_verification(array &$requirements):
       ]),
       'severity' => $severity,
       'description' => t('The last scheduled verification did not pass. The chain was not modified by the check; investigate the reported reason with <code>drush audit-chain:verify</code> before trusting new entries.'),
+    ],
+    'chain_rewound' => [
+      'title' => $title,
+      'value' => t('CHAIN REWOUND (last run @time)', [
+        '@time' => $when,
+      ]),
+      'severity' => $severity,
+      'description' => t('A confirmed witness is no longer present in the live chain. A database restore can rewind the chain without breaking its hashes. The chain was not modified by the check. Investigate before trusting new entries.'),
+    ],
+    'witness_unreachable' => [
+      'title' => $title,
+      'value' => t('Rewind check unavailable (last run @time)', [
+        '@time' => $when,
+      ]),
+      'severity' => $severity,
+      'description' => t('The configured witness could not be read, so this run does not show whether a database restore rewound the chain. The hash-chain result is recorded separately.'),
     ],
     'overdue' => [
       'title' => $title,

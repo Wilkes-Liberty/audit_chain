@@ -180,7 +180,7 @@ final class ChainGap {
    */
   public function exportFields(int $rowId): array {
     $row = $this->gapRow($rowId);
-    if ($row === NULL || (string) $row->operation !== self::OPERATION) {
+    if ($row === NULL || !$this->isGapIdentity($row)) {
       throw new \RuntimeException('gap_unreadable');
     }
     try {
@@ -242,6 +242,10 @@ final class ChainGap {
       || $rows[0]['id'] !== $loaded['lost_from_id']
       || $rows[array_key_last($rows)]['id'] !== $loaded['lost_through_id']) {
       return ['ok' => FALSE, 'reason' => self::REASON_RANGE_MISMATCH];
+    }
+    // The surviving row cannot also be the first row of the lost branch.
+    if (hash_equals($loaded['first_live_row_hash'], $rows[0]['row_hash'])) {
+      return ['ok' => FALSE, 'reason' => self::REASON_LINKAGE_BROKEN];
     }
     $prev = $loaded['fork_row_hash'];
     $lastId = $loaded['fork_id'];
@@ -343,15 +347,21 @@ final class ChainGap {
   private function assertRecordable(array $gap): void {
     $status = $this->recovery->currentStatus();
     if ($status !== NULL) {
-      if (empty($status['segment_ok'])) {
+      $segmentId = $status['segment_id'] ?? NULL;
+      if (empty($status['segment_ok']) || !is_string($segmentId) || $segmentId === '') {
         throw new \RuntimeException('The recovery segment does not verify.');
       }
+      $this->recovery->assertSurvivingAnchor(
+        $segmentId,
+        (int) $gap['fork_id'],
+        (string) $gap['fork_row_hash'],
+        (string) $gap['first_live_row_hash'],
+      );
+      return;
     }
-    else {
-      $verdict = $this->chain->verify();
-      if (empty($verdict['ok'])) {
-        throw new \RuntimeException('The chain does not verify.');
-      }
+    $verdict = $this->chain->verify();
+    if (empty($verdict['ok'])) {
+      throw new \RuntimeException('The chain does not verify.');
     }
     $fork = $this->database->select('audit_chain_log', 'l')
       ->fields('l', ['row_hash'])
@@ -362,13 +372,20 @@ final class ChainGap {
       throw new \RuntimeException('The fork row is not the live row at that id.');
     }
     $live = $this->database->select('audit_chain_log', 'l')
-      ->fields('l', ['row_hash'])
+      ->fields('l', ['prev_hash', 'row_hash'])
       ->condition('id', $gap['fork_id'], '>')
       ->orderBy('id')
       ->range(0, 1)
       ->execute()
-      ->fetchField();
-    if (!is_string($live) || !hash_equals($gap['first_live_row_hash'], $live)) {
+      ->fetchAssoc();
+    $forkHash = (string) $gap['fork_row_hash'];
+    $liveHash = (string) $gap['first_live_row_hash'];
+    if (!is_array($live)
+      || !is_string($live['prev_hash'])
+      || !is_string($live['row_hash'])
+      || strlen($live['prev_hash']) !== strlen($forkHash)
+      || !hash_equals($forkHash, $live['prev_hash'])
+      || !hash_equals($liveHash, $live['row_hash'])) {
       throw new \RuntimeException('The first live row after the fork does not match.');
     }
   }
@@ -384,7 +401,7 @@ final class ChainGap {
    */
   private function loadCanonical(int $rowId): array {
     $row = $this->gapRow($rowId);
-    if ($row === NULL || (string) $row->operation !== self::OPERATION) {
+    if ($row === NULL || !$this->isGapIdentity($row)) {
       throw new \RuntimeException(self::REASON_GAP_MISSING);
     }
     try {
@@ -426,8 +443,8 @@ final class ChainGap {
       try {
         $gap = $this->canonicalFromStored((string) ($row->metadata ?? ''), (string) ($row->encryption_profile ?? ''));
       }
-      catch (\Throwable) {
-        continue;
+      catch (\Throwable $exception) {
+        throw new \RuntimeException('A recorded gap could not be read.', 0, $exception);
       }
       if ($gap['gap_id'] !== $gapId) {
         continue;
@@ -471,11 +488,22 @@ final class ChainGap {
    */
   private function gapRow(int $rowId): ?object {
     $row = $this->database->select('audit_chain_log', 'l')
-      ->fields('l', ['id', 'operation', 'metadata', 'encryption_profile'])
+      ->fields('l', ['id', 'channel', 'operation', 'metadata', 'encryption_profile'])
       ->condition('id', $rowId)
       ->execute()
       ->fetch();
     return $row === FALSE ? NULL : $row;
+  }
+
+  /**
+   * Whether a row is an audit-chain gap record.
+   *
+   * Channel and operation together are the identity. Another channel may
+   * reuse the operation name.
+   */
+  private function isGapIdentity(object $row): bool {
+    return (string) ($row->channel ?? '') === self::CHANNEL
+      && (string) ($row->operation ?? '') === self::OPERATION;
   }
 
   /**

@@ -167,8 +167,9 @@ same:
   state.
 - **Data-minimized.** Exported rows carry identifiers and the hash-chain
   columns only — `metadata`, IP addresses, user agents and entity labels never
-  leave the system. A recorded chain gap adds a `gap` object of ids and
-  hashes on that row only. It is not the metadata column. The trade is
+  leave the system. A recorded chain gap adds a `gap` object of the
+  canonical statement — ids, the lost time window, and hashes — on that
+  row only. It is not the metadata column. The trade is
   deliberate: the off-system copy cannot recompute `row_hash` (the canonical
   payload includes metadata), so chain verification stays an on-system duty.
 - **Verification-gated.** While the last scheduled verification is failing,
@@ -425,11 +426,14 @@ A later loss can be named without opening a second recovery segment.
 `drush audit-chain:record-gap` appends one keyed `chain_gap_recorded` row
 after confirmation. It does not rewrite rows. The command is allowed when
 the surviving chain verifies, and when a recovery segment exists and that
-segment verifies. Whole-history verification stays successful when the
-surviving chain still links. The dashboard lists the gap as a documented
-exception. `drush audit-chain:gap-check` checks an archived branch file, its
-manifest, and the source dump against that row. It proves the files still
-match. It does not restore rows.
+segment verifies. The anchor is the next row on the surviving chain, not
+an earlier sibling of the recovered head. Whole-history verification stays
+successful when the surviving chain still links. The dashboard lists the
+gap as a documented exception. `drush audit-chain:gap-check` checks an
+archived branch file, its manifest, and the source dump against that row.
+An archive whose first row is the surviving live row does not prove the
+lost branch. The command proves the files still match. It does not restore
+rows.
 
 ## What it does not do
 

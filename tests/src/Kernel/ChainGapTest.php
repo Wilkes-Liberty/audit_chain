@@ -174,9 +174,7 @@ final class ChainGapTest extends KernelTestBase {
       }
     }
     $this->assertIsArray($gapRow);
-    $this->assertSame($recorded['input']['fork_id'], $gapRow['gap']['fork_id']);
-    $this->assertSame(2, $gapRow['gap']['lost_from_id']);
-    $this->assertSame(3, $gapRow['gap']['lost_through_id']);
+    $this->assertSame($recorded['input'], $gapRow['gap']);
 
     $check = $this->gaps->checkArchive(
       $recorded['id'],
@@ -292,6 +290,82 @@ final class ChainGapTest extends KernelTestBase {
     $dashboard = $this->renderDashboard();
     $this->assertStringContainsString('could not be read', $dashboard);
     $this->assertStringContainsString('at row ' . $recorded['id'], $dashboard);
+
+    try {
+      $this->gaps->record($recorded['input'], $recorded['digest']);
+      $this->fail('An unreadable gap must not be recorded again.');
+    }
+    catch (\RuntimeException $exception) {
+      $this->assertSame('A recorded gap could not be read.', $exception->getMessage());
+    }
+    $this->assertSame(1, $this->gapCount());
+  }
+
+  /**
+   * An archive that begins with the surviving row is not a lost branch.
+   */
+  public function testArchiveThatRepeatsLiveRowIsNotLostBranch(): void {
+    foreach (['one', 'two', 'three'] as $operation) {
+      $this->chain->logKeyed('audit_chain', $operation);
+    }
+    $rows = $this->rows();
+    $live = (string) $rows[1]->row_hash;
+    $head = str_repeat('ef', 32);
+    $files = $this->archiveFiles('repeats-live', $this->ndjson([
+      ['id' => 10, 'prev_hash' => (string) $rows[0]->row_hash, 'row_hash' => $live],
+      ['id' => 11, 'prev_hash' => $live, 'row_hash' => $head],
+    ]));
+    $input = $this->gapInput(
+      'cccccccc-dddd-4eee-8fff-000000000000',
+      (int) $rows[0]->id,
+      (string) $rows[0]->row_hash,
+      $live,
+      $files,
+      10,
+      11,
+      2,
+      $head,
+    );
+    $recorded = $this->gaps->record($input, $this->gaps->prepare($input)['snapshot_digest']);
+    $check = $this->gaps->checkArchive($recorded['id'], $files['archive'], $files['manifest'], $files['dump']);
+    $this->assertFalse($check['ok']);
+    $this->assertSame(ChainGap::REASON_LINKAGE_BROKEN, $check['reason']);
+  }
+
+  /**
+   * A same-named operation on another channel is not a recorded gap.
+   */
+  public function testForeignChannelIsNotGap(): void {
+    $recorded = $this->recordCleanGap();
+    $this->container->get('database')->update('audit_chain_log')
+      ->fields(['channel' => 'personnel'])
+      ->condition('id', $recorded['id'])
+      ->execute();
+
+    $check = $this->gaps->checkArchive(
+      $recorded['id'],
+      $recorded['files']['archive'],
+      $recorded['files']['manifest'],
+      $recorded['files']['dump'],
+    );
+    $this->assertFalse($check['ok']);
+    $this->assertSame(ChainGap::REASON_GAP_MISSING, $check['reason']);
+
+    $destination = $this->siteDirectory . '/foreign-channel.ndjson';
+    $run = $this->container->get('audit_chain.evidence_exporter')->exportTo('file://' . $destination);
+    $this->assertTrue($run['ok']);
+    $this->assertNotSame(EvidenceExporter::REASON_GAP_UNREADABLE, $run['reason']);
+    $exported = $this->exportedRows('foreign-channel.ndjson');
+    $matched = FALSE;
+    foreach ($exported as $row) {
+      $this->assertArrayNotHasKey('gap', $row);
+      if ((int) $row['id'] === $recorded['id']) {
+        $matched = TRUE;
+        $this->assertSame('personnel', $row['channel']);
+        $this->assertSame(ChainGap::OPERATION, $row['operation']);
+      }
+    }
+    $this->assertTrue($matched);
   }
 
   /**
@@ -312,18 +386,64 @@ final class ChainGapTest extends KernelTestBase {
 
     $rows = $this->rows();
     $fork = (string) $rows[0]->row_hash;
-    $live = (string) $rows[1]->row_hash;
+    $orphan = (string) $rows[1]->row_hash;
+    $surviving = (string) $rows[2]->row_hash;
     $first = str_repeat('ab', 32);
     $head = str_repeat('cd', 32);
     $files = $this->archiveFiles('after-recovery', $this->ndjson([
       ['id' => 10, 'prev_hash' => $fork, 'row_hash' => $first],
       ['id' => 11, 'prev_hash' => $first, 'row_hash' => $head],
     ]));
+    $orphanInput = $this->gapInput(
+      '123e4567-e89b-42d3-a456-426614174000',
+      (int) $rows[0]->id,
+      $fork,
+      $orphan,
+      $files,
+      10,
+      11,
+      2,
+      $head,
+    );
+    try {
+      $this->gaps->prepare($orphanInput);
+      $this->fail('The orphaned sibling is not the surviving row.');
+    }
+    catch (\RuntimeException $exception) {
+      $this->assertSame('The first live row after the fork does not match.', $exception->getMessage());
+    }
+    try {
+      $this->gaps->record($orphanInput, $this->statementDigest($orphanInput));
+      $this->fail('Recording must refuse the orphaned sibling.');
+    }
+    catch (\RuntimeException $exception) {
+      $this->assertSame('The first live row after the fork does not match.', $exception->getMessage());
+    }
+    $orphanFork = $this->gapInput(
+      '123e4567-e89b-42d3-a456-426614174001',
+      (int) $rows[1]->id,
+      $orphan,
+      $surviving,
+      $files,
+      10,
+      11,
+      2,
+      $head,
+    );
+    try {
+      $this->gaps->prepare($orphanFork);
+      $this->fail('The orphaned sibling is not a fork on the surviving chain.');
+    }
+    catch (\RuntimeException $exception) {
+      $this->assertSame('The fork row is not on the surviving chain.', $exception->getMessage());
+    }
+    $this->assertSame(0, $this->gapCount());
+
     $input = $this->gapInput(
       '123e4567-e89b-42d3-a456-426614174000',
       (int) $rows[0]->id,
       $fork,
-      $live,
+      $surviving,
       $files,
       10,
       11,

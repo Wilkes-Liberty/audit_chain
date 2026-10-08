@@ -18,8 +18,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A known gap can be recorded with `drush audit-chain:record-gap` after
   `audit-chain:gap-prepare`, including when a recovery segment already
   exists. The dashboard lists it as a documented exception.
-  `audit-chain:gap-check` checks an archived branch file. The surviving
-  chain is not rewritten (#3627534).
+  `audit-chain:gap-check` checks an archived branch file. After recovery
+  the anchor is the next row on the surviving chain. An archive that
+  starts with that live row is not proof of the lost branch. The
+  surviving chain is not rewritten (#3627534).
 
 ## [1.11.0] - 2026-10-05
 

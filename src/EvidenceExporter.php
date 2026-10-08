@@ -22,9 +22,10 @@ use Psr\Log\LoggerInterface;
  *
  * Data minimization: exported rows carry identifiers and the hash-chain
  * columns, never content — `metadata`, `ip_address`, `user_agent`, and
- * `entity_label` stay on-system. A chain_gap_recorded row adds a `gap` object
- * of ids and hashes. That object is not the metadata column, and it is absent
- * on every other row, so contract_version stays 1. The consequence is
+ * `entity_label` stay on-system. A chain_gap_recorded row on the audit_chain
+ * channel adds a `gap` object of the canonical statement: ids, the lost time
+ * window, and hashes. That object is not the metadata column, and it is
+ * absent on every other row, so contract_version stays 1. The consequence is
  * deliberate: the off-system copy cannot re-derive `row_hash` (the canonical
  * payload includes metadata), so chain verification remains an on-system
  * duty — which is why export is gated on the scheduled verification: while
@@ -194,7 +195,8 @@ final class EvidenceExporter {
         'row_hash' => $record->row_hash,
         'key_id' => $record->key_id,
       ];
-      if ((string) $record->operation === ChainGap::OPERATION) {
+      if ((string) $record->channel === ChainGap::CHANNEL
+        && (string) $record->operation === ChainGap::OPERATION) {
         $gap = $this->exportedGap((int) $record->id);
         if ($gap === NULL) {
           return [

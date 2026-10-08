@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-10-07
+
 ### Added
 - Scheduled verification compares the live chain with the latest confirmed
   OpenTimestamps or XRPL witness. A witnessed head that is no longer the

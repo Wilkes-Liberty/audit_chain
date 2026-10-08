@@ -71,8 +71,52 @@ Those bytes can be inspected without Drupal. `witness-status --require`
 exits successfully only when each named backend has a fresh valid verdict.
 `--require=all` means both. The default is to print every receipt.
 
+## Rewind check
+
+Scheduled verification compares the live chain with the latest confirmed
+witness when `witness_backend` is `opentimestamps` or `xrpl`. Receipts and
+checkpoints are stored in the same database as the chain, so a dump restore
+removes them together. The check therefore reads the witness again.
+
+XRPL uses `GET {read_url}/accounts/{witness_account}/transactions`. The body
+must be a JSON object whose only key is `transactions`, and each element is
+the same transaction object the single-transaction read returns. Payments
+that are not the one-drop template are ignored. The latest witness is the
+highest `ledger_index`. Two different checkpoint digests at that index are
+`witness_ambiguous`: the witness was read, and the run does not choose a
+head. The read does not send the relay credential. A list larger than 2 MB
+is reported unavailable. It is not paginated and it is not treated as an
+empty history.
+
+A non-200 response, a transport failure, or a body that is not that object
+is `witness_unreachable`. The hash-chain result is kept, the failure event
+is not dispatched, and the run does not claim the chain was checked against
+a witness. An empty `transactions` array means no confirmed witness.
+`witness_ambiguous` keeps the hash-chain result as well and does not
+dispatch the failure event.
+
+OpenTimestamps cannot list proofs. The check loads stored receipts whose
+status is `confirmed` and fresh-verifies them in descending `through_id`
+order. Receipt update time is not the order, because upgrading an older
+proof refreshes that timestamp. The fresh-valid checkpoint with the
+greatest `through_id` is the mark. A receipt whose checkpoint does not name
+a through id sorts after one that does. A stored receipt that does not
+fresh-verify is skipped. If none verifies, the check reports no confirmed
+witness and does not report a rewind. If the confirmed receipt with the
+greatest `through_id` cannot be read, older proofs are not consulted. A
+proof that was lost with the database cannot be rediscovered: Bitcoin does
+not provide a list of stamps, and this module does not keep a second copy
+of the proof outside the database.
+
+A missing checkpoint row for that digest, a live row at `through_id` whose
+`row_hash` is not the checkpoint's `chain_head`, or a chain whose maximum id
+is below `through_id`, is `chain_rewound`. The chain is not modified. Rows
+written after the witnessed head are outside the mark. An empty
+`witness_backend` does not run the check.
+
 ## Limits
 
 No wallet, fee payer, or settlement authority is included. Choosing a witness
 does not prune, retain, or delete audit rows. Receipts are not a second
-ledger.
+ledger. A witness does not detect a restore on a site that never submits one,
+and it does not cover rows appended after the latest confirmed checkpoint.

@@ -52,6 +52,15 @@ services:
       - '@event_dispatcher'
       - '@logger.channel.audit_chain'
       - '@audit_chain.recovery'
+      - '@audit_chain.rewind_detector'
+
+  audit_chain.rewind_detector:
+    class: Drupal\audit_chain\RewindDetector
+    arguments:
+      - '@config.factory'
+      - '@database'
+      - '@audit_chain.witness_backend.xrpl'
+      - '@audit_chain.witness_manager'
 
   audit_chain.evidence_exporter:
     class: Drupal\audit_chain\EvidenceExporter

@@ -6,6 +6,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Scheduled verification compares the live chain with the latest confirmed
+  OpenTimestamps or XRPL witness. A witnessed head that is no longer the
+  live row fails as `chain_rewound` (#3627532). A witness that cannot be
+  read, and two confirmed witnesses that disagree, are reported separately
+  and do not by themselves fail the hash-chain result. The OpenTimestamps
+  mark is the fresh-valid checkpoint with the greatest witnessed head, not
+  the most recently updated receipt. OpenTimestamps cannot rediscover a
+  proof lost with the database.
+
 ## [1.11.0] - 2026-10-05
 
 ### Added

@@ -163,6 +163,57 @@ final class XrplWitnessBackend implements IdentifiedWitnessBackendInterface {
   }
 
   /**
+   * Lists confirmed checkpoint digests from the ledger read service.
+   *
+   * Local receipt rows are not consulted. A database restore removes those
+   * rows and leaves this list in place. Non-witness payments are ignored.
+   *
+   * @return list<array{digest: string, ledger_index: int}>
+   *   Confirmed digests. Order is the read service's order.
+   *
+   * @throws \RuntimeException
+   *   When the list cannot be read. An empty list is a successful read.
+   */
+  public function confirmedDigests(): array {
+    $config = $this->configuration();
+    $url = rtrim($config['read_url'], '/') . '/accounts/' . $config['witness_account'] . '/transactions';
+    try {
+      $policy = new DestinationPolicy($this->dns);
+      $policy->assertAllowed($url, [DestinationPolicy::host($config['read_url'])]);
+      $result = $this->transport->request('GET', $url, '', [
+        'Accept' => 'application/json',
+        'User-Agent' => 'audit_chain',
+      ], 2000000);
+    }
+    catch (\RuntimeException) {
+      throw new \RuntimeException('backend_unreachable');
+    }
+    if ($result['status'] !== 200) {
+      throw new \RuntimeException('backend_unreachable');
+    }
+    $decoded = json_decode($result['body'], TRUE);
+    if (!is_array($decoded) || array_keys($decoded) !== ['transactions'] || !is_array($decoded['transactions'])) {
+      throw new \RuntimeException('backend_unreachable');
+    }
+    $found = [];
+    foreach ($decoded['transactions'] as $tx) {
+      if (!is_array($tx) || !$this->isWitnessPayment($tx, $config)) {
+        continue;
+      }
+      $index = $tx['ledger_index'] ?? NULL;
+      if (!is_int($index) || $index < 1) {
+        continue;
+      }
+      $memo = $tx['Memos'][0]['Memo'];
+      $found[] = [
+        'digest' => strtolower((string) $memo['MemoData']),
+        'ledger_index' => $index,
+      ];
+    }
+    return $found;
+  }
+
+  /**
    * Applies one relay response without treating it as confirmation.
    *
    * @param \Drupal\audit_chain\WitnessReceipt $receipt
@@ -297,6 +348,45 @@ final class XrplWitnessBackend implements IdentifiedWitnessBackendInterface {
     $evidence['close_time'] = (int) ($tx['close_time'] ?? 0);
     $evidence['network'] = (string) $token['network'];
     return ['state' => 'confirmed', 'evidence' => $evidence];
+  }
+
+  /**
+   * Whether a ledger transaction is the fixed one-drop witness payment.
+   *
+   * @param array<string, mixed> $tx
+   *   Transaction object from the read endpoint.
+   * @param array<string, string> $config
+   *   XRPL witness settings.
+   *
+   * @return bool
+   *   TRUE when the transaction is validated, successful, and the template.
+   */
+  private function isWitnessPayment(array $tx, array $config): bool {
+    $meta = is_array($tx['meta'] ?? NULL) ? $tx['meta'] : [];
+    if (($tx['validated'] ?? NULL) !== TRUE || ($meta['TransactionResult'] ?? '') !== 'tesSUCCESS') {
+      return FALSE;
+    }
+    if (($tx['TransactionType'] ?? '') !== 'Payment') {
+      return FALSE;
+    }
+    if (($tx['Account'] ?? '') !== $config['witness_account'] || ($tx['Destination'] ?? '') !== $config['sink_address']) {
+      return FALSE;
+    }
+    if ((string) ($tx['Amount'] ?? '') !== '1' || (string) ($tx['Fee'] ?? '') !== '12') {
+      return FALSE;
+    }
+    if (isset($tx['DestinationTag']) || isset($tx['Paths']) || isset($tx['SendMax'])) {
+      return FALSE;
+    }
+    $memos = $tx['Memos'] ?? NULL;
+    if (!is_array($memos) || count($memos) !== 1 || !is_array($memos[0]['Memo'] ?? NULL)) {
+      return FALSE;
+    }
+    $memo = $memos[0]['Memo'];
+    $type = strtolower((string) ($memo['MemoType'] ?? ''));
+    $data = strtolower((string) ($memo['MemoData'] ?? ''));
+    return hash_equals(bin2hex(self::MEMO_TYPE_TEXT), $type)
+      && preg_match('/^[a-f0-9]{64}$/D', $data) === 1;
   }
 
   /**

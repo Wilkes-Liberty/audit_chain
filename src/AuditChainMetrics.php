@@ -184,6 +184,18 @@ final class AuditChainMetrics {
   }
 
   /**
+   * Reads the stored witness comparison without contacting the witness.
+   *
+   * @return array{status: string, reason: string, digest: string|null, through_id: int|null}|null
+   *   The rewind assessment from the last scheduled run, or NULL.
+   */
+  public function rewindAssessment(): ?array {
+    $run = $this->state->get(ScheduledVerifier::STATE_KEY);
+    $rewind = is_array($run) ? ($run['rewind'] ?? NULL) : NULL;
+    return is_array($rewind) ? $rewind : NULL;
+  }
+
+  /**
    * Reads the scheduled successor result without re-verifying on page load.
    */
   public function recoveryStatus(): ?array {

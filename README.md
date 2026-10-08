@@ -387,6 +387,35 @@ If any stored `row_hash` in the sealed prefix changes relative to the seal,
 verification instead reports `SEAL BROKEN`; scheduled verification keeps the
 error log and failure-event behavior for that integrity incident.
 
+### A database restore that rewinds the chain
+
+A dump restore can move the chain backwards, reuse row ids, and still verify,
+because the rows that remain link to each other. The last scheduled run is
+stored in the same database, so it rewinds too. When `witness_backend` is
+`opentimestamps` or `xrpl`, scheduled verification compares the live chain
+with the latest confirmed witness. If that witnessed head is gone, the run
+fails with `chain_rewound`, the dashboard shows **Chain rewound**, the status
+report is an error, and `audit_chain.verification_failed` is dispatched. The
+check does not rewrite rows. Evidence export stays blocked, as it does for
+any failing scheduled run.
+
+The comparison uses the witness, not a copy kept in this database. Checkpoints
+and receipt rows rewind with the dump. For XRPL, the read is
+`GET {read_url}/accounts/{witness_account}/transactions`. A failed, missing,
+or malformed read leaves the hash-chain result in place and reports the rewind
+check as unavailable. It does not claim the chain was checked, and it does not
+dispatch the failure event. Two confirmed checkpoints at the newest ledger are
+reported as ambiguous, which is a warning and not a claim that the witness
+could not be read. An empty transaction list means no confirmed witness. A
+site that leaves `witness_backend` empty is not checked.
+
+OpenTimestamps has no list of proofs. The check can only fresh-verify a
+confirmed proof that is still stored. A proof lost with the database cannot
+be rediscovered. The mark is the fresh-valid confirmed checkpoint with the
+greatest witnessed head id, not the receipt that was updated most recently.
+Rows appended after that checkpoint are outside it. See
+[docs/WITNESS.md](docs/WITNESS.md).
+
 ## What it does not do
 
 - **It does not make deletion impossible.** Nothing at the application layer

@@ -16,9 +16,10 @@ use Psr\Log\LoggerInterface;
  *
  * Queries are window-bounded on the indexed timestamp and key_id columns and
  * never read metadata, IP addresses, user agents, or entity labels.
- * Verification is not re-run on this path: integrity() reads the last
- * scheduled-verification record from state and classifies it with
- * ScheduledVerificationIntegrity.
+ * recordedGaps() is the exception: it decrypts chain_gap_recorded rows and
+ * returns the fork and lost range only. Verification is not re-run on this
+ * path: integrity() reads the last scheduled-verification record from state
+ * and classifies it with ScheduledVerificationIntegrity.
  */
 final class AuditChainMetrics {
 
@@ -56,6 +57,8 @@ final class AuditChainMetrics {
    *   The config factory (verify_interval).
    * @param \Psr\Log\LoggerInterface $logger
    *   The audit_chain logger channel.
+   * @param \Drupal\audit_chain\ChainGap|null $gaps
+   *   Recorded-gap listing. NULL in tests that build metrics by hand.
    */
   public function __construct(
     private readonly Connection $database,
@@ -63,6 +66,7 @@ final class AuditChainMetrics {
     private readonly StateInterface $state,
     private readonly ConfigFactoryInterface $configFactory,
     private readonly LoggerInterface $logger,
+    private readonly ?ChainGap $gaps = NULL,
   ) {}
 
   /**
@@ -181,6 +185,23 @@ final class AuditChainMetrics {
         'rows' => $rows,
       ];
     });
+  }
+
+  /**
+   * Lists recorded gaps for the dashboard.
+   *
+   * Decrypts only chain_gap_recorded rows. Other metadata is not read.
+   *
+   * @return list<array{row_id: int, readable: bool, fork_id: int|null, lost_from_id: int|null, lost_through_id: int|null, lost_count: int|null}>
+   *   One entry per gap row, or an empty list when the reader is absent.
+   */
+  public function recordedGaps(): array {
+    $gaps = $this->gaps;
+    if ($gaps === NULL) {
+      return [];
+    }
+    $listed = $this->guard('recordedGaps', NULL, [], fn (): array => $gaps->recorded());
+    return is_array($listed) ? $listed : [];
   }
 
   /**

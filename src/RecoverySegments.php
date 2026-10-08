@@ -153,6 +153,105 @@ final class RecoverySegments {
   }
 
   /**
+   * Requires the fork and the next row on the surviving chain.
+   *
+   * Historical rows may contain a fork. The surviving path is the ancestry
+   * of the authenticated snapshot head, then the successor rows. The lowest
+   * id after the fork can be the other branch.
+   *
+   * @param string $segmentId
+   *   Recovery segment to authenticate.
+   * @param int $forkId
+   *   Row id the operator named as the fork.
+   * @param string $forkHash
+   *   The row_hash the operator named for that fork.
+   * @param string $liveHash
+   *   The row_hash the operator named for the next surviving row.
+   *
+   * @throws \RuntimeException
+   *   When the segment does not verify, the fork is not on the surviving
+   *   path, or the next surviving row is not the named live row.
+   */
+  public function assertSurvivingAnchor(string $segmentId, int $forkId, string $forkHash, string $liveHash): void {
+    $this->chain->withChainLock(function () use ($segmentId, $forkId, $forkHash, $liveHash): void {
+      $record = $this->record($segmentId);
+      if ($record === NULL || empty($this->verifyLocked($record)['segment_ok'])) {
+        throw new \RuntimeException('The recovery segment does not verify.');
+      }
+      $manifest = $this->authenticatedManifest($record);
+      $snapshot = is_array($manifest['snapshot'] ?? NULL) ? $manifest['snapshot'] : [];
+      $through = is_int($snapshot['through_id'] ?? NULL) ? $snapshot['through_id'] : 0;
+      $head = is_string($snapshot['head_hash'] ?? NULL) ? $snapshot['head_hash'] : '';
+      if ($through < 1 || preg_match('/^[a-f0-9]{64}$/D', $head) !== 1) {
+        throw new \RuntimeException('The recovery segment does not verify.');
+      }
+      $byHash = [];
+      $historical = $this->database->select('audit_chain_log', 'l')
+        ->fields('l', ['id', 'prev_hash', 'row_hash'])
+        ->condition('id', $through, '<=')
+        ->orderBy('id')
+        ->forUpdate()
+        ->execute();
+      foreach ($historical as $row) {
+        $hash = (string) ($row->row_hash ?? '');
+        if ($hash === '' || isset($byHash[$hash])) {
+          throw new \RuntimeException('The fork row is not on the surviving chain.');
+        }
+        $byHash[$hash] = [
+          'id' => (int) $row->id,
+          'prev_hash' => $row->prev_hash === NULL ? '' : (string) $row->prev_hash,
+          'row_hash' => $hash,
+        ];
+      }
+      $path = [];
+      $cursor = $head;
+      $visited = [];
+      while ($cursor !== '') {
+        if (isset($visited[$cursor]) || !isset($byHash[$cursor])) {
+          throw new \RuntimeException('The fork row is not on the surviving chain.');
+        }
+        $visited[$cursor] = TRUE;
+        $path[] = $byHash[$cursor];
+        $cursor = $byHash[$cursor]['prev_hash'];
+      }
+      $path = array_reverse($path);
+      $successors = $this->database->select('audit_chain_log', 'l')
+        ->fields('l', ['id', 'prev_hash', 'row_hash'])
+        ->condition('id', $through, '>')
+        ->orderBy('id')
+        ->forUpdate()
+        ->execute();
+      foreach ($successors as $row) {
+        $path[] = [
+          'id' => (int) $row->id,
+          'prev_hash' => $row->prev_hash === NULL ? '' : (string) $row->prev_hash,
+          'row_hash' => (string) ($row->row_hash ?? ''),
+        ];
+      }
+      $index = NULL;
+      foreach ($path as $position => $row) {
+        if ($row['id'] === $forkId
+          && strlen($row['row_hash']) === strlen($forkHash)
+          && hash_equals($forkHash, $row['row_hash'])) {
+          $index = $position;
+          break;
+        }
+      }
+      $next = $index === NULL ? NULL : ($path[$index + 1] ?? NULL);
+      if ($index === NULL) {
+        throw new \RuntimeException('The fork row is not on the surviving chain.');
+      }
+      if (!is_array($next)
+        || strlen($next['prev_hash']) !== strlen($forkHash)
+        || strlen($next['row_hash']) !== strlen($liveHash)
+        || !hash_equals($forkHash, $next['prev_hash'])
+        || !hash_equals($liveHash, $next['row_hash'])) {
+        throw new \RuntimeException('The first live row after the fork does not match.');
+      }
+    });
+  }
+
+  /**
    * Returns the separate successor verdict for scheduled monitoring.
    */
   public function currentStatus(): ?array {

@@ -22,7 +22,7 @@ function audit_chain_help(string $route_name, RouteMatchInterface $route_match):
       ]) . '</p>';
 
     case 'audit_chain.dashboard':
-      return '<p>' . t('Integrity and the keyed-vs-unkeyed split only — not a volume or channel dashboard. Metadata, IP addresses, user agents and entity labels are never shown. The integrity card reads the last scheduled verification; it does not re-walk the chain.') . '</p>';
+      return '<p>' . t('Integrity and the keyed-vs-unkeyed split only — not a volume or channel dashboard. Metadata, IP addresses, user agents and entity labels are never shown. The integrity card reads the last scheduled verification; it does not re-walk the chain. A recorded gap lists its fork and lost range. Other metadata is not shown.') . '</p>';
   }
   return '';
 }
@@ -41,6 +41,7 @@ function audit_chain_theme(): array {
         'quick_actions' => [],
         'window' => '24h',
         'windows' => [],
+        'gaps' => [],
       ],
     ],
   ];

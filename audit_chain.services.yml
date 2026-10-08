@@ -62,6 +62,13 @@ services:
       - '@audit_chain.witness_backend.xrpl'
       - '@audit_chain.witness_manager'
 
+  audit_chain.chain_gap:
+    class: Drupal\audit_chain\ChainGap
+    arguments:
+      - '@database'
+      - '@audit_chain.logger'
+      - '@audit_chain.recovery'
+
   audit_chain.evidence_exporter:
     class: Drupal\audit_chain\EvidenceExporter
     arguments:
@@ -70,6 +77,7 @@ services:
       - '@datetime.time'
       - '@http_client'
       - '@logger.channel.audit_chain'
+      - '@audit_chain.chain_gap'
 
   audit_chain.archive_bundle_exporter:
     class: Drupal\audit_chain\ArchiveBundleExporter
@@ -137,6 +145,7 @@ services:
       - '@state'
       - '@config.factory'
       - '@logger.channel.audit_chain'
+      - '@audit_chain.chain_gap'
 
   audit_chain.chart_renderer:
     class: Drupal\audit_chain\AuditChainChartRenderer

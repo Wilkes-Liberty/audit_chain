@@ -460,6 +460,7 @@ function _audit_chain_requirements_scheduled_verification(array &$requirements):
     'passing',
     'chain_rewound',
     'witness_unreachable',
+    'witness_ambiguous',
   ], TRUE)
     ? \Drupal::service('date.formatter')->format((int) ($classified['time'] ?? 0))
     : NULL;
@@ -523,6 +524,14 @@ function _audit_chain_requirements_scheduled_verification(array &$requirements):
       ]),
       'severity' => $severity,
       'description' => t('The configured witness could not be read, so this run does not show whether a database restore rewound the chain. The hash-chain result is recorded separately.'),
+    ],
+    'witness_ambiguous' => [
+      'title' => $title,
+      'value' => t('Witness ambiguous (last run @time)', [
+        '@time' => $when,
+      ]),
+      'severity' => $severity,
+      'description' => t('Two confirmed witnesses name different checkpoints, so this run does not choose a chain head. The witness was read. The hash-chain result is recorded separately.'),
     ],
     'overdue' => [
       'title' => $title,

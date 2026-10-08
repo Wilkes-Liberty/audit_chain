@@ -30,7 +30,10 @@ final class RewindDetector {
   public const STATUS_ABSENT = 'absent';
 
   /**
-   * The witness could not be read. This is not a rewind.
+   * No single confirmed head was obtained. This is not a rewind.
+   *
+   * The reason distinguishes a witness that could not be read from two
+   * confirmed heads that disagree.
    */
   public const STATUS_UNCHECKED = 'unchecked';
 
@@ -53,6 +56,11 @@ final class RewindDetector {
    * Scheduled-verification reason when the witness could not be read.
    */
   public const REASON_UNREACHABLE = 'witness_unreachable';
+
+  /**
+   * Scheduled-verification reason when two confirmed heads disagree.
+   */
+  public const REASON_AMBIGUOUS = 'witness_ambiguous';
 
   public function __construct(
     private readonly ConfigFactoryInterface $configFactory,
@@ -81,7 +89,10 @@ final class RewindDetector {
         default => FALSE,
       };
     }
-    catch (\Throwable) {
+    catch (\Throwable $exception) {
+      if ($exception->getMessage() === 'witness_ambiguous') {
+        return $this->result(self::STATUS_UNCHECKED, self::REASON_AMBIGUOUS);
+      }
       return $this->result(self::STATUS_UNCHECKED, self::REASON_UNREACHABLE);
     }
     if ($digest === FALSE) {
@@ -120,39 +131,86 @@ final class RewindDetector {
   }
 
   /**
-   * Returns the newest fresh OpenTimestamps digest still stored here.
+   * Returns the fresh OpenTimestamps digest with the greatest through id.
+   *
+   * Receipt `updated` is not the order. Upgrading an older proof refreshes
+   * that timestamp, so update order can hide a newer witnessed head. If the
+   * receipt with the greatest through id cannot be read, older proofs are
+   * not consulted. A receipt whose checkpoint does not name a through id
+   * sorts last.
    *
    * @return string|null
-   *   Lowercase checkpoint digest, or NULL when nothing is confirmed.
+   *   Lowercase checkpoint digest, or NULL when nothing fresh-verifies.
    */
   private function openTimestampsDigest(): ?string {
     if (!$this->database->schema()->tableExists('audit_chain_witness_receipt')) {
       return NULL;
     }
     $rows = $this->database->select('audit_chain_witness_receipt', 'w')
-      ->fields('w', ['id', 'checkpoint_digest', 'status', 'updated'])
+      ->fields('w', ['id', 'checkpoint_digest', 'status'])
       ->condition('backend_id', 'opentimestamps')
-      ->orderBy('updated', 'DESC')
-      ->orderBy('id', 'DESC')
       ->execute();
-    $confirmed = FALSE;
+    $candidates = [];
     foreach ($rows as $row) {
       if ((string) $row->status !== WitnessReceipt::STATUS_CONFIRMED) {
         continue;
       }
-      $confirmed = TRUE;
-      $verdict = $this->witnesses->verify((string) $row->id, (string) $row->checkpoint_digest);
+      $digest = strtolower((string) $row->checkpoint_digest);
+      $candidates[] = [
+        'id' => (string) $row->id,
+        'digest' => $digest,
+        'through_id' => $this->orderingThroughId($digest),
+      ];
+    }
+    usort($candidates, static function (array $left, array $right): int {
+      if ($left['through_id'] === NULL && $right['through_id'] === NULL) {
+        return $right['id'] <=> $left['id'];
+      }
+      if ($left['through_id'] === NULL) {
+        return 1;
+      }
+      if ($right['through_id'] === NULL) {
+        return -1;
+      }
+      $byThrough = $right['through_id'] <=> $left['through_id'];
+      return $byThrough !== 0 ? $byThrough : $right['id'] <=> $left['id'];
+    });
+    foreach ($candidates as $candidate) {
+      $verdict = $this->witnesses->verify($candidate['id'], $candidate['digest']);
       if ($verdict->reason === 'backend_unreachable') {
         throw new \RuntimeException('backend_unreachable');
       }
       if ($verdict->valid) {
-        return strtolower((string) $row->checkpoint_digest);
+        return $candidate['digest'];
       }
     }
-    if (!$confirmed) {
-      return NULL;
-    }
     return NULL;
+  }
+
+  /**
+   * Reads a checkpoint through id for witness ordering.
+   *
+   * A missing or unreadable checkpoint sorts after one that names a head.
+   * compare() still reports a rewind or an unreadable checkpoint for the
+   * digest that is actually selected.
+   *
+   * @param string $digest
+   *   Lowercase checkpoint digest.
+   *
+   * @return int|null
+   *   The witnessed head id, or NULL when this digest cannot be ordered.
+   */
+  private function orderingThroughId(string $digest): ?int {
+    try {
+      $manifest = $this->checkpointManifest($digest);
+    }
+    catch (\RuntimeException $exception) {
+      if ($exception->getMessage() === 'checkpoint_unreadable') {
+        return NULL;
+      }
+      throw $exception;
+    }
+    return $manifest['through_id'] ?? NULL;
   }
 
   /**

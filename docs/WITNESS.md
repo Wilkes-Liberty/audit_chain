@@ -83,21 +83,30 @@ must be a JSON object whose only key is `transactions`, and each element is
 the same transaction object the single-transaction read returns. Payments
 that are not the one-drop template are ignored. The latest witness is the
 highest `ledger_index`. Two different checkpoint digests at that index are
-left unchecked. The read does not send the relay credential.
+`witness_ambiguous`: the witness was read, and the run does not choose a
+head. The read does not send the relay credential. A list larger than 2 MB
+is reported unavailable. It is not paginated and it is not treated as an
+empty history.
 
 A non-200 response, a transport failure, or a body that is not that object
 is `witness_unreachable`. The hash-chain result is kept, the failure event
 is not dispatched, and the run does not claim the chain was checked against
 a witness. An empty `transactions` array means no confirmed witness.
+`witness_ambiguous` keeps the hash-chain result as well and does not
+dispatch the failure event.
 
 OpenTimestamps cannot list proofs. The check loads stored receipts whose
-status is `confirmed`, newest first, and fresh-verifies them. The first
-valid digest is the mark. A stored receipt that does not fresh-verify is
-skipped. If none verifies, the check reports no confirmed witness and does
-not report a rewind. If the newest confirmed receipt cannot be read, older
-proofs are not consulted. A proof that was lost with the database cannot
-be rediscovered: Bitcoin does not provide a list of stamps, and this module
-does not keep a second copy of the proof outside the database.
+status is `confirmed` and fresh-verifies them in descending `through_id`
+order. Receipt update time is not the order, because upgrading an older
+proof refreshes that timestamp. The fresh-valid checkpoint with the
+greatest `through_id` is the mark. A receipt whose checkpoint does not name
+a through id sorts after one that does. A stored receipt that does not
+fresh-verify is skipped. If none verifies, the check reports no confirmed
+witness and does not report a rewind. If the confirmed receipt with the
+greatest `through_id` cannot be read, older proofs are not consulted. A
+proof that was lost with the database cannot be rediscovered: Bitcoin does
+not provide a list of stamps, and this module does not keep a second copy
+of the proof outside the database.
 
 A missing checkpoint row for that digest, a live row at `through_id` whose
 `row_hash` is not the checkpoint's `chain_head`, or a chain whose maximum id

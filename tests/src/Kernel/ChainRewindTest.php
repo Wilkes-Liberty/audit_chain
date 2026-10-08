@@ -7,6 +7,8 @@ namespace Drupal\Tests\audit_chain\Kernel;
 use Drupal\audit_chain\Controller\AuditChainDashboardController;
 use Drupal\audit_chain\Event\AuditChainVerificationFailedEvent;
 use Drupal\audit_chain\RewindDetector;
+use Drupal\audit_chain\WitnessManager;
+use Drupal\audit_chain\WitnessVerdict;
 use Drupal\audit_chain\Witness\WitnessDnsResolverInterface;
 use Drupal\audit_chain\Witness\WitnessTransportInterface;
 use Drupal\Core\Site\Settings;
@@ -216,8 +218,83 @@ final class ChainRewindTest extends KernelTestBase {
 
     $run = $this->container->get('audit_chain.scheduled_verifier')->runNow();
     $this->assertTrue($run['ok']);
+    $this->assertNull($run['reason']);
     $this->assertSame(RewindDetector::STATUS_UNCHECKED, $run['rewind']['status']);
+    $this->assertSame(RewindDetector::REASON_AMBIGUOUS, $run['rewind']['reason']);
     $this->assertSame([], $this->captured);
+
+    $requirements = $this->runtimeRequirements();
+    $requirement = $requirements['audit_chain_scheduled_verification'];
+    $this->assertSame(REQUIREMENT_WARNING, $requirement['severity']);
+    $this->assertStringContainsString('Witness ambiguous', (string) $requirement['value']);
+    $this->assertStringNotContainsString('could not be read', (string) $requirement['description']);
+
+    $controller = AuditChainDashboardController::create($this->container);
+    $build = $controller->dashboard(Request::create('/admin/reports/audit-chain'));
+    $this->assertSame('warn', $build['#chain']['state']);
+    $this->assertSame('Witness ambiguous', $build['#chain']['label']);
+    $this->assertStringNotContainsString('could not be read', $build['#chain']['detail']);
+  }
+
+  /**
+   * A later receipt update must not hide a newer witnessed head.
+   */
+  public function testStaleReceiptUpdateDoesNotHideNewerWitness(): void {
+    $this->config('audit_chain.settings')
+      ->set('witness_backend', 'opentimestamps')
+      ->save();
+    $logger = $this->container->get('audit_chain.logger');
+    $logger->logKeyed('personnel', 'root');
+    $logger->logKeyed('personnel', 'middle');
+    $logger->logKeyed('personnel', 'head');
+    $exporter = $this->container->get('audit_chain.archive_bundle_exporter');
+    $older = $exporter->create(1, 1);
+    $newer = $exporter->create(1, 3);
+    $olderDigest = $older['manifest']['digest'];
+    $newerDigest = $newer['manifest']['digest'];
+    $this->insertConfirmedReceipt('ots-older', $olderDigest, 200);
+    $this->insertConfirmedReceipt('ots-newer', $newerDigest, 100);
+    $this->container->get('database')->delete('audit_chain_log')
+      ->condition('id', 1, '>')
+      ->execute();
+
+    $assessment = $this->openTimestampsDetector()->assess();
+    $this->assertSame(RewindDetector::STATUS_REWOUND, $assessment['status']);
+    $this->assertSame(RewindDetector::REASON_REWOUND, $assessment['reason']);
+    $this->assertSame($newerDigest, $assessment['digest']);
+    $this->assertSame(3, $assessment['through_id']);
+  }
+
+  /**
+   * An unreachable newer proof does not fall through to an older one.
+   */
+  public function testUnreachableNewerWitnessDoesNotUseAnOlderProof(): void {
+    $this->config('audit_chain.settings')
+      ->set('witness_backend', 'opentimestamps')
+      ->save();
+    $logger = $this->container->get('audit_chain.logger');
+    $logger->logKeyed('personnel', 'root');
+    $logger->logKeyed('personnel', 'middle');
+    $logger->logKeyed('personnel', 'head');
+    $exporter = $this->container->get('audit_chain.archive_bundle_exporter');
+    $older = $exporter->create(1, 1);
+    $newer = $exporter->create(1, 3);
+    $olderDigest = $older['manifest']['digest'];
+    $newerDigest = $newer['manifest']['digest'];
+    $this->insertConfirmedReceipt('ots-older', $olderDigest, 200);
+    $this->insertConfirmedReceipt('ots-newer', $newerDigest, 100);
+
+    $assessment = $this->openTimestampsDetector(
+      static function (string $receiptId, string $digest) use ($newerDigest): WitnessVerdict {
+        if ($digest === $newerDigest) {
+          return new WitnessVerdict(FALSE, 'backend_unreachable');
+        }
+        return new WitnessVerdict(TRUE, 'confirmed', ['receipt' => $receiptId]);
+      },
+    )->assess();
+    $this->assertSame(RewindDetector::STATUS_UNCHECKED, $assessment['status']);
+    $this->assertSame(RewindDetector::REASON_UNREACHABLE, $assessment['reason']);
+    $this->assertNull($assessment['digest']);
   }
 
   /**
@@ -230,6 +307,50 @@ final class ChainRewindTest extends KernelTestBase {
     $this->assertSame(RewindDetector::STATUS_NOT_CONFIGURED, $run['rewind']['status']);
     $this->assertSame([], $this->transport->calls);
     $this->assertSame([], $this->captured);
+  }
+
+  /**
+   * Inserts one confirmed OpenTimestamps receipt.
+   *
+   * @param string $id
+   *   Receipt id.
+   * @param string $digest
+   *   Checkpoint digest.
+   * @param int $updated
+   *   Receipt update time. This must not decide which head is compared.
+   */
+  private function insertConfirmedReceipt(string $id, string $digest, int $updated): void {
+    $this->container->get('database')->insert('audit_chain_witness_receipt')->fields([
+      'id' => $id,
+      'checkpoint_digest' => $digest,
+      'backend_id' => 'opentimestamps',
+      'status' => 'confirmed',
+      'submitted' => $updated,
+      'updated' => $updated,
+      'opaque_token' => 'proof-' . $id,
+    ])->execute();
+  }
+
+  /**
+   * Builds a detector whose OpenTimestamps verify result is scripted.
+   *
+   * The double does not contact Bitcoin. Every digest is fresh-valid unless
+   * $verify says otherwise.
+   *
+   * @param callable|null $verify
+   *   Optional verify() double. Arguments are receipt id and digest.
+   */
+  private function openTimestampsDetector(?callable $verify = NULL): RewindDetector {
+    $witnesses = $this->createMock(WitnessManager::class);
+    $witnesses->method('verify')->willReturnCallback(
+      $verify ?? static fn (): WitnessVerdict => new WitnessVerdict(TRUE, 'confirmed'),
+    );
+    return new RewindDetector(
+      $this->container->get('config.factory'),
+      $this->container->get('database'),
+      $this->container->get('audit_chain.witness_backend.xrpl'),
+      $witnesses,
+    );
   }
 
   /**

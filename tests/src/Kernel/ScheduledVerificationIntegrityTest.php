@@ -192,6 +192,20 @@ final class ScheduledVerificationIntegrityTest extends KernelTestBase {
         'witness_unreachable',
         'warn',
       ],
+      [
+        [
+          'time' => $now - 60,
+          'ok' => TRUE,
+          'reason' => NULL,
+          'rewind' => [
+            'status' => RewindDetector::STATUS_UNCHECKED,
+            'reason' => RewindDetector::REASON_AMBIGUOUS,
+          ],
+        ],
+        3600,
+        'witness_ambiguous',
+        'warn',
+      ],
     ];
 
     foreach ($cases as $case) {
@@ -311,6 +325,19 @@ final class ScheduledVerificationIntegrityTest extends KernelTestBase {
           'ok' => TRUE,
           'reason' => NULL,
           'rewind' => ['status' => RewindDetector::STATUS_UNCHECKED],
+        ],
+      ],
+      [
+        'interval' => 3600,
+        'require_keyed' => FALSE,
+        'run' => [
+          'time' => $now,
+          'ok' => TRUE,
+          'reason' => NULL,
+          'rewind' => [
+            'status' => RewindDetector::STATUS_UNCHECKED,
+            'reason' => RewindDetector::REASON_AMBIGUOUS,
+          ],
         ],
       ],
     ];

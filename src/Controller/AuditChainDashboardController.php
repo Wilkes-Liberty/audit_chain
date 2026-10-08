@@ -140,6 +140,13 @@ final class AuditChainDashboardController extends ControllerBase {
           '@when' => $when,
         ]),
       ],
+      'witness_ambiguous' => [
+        'state' => 'warn',
+        'label' => (string) $this->t('Witness ambiguous'),
+        'detail' => (string) $this->t('Two confirmed witnesses name different checkpoints, so this run does not choose a chain head. Last scheduled verification @when. The chain was not modified by the check.', [
+          '@when' => $when,
+        ]),
+      ],
       'overdue' => [
         'state' => 'warn',
         'label' => (string) $this->t('Overdue'),

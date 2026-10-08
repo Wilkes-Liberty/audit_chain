@@ -97,9 +97,12 @@ final class ScheduledVerificationIntegrity {
     }
 
     if (($rewind['status'] ?? '') === RewindDetector::STATUS_UNCHECKED) {
+      $rewindReason = (string) ($rewind['reason'] ?? '');
       return [
         'status' => 'warn',
-        'reason' => RewindDetector::REASON_UNREACHABLE,
+        'reason' => $rewindReason === RewindDetector::REASON_AMBIGUOUS
+          ? RewindDetector::REASON_AMBIGUOUS
+          : RewindDetector::REASON_UNREACHABLE,
         'time' => $time,
       ];
     }

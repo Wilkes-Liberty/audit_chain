@@ -16,7 +16,7 @@ use Drupal\Core\Database\Connection;
  * compares the stored token and status so a stale result cannot overwrite a
  * newer receipt. Witness operations do not write audit-chain rows.
  */
-final class WitnessManager {
+class WitnessManager {
 
   /**
    * Registered backends keyed by stable identifier.

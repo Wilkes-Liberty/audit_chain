@@ -17,7 +17,8 @@ use Symfony\Contracts\EventDispatcher\Event;
  * chain no longer contains is one of those failures. A foreign seal is
  * recorded as an unverified, fail-closed run but is an advisory rather than
  * evidence that the copied prefix changed, so it does not dispatch this
- * event. A witness that cannot be read does not dispatch it either.
+ * event. A witness that cannot be read does not dispatch it. Two confirmed
+ * witnesses that disagree do not dispatch it either.
  */
 final class AuditChainVerificationFailedEvent extends Event {
 

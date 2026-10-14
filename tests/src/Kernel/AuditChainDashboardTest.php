@@ -12,7 +12,6 @@ use Drupal\KernelTests\KernelTestBase;
 use Drupal\Tests\user\Traits\UserCreationTrait;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
-use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 use Symfony\Component\HttpFoundation\Request;
 
 /**
@@ -21,12 +20,9 @@ use Symfony\Component\HttpFoundation\Request;
  * @coversDefaultClass \Drupal\audit_chain\Controller\AuditChainDashboardController
  *
  * @group audit_chain
- *
- * @runTestsInSeparateProcesses
  */
 #[CoversClass(AuditChainDashboardController::class)]
 #[Group('audit_chain')]
-#[RunTestsInSeparateProcesses]
 final class AuditChainDashboardTest extends KernelTestBase {
 
   use AuditChainSchemaTrait;
@@ -40,7 +36,6 @@ final class AuditChainDashboardTest extends KernelTestBase {
     'user',
     'key',
     'encrypt',
-    'encrypt_test',
     'audit_chain',
   ];
 

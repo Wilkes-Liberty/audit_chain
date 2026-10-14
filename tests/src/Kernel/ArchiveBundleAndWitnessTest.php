@@ -13,16 +13,13 @@ use Drupal\Core\Site\Settings;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\key\Entity\Key;
 use PHPUnit\Framework\Attributes\Group;
-use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
 /**
  * Checks archival checkpoints, bundles, and the witness seam.
  *
  * @group audit_chain
- * @runTestsInSeparateProcesses
  */
 #[Group('audit_chain')]
-#[RunTestsInSeparateProcesses]
 final class ArchiveBundleAndWitnessTest extends KernelTestBase {
 
   use AuditChainSchemaTrait;

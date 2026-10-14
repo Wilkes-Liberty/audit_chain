@@ -77,20 +77,22 @@ jobs:
             database: mysql
             connection: 'mysql://drupal:drupal@127.0.0.1/drupal_test'
 
+    # Empty image: the runner skips the container. Both services used to
+    # start on every leg, including in-memory SQLite, which is the waste
+    # this split exists to stop. Health options stay empty then too —
+    # a liveness check on a skipped service can still fail the job.
     services:
       postgres:
-        image: postgres:16
+        image: ${{ matrix.database == 'postgres' && 'postgres:16' || '' }}
         env:
           POSTGRES_DB: drupal_test
           POSTGRES_USER: drupal
           POSTGRES_PASSWORD: drupal
         ports:
           - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U drupal -d drupal_test"
-          --health-interval 5s --health-timeout 5s --health-retries 10
+        options: ${{ matrix.database == 'postgres' && '--health-cmd "pg_isready -U drupal -d drupal_test" --health-interval 5s --health-timeout 5s --health-retries 10' || '' }}
       mysql:
-        image: mysql:8.0
+        image: ${{ matrix.database == 'mysql' && 'mysql:8.0' || '' }}
         env:
           MYSQL_DATABASE: drupal_test
           MYSQL_USER: drupal
@@ -98,9 +100,7 @@ jobs:
           MYSQL_ROOT_PASSWORD: drupal_root
         ports:
           - 3306:3306
-        options: >-
-          --health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pdrupal_root --silent"
-          --health-interval 5s --health-timeout 5s --health-retries 10
+        options: ${{ matrix.database == 'mysql' && '--health-cmd "mysqladmin ping -h 127.0.0.1 -uroot -pdrupal_root --silent" --health-interval 5s --health-timeout 5s --health-retries 10' || '' }}
 
     steps:
       - name: Checkout the module
@@ -211,11 +211,15 @@ jobs:
           SIMPLETEST_DB: ${{ matrix.connection }}
           BROWSERTEST_OUTPUT_DIRECTORY: /tmp
           SYMFONY_DEPRECATIONS_HELPER: weak
-          MIN_TESTS: '16'
+          # 150 is the method count collected on 1.x (run 37720510292), not
+          # the class count of 16 this floor used to encode. A runner that
+          # collects nothing still exits 0.
+          MIN_TESTS: '150'
         run: |
           set -euo pipefail
-          # Absolute -c path: the kernel tests declare
-          # @runTestsInSeparateProcesses, and a child process does not inherit
+          # Absolute -c path: AuditChainLoggerTest and RecoverySegmentsTest
+          # declare @runTestsInSeparateProcesses (they spawn append-worker.php
+          # or mutate the DB connection), and a child process does not inherit
           # this working directory. PHPUnit 9.6 passes a relative path straight
           # through, so every child dies on "Could not read phpunit.xml.dist".
           config="${PWD}/web/core/phpunit.xml.dist"
@@ -326,9 +330,122 @@ jobs:
           composer global require --no-interaction --no-progress \
             squizlabs/php_codesniffer drupal/coder
 
-      - name: phpcs (Drupal, DrupalPractice)
+      - name: phpcs
         working-directory: module
         run: |
-          ~/.composer/vendor/bin/phpcs --standard=Drupal,DrupalPractice \
-            --extensions=php,module,inc,install,test,profile,theme,yml \
-            .
+          # The module's own phpcs.xml.dist, not a standard spelled out here.
+          # This job used to pass --standard=Drupal,DrupalPractice with its own
+          # --extensions list, so the committed ruleset and the enforced one
+          # could drift apart invisibly: editing phpcs.xml.dist changed what a
+          # developer runs locally and nothing about what CI checked. The
+          # drupalcode phpcs job reads the file, so this now asks the same
+          # question rather than a similar one.
+          ~/.composer/vendor/bin/phpcs --standard=phpcs.xml.dist -p
+
+  # phpstan exists on the drupalcode pipeline (commit-code-check.sh) and,
+  # until now, only there. A support claim CI does not exercise is not a
+  # claim: GitHub could stay green while d.o failed on the committed
+  # phpstan.neon.dist. This job runs that file at level 6, so the two
+  # venues check the same thing rather than two similar things.
+  phpstan:
+    name: PHPStan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the module
+        uses: actions/checkout@v7
+        with:
+          path: module
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: gd, pdo_sqlite, sqlite3
+          coverage: none
+
+      # phpstan-drupal needs a real Drupal tree to resolve core classes, so
+      # this scaffolds the same way the PHPUnit job does. Analysing the
+      # module on its own reports hundreds of "class not found" errors and
+      # tells you nothing about the module.
+      - name: Scaffold a Drupal site
+        run: |
+          retry() {
+            rc=0
+            for n in 1 2 3; do
+              "$@" && return 0
+              rc=$?
+              if [ "$n" -lt 3 ]; then
+                echo "::warning::attempt $n of 3 failed (exit $rc): $* - retrying"
+                sleep "$((15 * n))"
+              fi
+            done
+            return "$rc"
+          }
+          scaffold() {
+            rm -rf drupal
+            composer create-project "drupal/recommended-project:^11" drupal \
+              --no-interaction --no-install --no-progress
+          }
+          retry scaffold
+          cd drupal
+          composer config minimum-stability dev
+          composer config prefer-stable true
+          composer config --no-plugins allow-plugins.composer/installers true
+          composer config --no-plugins allow-plugins.drupal/core-composer-scaffold true
+          composer config --no-plugins allow-plugins.drupal/core-project-message true
+          composer config --no-plugins allow-plugins.phpstan/extension-installer true
+          composer config --no-plugins allow-plugins.dealerdirect/phpcodesniffer-composer-installer true
+          # MCP Sentinel requires drupal/audit_chain ^1.0.1. A path repo takes
+          # its version from the checkout, which here is a detached commit and
+          # satisfies no release constraint. Name the version, so the working
+          # copy stays the package under test.
+          composer config repositories.audit_chain --json \
+            '{"type":"path","url":"../module","options":{"versions":{"drupal/audit_chain":"1.x-dev"}}}'
+
+      - name: Install dependencies
+        working-directory: drupal
+        run: |
+          retry() {
+            rc=0
+            for n in 1 2 3; do
+              "$@" && return 0
+              rc=$?
+              if [ "$n" -lt 3 ]; then
+                echo "::warning::attempt $n of 3 failed (exit $rc): $* - retrying"
+                sleep "$((15 * n))"
+              fi
+            done
+            return "$rc"
+          }
+          retry composer require -W --no-interaction --no-progress \
+            'drupal/audit_chain:1.x-dev'
+          # phpstan-drupal plus the optional MCP submodule's runtime
+          # neighbours: a missing one turns a real error into a
+          # "class not found" that hides it.
+          retry composer require -W --dev --no-interaction --no-progress \
+            "drupal/core-dev:^11" \
+            "phpstan/phpstan:^2" \
+            "phpstan/extension-installer:^1.4" \
+            "mglaman/phpstan-drupal:^2" \
+            "phpstan/phpstan-deprecation-rules:^2" \
+            "drupal/mcp_sentinel:^2.22" \
+            "drupal/tool:^1.0.0-beta8"
+
+      - name: Confirm the working copy is what is under test
+        working-directory: drupal
+        run: |
+          test -L web/modules/contrib/audit_chain \
+            || { echo "::error::audit_chain is not symlinked to the working copy — the path repo did not apply"; exit 1; }
+          readlink web/modules/contrib/audit_chain
+
+      - name: phpstan
+        working-directory: drupal
+        run: |
+          set -euo pipefail
+          # The module's own phpstan.neon.dist (level 6), so this and the
+          # drupalcode phpstan job answer the same question.
+          vendor/bin/phpstan analyze web/modules/contrib/audit_chain \
+            -c web/modules/contrib/audit_chain/phpstan.neon.dist \
+            --autoload-file=vendor/autoload.php \
+            --no-progress \
+            --memory-limit=2G

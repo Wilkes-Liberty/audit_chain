@@ -9,7 +9,6 @@ use Drupal\audit_chain\EvidenceExporter;
 use Drupal\audit_chain\ScheduledVerifier;
 use Drupal\KernelTests\KernelTestBase;
 use PHPUnit\Framework\Attributes\Group;
-use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
 /**
  * Kernel tests for uninstall clearing module-owned state.
@@ -18,11 +17,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  * makes the next install's empty-chain verify() return seal_broken.
  *
  * @group audit_chain
- *
- * @runTestsInSeparateProcesses
  */
 #[Group('audit_chain')]
-#[RunTestsInSeparateProcesses]
 final class AuditChainUninstallTest extends KernelTestBase {
 
   use AuditChainSchemaTrait;
@@ -35,7 +31,6 @@ final class AuditChainUninstallTest extends KernelTestBase {
     'user',
     'key',
     'encrypt',
-    'encrypt_test',
     'audit_chain',
   ];
 

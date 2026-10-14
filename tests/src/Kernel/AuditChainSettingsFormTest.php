@@ -9,7 +9,6 @@ use Drupal\Core\Form\FormState;
 use Drupal\KernelTests\KernelTestBase;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
-use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
 /**
  * Kernel tests for settings-form encryption copy and export pairing.
@@ -17,12 +16,9 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  * @coversDefaultClass \Drupal\audit_chain\Form\AuditChainSettingsForm
  *
  * @group audit_chain
- *
- * @runTestsInSeparateProcesses
  */
 #[CoversClass(AuditChainSettingsForm::class)]
 #[Group('audit_chain')]
-#[RunTestsInSeparateProcesses]
 final class AuditChainSettingsFormTest extends KernelTestBase {
 
   use AuditChainSchemaTrait;
@@ -35,7 +31,6 @@ final class AuditChainSettingsFormTest extends KernelTestBase {
     'user',
     'key',
     'encrypt',
-    'encrypt_test',
     'audit_chain',
   ];
 

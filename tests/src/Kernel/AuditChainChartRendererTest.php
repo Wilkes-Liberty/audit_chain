@@ -10,7 +10,6 @@ use Drupal\Core\Extension\ModuleHandlerInterface;
 use Drupal\KernelTests\KernelTestBase;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
-use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
 /**
  * Kernel tests for the chart renderer helper.
@@ -22,12 +21,9 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  * @coversDefaultClass \Drupal\audit_chain\AuditChainChartRenderer
  *
  * @group audit_chain
- *
- * @runTestsInSeparateProcesses
  */
 #[CoversClass(AuditChainChartRenderer::class)]
 #[Group('audit_chain')]
-#[RunTestsInSeparateProcesses]
 final class AuditChainChartRendererTest extends KernelTestBase {
 
   /**
@@ -38,7 +34,6 @@ final class AuditChainChartRendererTest extends KernelTestBase {
     'user',
     'key',
     'encrypt',
-    'encrypt_test',
     'audit_chain',
   ];
 

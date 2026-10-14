@@ -428,6 +428,7 @@ jobs:
             "phpstan/extension-installer:^1.4" \
             "mglaman/phpstan-drupal:^2" \
             "phpstan/phpstan-deprecation-rules:^2" \
+            "drush/drush:^13" \
             "drupal/mcp_sentinel:^2.22" \
             "drupal/tool:^1.0.0-beta8"
 

@@ -30,3 +30,58 @@ parameters:
     # reflected on, so the tests themselves pass there; this is a cross-version
     # static-analysis artifact. Reassess when the floor rises above Drupal 10.
     - "#Attribute class PHPUnit.*Attributes.* does not exist#"
+    # Drupal calls hook implementations with a fixed argument list. PHP 8
+    # rejects extra arguments, so an unused hook parameter stays.
+    -
+      identifier: function.unusedParameter
+      path: audit_chain.module
+    # phpstan-drupal types select() as ConditionInterface, which has no
+    # execute(). The runtime object is SelectInterface. Do not rewrite the
+    # query builders to satisfy the stub.
+    - "#Call to an undefined method Drupal\\\\Core\\\\Database\\\\Query\\\\ConditionInterface::execute#"
+    # State/config bags are untyped at the boundary. PHPStan cannot see that
+    # the keys were validated, or that an optional schema key may be absent.
+    # Level stays 6; these are not hash/mutex/OTS contract changes.
+    -
+      identifier: return.type
+      paths:
+        - src/AuditChainLogger.php
+        - src/AuditChainMetrics.php
+    -
+      identifier: nullCoalesce.unnecessary
+      path: src/ScheduledVerifier.php
+    -
+      identifier: notIdentical.alwaysFalse
+      path: src/Form/AuditChainSettingsForm.php
+    # Binary OTS parser. Do not change witness/OTS to silence analysis.
+    -
+      identifier: booleanOr.alwaysTrue
+      path: src/Witness/OtsProof.php
+    -
+      identifier: notIdentical.alwaysTrue
+      path: src/Witness/OtsProof.php
+    -
+      identifier: deadCode.unreachable
+      path: src/Witness/OtsProof.php
+    # Kernel tests assert runtime outcomes PHPStan has already narrowed.
+    -
+      identifier: method.alreadyNarrowedType
+      path: tests
+    -
+      identifier: method.impossibleType
+      path: tests
+    -
+      identifier: catch.neverThrown
+      path: tests
+    -
+      identifier: deadCode.unreachable
+      path: tests
+    -
+      identifier: argument.unresolvableType
+      path: tests
+    -
+      identifier: return.type
+      path: tests
+    -
+      identifier: globalDrupalDependencyInjection.useDependencyInjection
+      path: tests

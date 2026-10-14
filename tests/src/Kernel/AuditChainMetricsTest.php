@@ -11,7 +11,6 @@ use Drupal\audit_chain\ScheduledVerifier;
 use Drupal\KernelTests\KernelTestBase;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
-use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
 /**
  * Kernel tests for dashboard aggregates.
@@ -19,12 +18,9 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  * @coversDefaultClass \Drupal\audit_chain\AuditChainMetrics
  *
  * @group audit_chain
- *
- * @runTestsInSeparateProcesses
  */
 #[CoversClass(AuditChainMetrics::class)]
 #[Group('audit_chain')]
-#[RunTestsInSeparateProcesses]
 final class AuditChainMetricsTest extends KernelTestBase {
 
   use AuditChainSchemaTrait;
@@ -37,7 +33,6 @@ final class AuditChainMetricsTest extends KernelTestBase {
     'user',
     'key',
     'encrypt',
-    'encrypt_test',
     'audit_chain',
   ];
 

@@ -8,7 +8,6 @@ use Drupal\audit_chain\AuditChainCollector;
 use Drupal\KernelTests\KernelTestBase;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
-use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
 /**
  * Kernel tests for the request-scoped collector.
@@ -19,7 +18,6 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  */
 #[CoversClass(AuditChainCollector::class)]
 #[Group('audit_chain')]
-#[RunTestsInSeparateProcesses]
 final class AuditChainCollectorTest extends KernelTestBase {
 
   use AuditChainSchemaTrait;

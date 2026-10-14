@@ -13,18 +13,14 @@ use Drupal\Core\Site\Settings;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\key\Entity\Key;
 use PHPUnit\Framework\Attributes\Group;
-use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 use Symfony\Component\HttpFoundation\Request;
 
 /**
  * Records a known gap without a second recovery segment.
  *
  * @group audit_chain
- *
- * @runTestsInSeparateProcesses
  */
 #[Group('audit_chain')]
-#[RunTestsInSeparateProcesses]
 final class ChainGapTest extends KernelTestBase {
 
   use AuditChainSchemaTrait;
@@ -61,7 +57,6 @@ final class ChainGapTest extends KernelTestBase {
     'user',
     'key',
     'encrypt',
-    'encrypt_test',
     'audit_chain',
   ];
 

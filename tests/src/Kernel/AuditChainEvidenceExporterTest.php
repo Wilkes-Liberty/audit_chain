@@ -12,7 +12,6 @@ use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Response;
 use PHPUnit\Framework\Attributes\Group;
-use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
 /**
  * Kernel tests for the off-system evidence export (d.o #3616535, part 2).
@@ -26,11 +25,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  * so unverified evidence is never presented as verified.
  *
  * @group audit_chain
- *
- * @runTestsInSeparateProcesses
  */
 #[Group('audit_chain')]
-#[RunTestsInSeparateProcesses]
 final class AuditChainEvidenceExporterTest extends KernelTestBase {
 
   use AuditChainSchemaTrait;
@@ -43,7 +39,6 @@ final class AuditChainEvidenceExporterTest extends KernelTestBase {
     'user',
     'key',
     'encrypt',
-    'encrypt_test',
     'audit_chain',
   ];
 

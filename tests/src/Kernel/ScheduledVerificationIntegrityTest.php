@@ -12,7 +12,6 @@ use Drupal\audit_chain\ScheduledVerifier;
 use Drupal\KernelTests\KernelTestBase;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
-use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
 /**
  * Shared scheduled-verification integrity classifier.
@@ -20,12 +19,9 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  * @coversDefaultClass \Drupal\audit_chain\ScheduledVerificationIntegrity
  *
  * @group audit_chain
- *
- * @runTestsInSeparateProcesses
  */
 #[CoversClass(ScheduledVerificationIntegrity::class)]
 #[Group('audit_chain')]
-#[RunTestsInSeparateProcesses]
 final class ScheduledVerificationIntegrityTest extends KernelTestBase {
 
   use AuditChainSchemaTrait;
@@ -38,7 +34,6 @@ final class ScheduledVerificationIntegrityTest extends KernelTestBase {
     'user',
     'key',
     'encrypt',
-    'encrypt_test',
     'audit_chain',
   ];
 

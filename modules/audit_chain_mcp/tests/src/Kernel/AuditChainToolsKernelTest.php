@@ -14,18 +14,14 @@ use Drupal\KernelTests\KernelTestBase;
 use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\user\Entity\Role;
 use PHPUnit\Framework\Attributes\Group;
-use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 use Symfony\Component\HttpFoundation\Request;
 
 /**
  * Exercises discovery and direct execution against source governance.
  *
  * @group audit_chain
- *
- * @runTestsInSeparateProcesses
  */
 #[Group('audit_chain')]
-#[RunTestsInSeparateProcesses]
 final class AuditChainToolsKernelTest extends KernelTestBase {
 
   use UserCreationTrait;

@@ -15,7 +15,6 @@ use Drupal\Core\Site\Settings;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\key\Entity\Key;
 use PHPUnit\Framework\Attributes\Group;
-use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 use Symfony\Component\HttpFoundation\Request;
 
 /**
@@ -26,11 +25,8 @@ use Symfony\Component\HttpFoundation\Request;
  * rewound rows and leaves the ledger response in place.
  *
  * @group audit_chain
- *
- * @runTestsInSeparateProcesses
  */
 #[Group('audit_chain')]
-#[RunTestsInSeparateProcesses]
 final class ChainRewindTest extends KernelTestBase {
 
   use AuditChainSchemaTrait;
@@ -59,7 +55,6 @@ final class ChainRewindTest extends KernelTestBase {
     'user',
     'key',
     'encrypt',
-    'encrypt_test',
     'audit_chain',
   ];
 

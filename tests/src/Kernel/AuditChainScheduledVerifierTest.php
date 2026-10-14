@@ -11,7 +11,6 @@ use Drupal\KernelTests\KernelTestBase;
 use Drupal\key\Entity\Key;
 use Psr\Log\AbstractLogger;
 use PHPUnit\Framework\Attributes\Group;
-use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
 /**
  * Kernel tests for scheduled keyed verification (d.o #3616535, part 1).
@@ -24,11 +23,8 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
  * event for consumers — and never rewrites the chain it verified.
  *
  * @group audit_chain
- *
- * @runTestsInSeparateProcesses
  */
 #[Group('audit_chain')]
-#[RunTestsInSeparateProcesses]
 final class AuditChainScheduledVerifierTest extends KernelTestBase {
 
   use AuditChainSchemaTrait;
@@ -41,7 +37,6 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
     'user',
     'key',
     'encrypt',
-    'encrypt_test',
     'audit_chain',
   ];
 

@@ -135,7 +135,7 @@ if (isset($input['started'])) {
 }
 if (isset($input['activate_segment'])) {
   new Settings(['audit_chain_instance_id' => 'synthetic-instance-a']);
-  $segments = new RecoverySegments($database, $logger, new Time(new RequestStack()), $builder->recoveryState());
+  $segments = new RecoverySegments($database, $logger, new Time(new RequestStack()), $builder->recoveryState(), $logger->recoverySupport());
   $segments->activate($input['activate_segment'], $input['snapshot_digest'], $input['context']);
 }
 else {

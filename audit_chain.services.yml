@@ -26,6 +26,10 @@ services:
     arguments:
       - '@audit_chain.logger'
 
+  audit_chain.recovery_support:
+    class: Drupal\audit_chain\AuditChainRecoverySupport
+    factory: ['@audit_chain.logger', 'recoverySupport']
+
   audit_chain.recovery:
     class: Drupal\audit_chain\RecoverySegments
     arguments:
@@ -33,6 +37,7 @@ services:
       - '@audit_chain.logger'
       - '@datetime.time'
       - '@state'
+      - '@audit_chain.recovery_support'
       - '@extension.list.module'
 
   audit_chain.flush_subscriber:
@@ -68,6 +73,7 @@ services:
       - '@database'
       - '@audit_chain.logger'
       - '@audit_chain.recovery'
+      - '@audit_chain.recovery_support'
 
   audit_chain.evidence_exporter:
     class: Drupal\audit_chain\EvidenceExporter
@@ -86,6 +92,7 @@ services:
       - '@audit_chain.logger'
       - '@audit_chain.recovery'
       - '@datetime.time'
+      - '@audit_chain.recovery_support'
 
   audit_chain.witness_transport:
     class: Drupal\audit_chain\Witness\GuzzleWitnessTransport
@@ -155,3 +162,4 @@ services:
 
   Drupal\audit_chain\AuditChainLoggerInterface: '@audit_chain.logger'
   Drupal\audit_chain\AuditChainCollector: '@audit_chain.collector'
+  Drupal\audit_chain\AuditChainRecoverySupport: '@audit_chain.recovery_support'

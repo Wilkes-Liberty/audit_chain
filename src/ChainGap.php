@@ -64,6 +64,7 @@ final class ChainGap {
     private readonly Connection $database,
     private readonly AuditChainLogger $chain,
     private readonly RecoverySegments $recovery,
+    private readonly AuditChainRecoverySupport $recoverySupport,
   ) {}
 
   /**
@@ -77,7 +78,7 @@ final class ChainGap {
    */
   public function prepare(array $input): array {
     $statement = $this->statement($input);
-    return $this->chain->withChainLock(function () use ($statement): array {
+    return $this->recoverySupport->withChainLock(function () use ($statement): array {
       $this->assertRecordable($statement['gap']);
       return $statement;
     });
@@ -100,7 +101,7 @@ final class ChainGap {
       || !hash_equals($statement['snapshot_digest'], $expectedDigest)) {
       throw new \InvalidArgumentException('The approved gap statement does not match this digest.');
     }
-    return $this->chain->withChainLock(function () use ($statement): array {
+    return $this->recoverySupport->withChainLock(function () use ($statement): array {
       $existing = $this->findByGapId($statement['gap']['gap_id']);
       if ($existing !== NULL) {
         if (!hash_equals($statement['snapshot_digest'], $existing['snapshot_digest'])) {

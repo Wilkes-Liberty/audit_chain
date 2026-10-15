@@ -486,7 +486,7 @@ final class RecoverySegmentsTest extends KernelTestBase {
     $this->container->get('database')->update('audit_chain_log')
       ->fields(['prev_hash' => $right['prev_hash'], 'row_hash' => $right['row_hash']])
       ->condition('id', 3)->execute();
-    $inspect = $this->chain->recoveryRowInspector();
+    $inspect = $this->container->get('audit_chain.recovery_support')->recoveryRowInspector();
     foreach ($this->rows() as $row) {
       $this->assertTrue($inspect((array) $row)['authenticated']);
     }

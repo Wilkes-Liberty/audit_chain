@@ -13,8 +13,12 @@ use PHPUnit\Framework\Attributes\Group;
  * Kernel tests for the request-scoped collector.
  *
  * The collector exists because the obvious integration is the destructive one:
- * a consumer logging from `hook_entity_field_access()` turns one human action
- * into dozens of chain rows, and a flooded hash chain cannot be un-flooded.
+ * a consumer logging from `hook_entity_field_access()` turns one operator
+ * action into dozens of chain rows, and a flooded hash chain cannot be
+ * un-flooded.
+ *
+ * @coversDefaultClass \Drupal\audit_chain\AuditChainCollector
+ * @group audit_chain
  */
 #[CoversClass(AuditChainCollector::class)]
 #[Group('audit_chain')]

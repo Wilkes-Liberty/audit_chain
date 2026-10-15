@@ -110,6 +110,11 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
   public const STATE_SEAL = 'audit_chain.seal';
 
   /**
+   * Recovery and lock collaborator, created once per logger instance.
+   */
+  private ?AuditChainRecoverySupport $recoverySupport = NULL;
+
+  /**
    * Constructs an AuditChainLogger.
    *
    * @param \Drupal\Core\Database\Connection $database
@@ -145,6 +150,29 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
     private readonly EntityTypeManagerInterface $entityTypeManager,
     private readonly StateInterface $state,
   ) {}
+
+  /**
+   * Returns the injected recovery and lock collaborator.
+   *
+   * Factory for audit_chain.recovery_support. Hash, mutex, and seal
+   * primitives stay on this logger; only the former public @internal
+   * recovery helpers are exposed through the collaborator.
+   *
+   * @internal
+   */
+  public function recoverySupport(): AuditChainRecoverySupport {
+    return $this->recoverySupport ??= new AuditChainRecoverySupport(
+      $this->database,
+      $this->state,
+      $this->configFactory,
+      $this->acquireAppendMutex(...),
+      $this->verificationKeys(...),
+      $this->canonicalFromRecord(...),
+      $this->matchesAnyKey(...),
+      $this->resolveHashKey(...),
+      $this->throwSigningUnavailable(...),
+    );
+  }
 
   /**
    * {@inheritdoc}
@@ -798,24 +826,10 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
   /**
    * Runs a chain operation under the same transaction lock as appends.
    *
-   * @internal
    * Recovery callers must not perform network I/O inside this callback.
    */
-  public function withChainLock(callable $operation): mixed {
-    $transaction = $this->database->startTransaction();
-    try {
-      $this->acquireAppendMutex();
-      // Recovery must not reuse a seal cached before another serialized
-      // maintenance operation completed.
-      $this->state->resetCache();
-      $result = $operation();
-    }
-    catch (\Throwable $exception) {
-      $transaction->rollBack();
-      throw $exception;
-    }
-    unset($transaction);
-    return $result;
+  private function withChainLock(callable $operation): mixed {
+    return $this->recoverySupport()->withChainLock($operation);
   }
 
   /**
@@ -829,65 +843,6 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
     }
     return $this->database->select('audit_chain_recovery', 'r')
       ->fields('r', ['segment_id'])->range(0, 1)->forUpdate()->execute()->fetchField() !== FALSE;
-  }
-
-  /**
-   * Creates an inspector using the normal verifier's canonical encoding.
-   *
-   * @internal
-   * No plaintext metadata or signing material leaves this method.
-   *
-   * @return callable
-   *   Returns a content digest and keyed authentication flag for a stored row.
-   */
-  public function recoveryRowInspector(): callable {
-    $keys = $this->verificationKeys();
-    return function (array $row) use ($keys): array {
-      $canonical = $this->canonicalFromRecord($row);
-      return [
-        'content_digest' => hash('sha256', $canonical),
-        'authenticated' => $this->matchesAnyKey(
-          (string) ($row['row_hash'] ?? ''),
-          (string) ($row['prev_hash'] ?? ''),
-          $canonical,
-          $keys,
-          (string) ($row['key_id'] ?? ''),
-        ),
-      ];
-    };
-  }
-
-  /**
-   * Signs a recovery manifest with an available active key.
-   *
-   * @internal
-   *
-   * @return array
-   *   Signing key identifier and domain-separated HMAC, never key material.
-   */
-  public function signRecoveryManifest(string $manifest): array {
-    $key = $this->resolveHashKey($this->configFactory->get('audit_chain.settings')->get('hash_key'));
-    if ($key['value'] === '') {
-      $this->throwSigningUnavailable($key);
-    }
-    return [
-      'key_id' => $key['id'],
-      'mac' => hash_hmac('sha256', 'audit_chain.recovery.v1|' . $manifest, $key['value']),
-    ];
-  }
-
-  /**
-   * Authenticates a recovery manifest with active or retained signing keys.
-   *
-   * @internal
-   */
-  public function authenticateRecoveryManifest(string $manifest, string $mac): bool {
-    foreach ($this->verificationKeys() as $key) {
-      if (hash_equals(hash_hmac('sha256', 'audit_chain.recovery.v1|' . $manifest, $key), $mac)) {
-        return TRUE;
-      }
-    }
-    return FALSE;
   }
 
   /**

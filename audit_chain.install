@@ -5,6 +5,8 @@
  * Install and schema functions for Audit Chain.
  */
 
+declare(strict_types=1);
+
 use Drupal\audit_chain\AuditChainLogger;
 use Drupal\audit_chain\EvidenceExporter;
 use Drupal\audit_chain\ScheduledVerificationIntegrity;

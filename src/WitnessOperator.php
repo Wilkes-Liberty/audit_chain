@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Drupal\audit_chain;
 
 /**
- * Human-gated witness operations for the command line.
+ * Operator-gated witness operations for the command line.
  *
  * Approval is the exact persisted digest and the exact backend list. A
  * Drush affirmative flag is not accepted here. The operator does not write
@@ -70,7 +70,7 @@ final class WitnessOperator {
       return new WitnessOperation(1, [$exception->getMessage()]);
     }
     $line = ($verdict->valid ? 'valid' : 'invalid') . ' ' . $verdict->reason;
-    return new WitnessOperation($verdict->valid ? 0 : 1, [$line], NULL, $verdict->evidence);
+    return new WitnessOperation($verdict->valid ? 0 : 1, [$line]);
   }
 
   /**

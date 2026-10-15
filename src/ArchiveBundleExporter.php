@@ -26,6 +26,7 @@ final class ArchiveBundleExporter {
     private readonly AuditChainLogger $chain,
     private readonly RecoverySegments $recovery,
     private readonly TimeInterface $time,
+    private readonly AuditChainRecoverySupport $recoverySupport,
   ) {}
 
   /**
@@ -39,7 +40,7 @@ final class ArchiveBundleExporter {
     if ($fromId < 1 || ($throughId !== NULL && $throughId < $fromId)) {
       throw new \InvalidArgumentException('The archive window must use positive ascending row ids.');
     }
-    return $this->chain->withChainLock(function () use ($fromId, $throughId): array {
+    return $this->recoverySupport->withChainLock(function () use ($fromId, $throughId): array {
       $verdict = $this->chain->verify();
       $successor = $this->recovery->currentStatus();
       if ((!$verdict['ok'] || $successor !== NULL)

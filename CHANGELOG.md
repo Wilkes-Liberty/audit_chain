@@ -6,6 +6,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Recovery and lock helpers (`withChainLock`, `recoveryRowInspector`,
+  `signRecoveryManifest`, `authenticateRecoveryManifest`) now live on the
+  injected `audit_chain.recovery_support` collaborator instead of
+  `AuditChainLogger`. Hash, mutex, and seal behavior is unchanged.
+
 ## [1.12.0] - 2026-10-07
 
 ### Added

@@ -25,6 +25,7 @@ final class RecoverySegments {
     private readonly AuditChainLogger $chain,
     private readonly TimeInterface $time,
     private readonly StateInterface $state,
+    private readonly AuditChainRecoverySupport $recoverySupport,
     private readonly ?ModuleExtensionList $modules = NULL,
   ) {}
 
@@ -32,7 +33,7 @@ final class RecoverySegments {
    * Prepares a read-only snapshot for operator review.
    */
   public function prepare(): array {
-    return $this->chain->withChainLock(function (): array {
+    return $this->recoverySupport->withChainLock(function (): array {
       $snapshot = $this->snapshot();
       return [
         'snapshot' => $snapshot,
@@ -60,7 +61,7 @@ final class RecoverySegments {
       throw new \InvalidArgumentException('A segment UUID and reviewed snapshot SHA-256 digest are required.');
     }
     $context = $this->validateContext($context);
-    return $this->chain->withChainLock(function () use ($segmentId, $expectedSnapshot, $context): array {
+    return $this->recoverySupport->withChainLock(function () use ($segmentId, $expectedSnapshot, $context): array {
       $existing = $this->record($segmentId);
       if ($existing !== NULL) {
         $manifest = $this->authenticatedManifest($existing);
@@ -100,7 +101,7 @@ final class RecoverySegments {
         'context' => $context,
       ];
       $payload = self::encode($manifest);
-      $signature = $this->chain->signRecoveryManifest($payload);
+      $signature = $this->recoverySupport->signRecoveryManifest($payload);
       if ($signature['key_id'] !== $manifest['signing_key_id']) {
         throw new \RuntimeException('The active signing key changed during recovery.');
       }
@@ -138,7 +139,7 @@ final class RecoverySegments {
    * Verifies a successor without returning a whole-history success.
    */
   public function verify(string $segmentId): array {
-    return $this->chain->withChainLock(function () use ($segmentId): array {
+    return $this->recoverySupport->withChainLock(function () use ($segmentId): array {
       $record = $this->record($segmentId);
       if ($record === NULL) {
         return $this->failure('recovery_record_missing');
@@ -173,7 +174,7 @@ final class RecoverySegments {
    *   path, or the next surviving row is not the named live row.
    */
   public function assertSurvivingAnchor(string $segmentId, int $forkId, string $forkHash, string $liveHash): void {
-    $this->chain->withChainLock(function () use ($segmentId, $forkId, $forkHash, $liveHash): void {
+    $this->recoverySupport->withChainLock(function () use ($segmentId, $forkId, $forkHash, $liveHash): void {
       $record = $this->record($segmentId);
       if ($record === NULL || empty($this->verifyLocked($record)['segment_ok'])) {
         throw new \RuntimeException('The recovery segment does not verify.');
@@ -282,7 +283,7 @@ final class RecoverySegments {
    * Exports exactly the record that was verified under the shared mutex.
    */
   public function export(string $segmentId): array {
-    return $this->chain->withChainLock(function () use ($segmentId): array {
+    return $this->recoverySupport->withChainLock(function () use ($segmentId): array {
       $record = $this->record($segmentId);
       if ($record === NULL) {
         return ['verification' => $this->failure('recovery_record_missing')];
@@ -312,7 +313,7 @@ final class RecoverySegments {
     if (!hash_equals($manifest['snapshot_digest'], hash('sha256', self::encode($actual)))) {
       return $this->failure('historical_anchor_changed');
     }
-    $inspect = $this->chain->recoveryRowInspector();
+    $inspect = $this->recoverySupport->recoveryRowInspector();
     $previous = $snapshot['head_hash'];
     $count = 0;
     $rows = $this->database->select('audit_chain_log', 'l')
@@ -358,7 +359,7 @@ final class RecoverySegments {
    * Captures logical contents, hashes, ordering, seals and branch tips.
    */
   private function snapshot(?int $through = NULL): array {
-    $inspect = $this->chain->recoveryRowInspector();
+    $inspect = $this->recoverySupport->recoveryRowInspector();
     $query = $this->database->select('audit_chain_log', 'l')->fields('l')->orderBy('id')->forUpdate();
     if ($through !== NULL) {
       $query->condition('id', $through, '<=');
@@ -409,7 +410,7 @@ final class RecoverySegments {
    * Authenticates the complete stored manifest before interpreting it.
    */
   private function authenticatedManifest(array $record): array {
-    if (!$this->chain->authenticateRecoveryManifest($record['manifest'], $record['mac'])) {
+    if (!$this->recoverySupport->authenticateRecoveryManifest($record['manifest'], $record['mac'])) {
       throw new \RuntimeException('The recovery signature cannot be authenticated.');
     }
     $manifest = json_decode($record['manifest'], TRUE, 64, JSON_THROW_ON_ERROR);

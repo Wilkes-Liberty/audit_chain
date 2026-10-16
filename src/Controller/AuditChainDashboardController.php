@@ -6,6 +6,7 @@ namespace Drupal\audit_chain\Controller;
 
 use Drupal\audit_chain\AuditChainChartRenderer;
 use Drupal\audit_chain\AuditChainMetrics;
+use Drupal\audit_chain\ScheduledVerificationPresentation;
 use Drupal\Core\Controller\ControllerBase;
 use Drupal\Core\Datetime\DateFormatterInterface;
 use Drupal\Core\Url;
@@ -99,137 +100,33 @@ final class AuditChainDashboardController extends ControllerBase {
    */
   private function buildChain(): array {
     $integrity = $this->metrics->integrity();
-    $rows = $integrity['rows'];
     $time = $integrity['time'];
     $when = $time ? $this->dates->format($time) : self::PLACEHOLDER;
-
-    return match ($integrity['reason']) {
-      'passing' => [
-        'state' => 'ok',
-        'label' => (string) $this->t('Verified'),
-        'detail' => (string) $this->t('@n rows. Last scheduled verification @when.', [
-          '@n' => $rows,
-          '@when' => $when,
-        ]),
-      ],
-      'failed' => [
-        'state' => 'crit',
-        'label' => (string) $this->t('Failed'),
-        'detail' => (string) $this->t('Last scheduled verification failed at @when. Run drush audit-chain:verify. The chain was not modified by the check.', [
-          '@when' => $when,
-        ]),
-      ],
-      'seal_foreign' => [
-        'state' => 'warn',
-        'label' => (string) $this->t('Foreign seal'),
-        'detail' => (string) $this->t('Sealed prefix hashes are unchanged but this environment cannot authenticate the copied seal.'),
-      ],
-      'unsigned_prefix' => [
-        'state' => 'warn',
-        'label' => (string) $this->t('Unsigned prefix'),
-        'detail' => (string) $this->t('A leading unsigned prefix is retained and is not re-signed. Signed rows after it are the authoritative chain. Last scheduled verification @when.', [
-          '@when' => $when,
-        ]),
-      ],
-      'historical_exception' => $this->historicalExceptionCard($when),
-      'chain_rewound' => $this->rewoundCard($when),
-      'witness_unreachable' => [
-        'state' => 'warn',
-        'label' => (string) $this->t('Rewind check unavailable'),
-        'detail' => (string) $this->t('The configured witness could not be read at @when, so this run does not show whether a database restore rewound the chain.', [
-          '@when' => $when,
-        ]),
-      ],
-      'witness_ambiguous' => [
-        'state' => 'warn',
-        'label' => (string) $this->t('Witness ambiguous'),
-        'detail' => (string) $this->t('Two confirmed witnesses name different checkpoints, so this run does not choose a chain head. Last scheduled verification @when. The chain was not modified by the check.', [
-          '@when' => $when,
-        ]),
-      ],
-      'overdue' => [
-        'state' => 'warn',
-        'label' => (string) $this->t('Overdue'),
-        'detail' => (string) $this->t('@n rows. Last successful verification @when is past twice the configured interval.', [
-          '@n' => $rows,
-          '@when' => $when,
-        ]),
-      ],
-      'disabled' => [
-        'state' => 'warn',
-        'label' => (string) $this->t('Not scheduled'),
-        'detail' => (string) $this->t('@n rows. Scheduled verification is off. Run drush audit-chain:verify, or set an interval under settings.', [
-          '@n' => $rows,
-        ]),
-      ],
-      default => [
-        'state' => 'warn',
-        'label' => (string) $this->t('Pending'),
-        'detail' => (string) $this->t('@n rows. No scheduled verification has run yet.', [
-          '@n' => $rows,
-        ]),
-      ],
-    };
-  }
-
-  /**
-   * Builds the card for a witness the live chain no longer contains.
-   *
-   * @param string $when
-   *   Formatted last-run time, or the dashboard placeholder.
-   *
-   * @return array{state: string, label: string, detail: string}
-   *   The chain card.
-   */
-  private function rewoundCard(string $when): array {
-    $rewind = $this->metrics->rewindAssessment() ?? [];
-    $through = is_numeric($rewind['through_id'] ?? NULL) ? (int) $rewind['through_id'] : NULL;
-    $detail = $through === NULL
-      ? $this->t('A confirmed witness is not in this database. A database restore can rewind the chain without breaking its hashes. Last scheduled verification @when. The chain was not modified by the check.', [
-        '@when' => $when,
-      ])
-      : $this->t('The witnessed head at row @id is not the live row. A database restore can rewind the chain without breaking its hashes. Last scheduled verification @when. The chain was not modified by the check.', [
-        '@id' => $through,
-        '@when' => $when,
-      ]);
-    return [
-      'state' => 'crit',
-      'label' => (string) $this->t('Chain rewound'),
-      'detail' => (string) $detail,
-    ];
-  }
-
-  /**
-   * Builds the documented historical-exception integrity card.
-   *
-   * @param string $when
-   *   Formatted last-run time, or the dashboard placeholder.
-   *
-   * @return array{state: string, label: string, detail: string}
-   *   The chain card.
-   */
-  private function historicalExceptionCard(string $when): array {
     $successor = $this->metrics->recoveryStatus() ?? [];
     $verdict = is_array($successor['historical_verdict'] ?? NULL)
       ? $successor['historical_verdict']
       : [];
-    $brokenAt = is_numeric($verdict['broken_at'] ?? NULL)
-      ? (int) $verdict['broken_at']
-      : NULL;
-    $segmentId = is_string($successor['segment_id'] ?? NULL) && $successor['segment_id'] !== ''
-      ? $successor['segment_id']
-      : NULL;
+    $rewind = $this->metrics->rewindAssessment() ?? [];
+    $presented = ScheduledVerificationPresentation::forReason($integrity['reason'], [
+      'rows' => $integrity['rows'],
+      'when' => $when,
+      'broken_at' => is_numeric($verdict['broken_at'] ?? NULL)
+        ? (int) $verdict['broken_at']
+        : NULL,
+      'segment_id' => is_string($successor['segment_id'] ?? NULL) && $successor['segment_id'] !== ''
+        ? $successor['segment_id']
+        : NULL,
+      'historical_ok' => !empty($successor['historical_ok']),
+      'segment_ok' => !empty($successor['segment_ok']),
+      'rewind_through_id' => is_numeric($rewind['through_id'] ?? NULL)
+        ? (int) $rewind['through_id']
+        : NULL,
+    ]);
 
     return [
-      'state' => 'warn',
-      'label' => (string) $this->t('Historical exception'),
-      'detail' => (string) $this->t('Audit Chain preserved failure at row @broken_at. Successor @segment_id verifies (historical_ok=@historical_ok, segment_ok=@segment_ok). This is a documented preserved failure, not a new break. Last scheduled verification @when. A missing successor or segment_ok=false is still a critical failure; run drush audit-chain:verify and drush audit-chain:recovery-verify.', [
-        '@broken_at' => $brokenAt ?? (string) $this->t('unknown'),
-        '@segment_id' => $segmentId ?? (string) $this->t('unknown'),
-        '@historical_ok' => !empty($successor['historical_ok']) ? 'true' : 'false',
-        '@segment_ok' => !empty($successor['segment_ok']) ? 'true' : 'false',
-        '@when' => $when,
-      ]),
+      'state' => $presented['severity'],
+      'label' => (string) $presented['label'],
+      'detail' => (string) $presented['detail'],
     ];
   }
 

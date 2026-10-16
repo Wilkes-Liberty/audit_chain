@@ -8,11 +8,14 @@ use Drupal\Component\Plugin\PluginManagerInterface;
 use Drupal\Component\Utility\Html;
 use Drupal\Core\Extension\ModuleHandlerInterface;
 use Drupal\Core\Render\Markup;
+use Drupal\Core\StringTranslation\StringTranslationTrait;
 
 /**
  * Renders a metric series as a chart render array.
  */
 final class AuditChainChartRenderer {
+
+  use StringTranslationTrait;
 
   /**
    * Supported chart types.
@@ -96,7 +99,7 @@ final class AuditChainChartRenderer {
       'empty' => [
         '#type' => 'html_tag',
         '#tag' => 'p',
-        '#value' => 'No data',
+        '#value' => $this->t('No data'),
         '#attributes' => ['class' => ['audit-chain-chart__empty']],
       ],
     ];

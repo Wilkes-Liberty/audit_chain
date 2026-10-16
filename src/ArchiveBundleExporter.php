@@ -6,7 +6,6 @@ namespace Drupal\audit_chain;
 
 use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Core\Database\Connection;
-use Drupal\Core\Site\Settings;
 
 /**
  * Creates deterministic, data-minimized archive checkpoint bundles.
@@ -61,7 +60,7 @@ final class ArchiveBundleExporter {
       $manifest = [
         'contract' => self::CONTRACT,
         'contract_version' => self::CONTRACT_VERSION,
-        'instance_id' => $this->instanceId(),
+        'instance_id' => $this->recoverySupport->instanceId('Configure a unique runtime audit_chain_instance_id before creating an archive checkpoint.'),
         'window' => [
           'from_id' => $fromId,
           'through_id' => $resolvedThrough,
@@ -244,17 +243,6 @@ final class ArchiveBundleExporter {
       'created' => $this->time->getCurrentTime(),
       'manifest' => self::encode($manifest),
     ])->execute();
-  }
-
-  /**
-   * Requires the same runtime identity as successor segments.
-   */
-  private function instanceId(): string {
-    $identity = Settings::get('audit_chain_instance_id');
-    if (!is_string($identity) || trim($identity) === '' || strlen($identity) > 255) {
-      throw new \RuntimeException('Configure a unique runtime audit_chain_instance_id before creating an archive checkpoint.');
-    }
-    return $identity;
   }
 
   /**

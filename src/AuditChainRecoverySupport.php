@@ -6,6 +6,7 @@ namespace Drupal\audit_chain;
 
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Database\Connection;
+use Drupal\Core\Site\Settings;
 use Drupal\Core\State\StateInterface;
 
 /**
@@ -152,6 +153,23 @@ final class AuditChainRecoverySupport {
       }
     }
     return FALSE;
+  }
+
+  /**
+   * Requires a deployment identity kept outside exported configuration.
+   *
+   * @param string $message
+   *   Exception text when the identity is missing or invalid.
+   *
+   * @return string
+   *   The configured instance identity.
+   */
+  public function instanceId(string $message): string {
+    $identity = Settings::get('audit_chain_instance_id');
+    if (!is_string($identity) || trim($identity) === '' || strlen($identity) > 255) {
+      throw new \RuntimeException($message);
+    }
+    return $identity;
   }
 
 }

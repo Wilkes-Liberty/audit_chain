@@ -130,37 +130,7 @@ final class ScheduledVerifier {
       );
     }
 
-    if (!$run['ok'] && $run['reason'] === AuditChainLogger::REASON_SEAL_FOREIGN) {
-      $this->logger->warning(
-        'Scheduled audit-chain verification found a FOREIGN SEAL. The sealed prefix hashes are unchanged, but this environment cannot authenticate the seal MAC. The run remains unverified and evidence export stays blocked; verify on the source environment or configure its key as retired if policy permits.',
-      );
-    }
-    elseif (!$run['ok'] && $this->documentedUnsignedPrefix($run)) {
-      $this->logger->warning(
-        'Scheduled audit-chain verification found a documented unsigned prefix. Those rows stay in the log and are not re-signed. The signed rows after the prefix are the authoritative chain. Whole-history verification stays unsuccessful.',
-      );
-    }
-    elseif (!$run['ok'] && ScheduledVerificationIntegrity::isDocumentedHistoricalException($run)) {
-      $verdict = is_array($run['verdict'] ?? NULL) ? $run['verdict'] : [];
-      $successor = is_array($run['successor'] ?? NULL) ? $run['successor'] : [];
-      $this->logger->warning(
-        'Scheduled audit-chain verification found a documented historical exception at row @broken_at. Successor segment @segment_id verifies (segment_ok=true, historical_ok=false). This is a preserved failure, not a new break. Whole-history verification stays unsuccessful.',
-        [
-          '@broken_at' => (string) ($verdict['broken_at'] ?? 'unknown'),
-          '@segment_id' => (string) ($successor['segment_id'] ?? 'unknown'),
-        ],
-      );
-    }
-    elseif (!$run['ok']) {
-      $this->logger->error(
-        'Scheduled audit-chain verification FAILED: @reason. The chain was not modified; investigate before trusting new entries. See the status report for details.',
-        ['@reason' => (string) $run['reason']]
-      );
-      $this->eventDispatcher->dispatch(
-        new AuditChainVerificationFailedEvent($run),
-        AuditChainVerificationFailedEvent::EVENT_NAME
-      );
-    }
+    $this->recordPresentation($run);
 
     return $run;
   }
@@ -194,20 +164,55 @@ final class ScheduledVerifier {
   }
 
   /**
-   * Whether this run is a leading unsigned prefix with a signed successor.
+   * Logs and dispatches from the shared presentation mapping.
+   *
+   * The classify() method is the only classifier. Interval is forced above
+   * zero and "now" is the run time so disabled/overdue/pending cannot mask
+   * this run.
    *
    * @param array $run
    *   The recorded scheduled-verification run.
-   *
-   * @return bool
-   *   TRUE only when verify() marked the unsigned rows as that prefix.
    */
-  private function documentedUnsignedPrefix(array $run): bool {
-    if (($run['reason'] ?? NULL) !== AuditChainLogger::REASON_WRITTEN_UNKEYED) {
-      return FALSE;
+  private function recordPresentation(array $run): void {
+    $interval = (int) $this->configFactory->get('audit_chain.settings')->get('verify_interval');
+    $classified = ScheduledVerificationIntegrity::classify(
+      $run,
+      max($interval, 1),
+      (int) ($run['time'] ?? $this->time->getRequestTime()),
+    );
+    $successor = is_array($run['successor'] ?? NULL) ? $run['successor'] : [];
+    $verdict = is_array($run['verdict'] ?? NULL) ? $run['verdict'] : [];
+    $historical = is_array($successor['historical_verdict'] ?? NULL)
+      ? $successor['historical_verdict']
+      : [];
+    $rewind = is_array($run['rewind'] ?? NULL) ? $run['rewind'] : [];
+    $brokenAt = is_numeric($verdict['broken_at'] ?? NULL)
+      ? (int) $verdict['broken_at']
+      : (is_numeric($historical['broken_at'] ?? NULL) ? (int) $historical['broken_at'] : NULL);
+    $presented = ScheduledVerificationPresentation::forReason($classified['reason'], [
+      'run_reason' => (string) ($run['reason'] ?? ''),
+      'broken_at' => $brokenAt,
+      'segment_id' => is_string($successor['segment_id'] ?? NULL) && $successor['segment_id'] !== ''
+        ? $successor['segment_id']
+        : NULL,
+      'historical_ok' => !empty($successor['historical_ok']),
+      'segment_ok' => !empty($successor['segment_ok']),
+      'rewind_through_id' => is_numeric($rewind['through_id'] ?? NULL)
+        ? (int) $rewind['through_id']
+        : NULL,
+    ]);
+    if ($presented['log_level'] === 'error') {
+      $this->logger->error((string) $presented['detail']);
     }
-    $verdict = $run['verdict'] ?? NULL;
-    return is_array($verdict) && ($verdict['unsigned_prefix'] ?? FALSE) === TRUE;
+    elseif ($presented['log_level'] !== NULL) {
+      $this->logger->warning((string) $presented['detail']);
+    }
+    if ($presented['dispatch']) {
+      $this->eventDispatcher->dispatch(
+        new AuditChainVerificationFailedEvent($run),
+        AuditChainVerificationFailedEvent::EVENT_NAME,
+      );
+    }
   }
 
 }

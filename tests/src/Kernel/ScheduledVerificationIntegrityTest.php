@@ -8,6 +8,7 @@ use Drupal\audit_chain\AuditChainLogger;
 use Drupal\audit_chain\AuditChainMetrics;
 use Drupal\audit_chain\RewindDetector;
 use Drupal\audit_chain\ScheduledVerificationIntegrity;
+use Drupal\audit_chain\ScheduledVerificationPresentation;
 use Drupal\audit_chain\ScheduledVerifier;
 use Drupal\KernelTests\KernelTestBase;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -385,7 +386,8 @@ final class ScheduledVerificationIntegrityTest extends KernelTestBase {
       if ($classified['reason'] === 'historical_exception') {
         $value = (string) $requirements['audit_chain_scheduled_verification']['value'];
         $description = (string) $requirements['audit_chain_scheduled_verification']['description'];
-        $this->assertStringContainsString('Documented historical exception at row 11425', $value);
+        $this->assertStringContainsString('Historical exception', $value);
+        $this->assertStringContainsString('Documented historical exception at row 11425', $description);
         $this->assertStringContainsString('Audit Chain', $description);
         $this->assertStringContainsString('11425', $description);
         $this->assertStringContainsString('957345ba-a0c8-42d5-9dcb-92ba4430a820', $description);
@@ -395,6 +397,77 @@ final class ScheduledVerificationIntegrityTest extends KernelTestBase {
         $this->assertStringContainsString('drush audit-chain:verify', $description);
         $this->assertStringContainsString('recovery-verify', $description);
       }
+    }
+  }
+
+  /**
+   * An unknown reason is not pending and does not throw on the status report.
+   *
+   * @covers \Drupal\audit_chain\ScheduledVerificationPresentation::forReason
+   */
+  public function testUnknownReasonIsNotPendingAndDoesNotThrow(): void {
+    $presented = ScheduledVerificationPresentation::forReason('mystery_future_reason', [
+      'rows' => 3,
+    ]);
+    $this->assertSame('warn', $presented['severity']);
+    $this->assertFalse($presented['omit']);
+    $this->assertFalse($presented['dispatch']);
+    $this->assertSame('warning', $presented['log_level']);
+    $label = (string) $presented['label'];
+    $detail = (string) $presented['detail'];
+    $this->assertSame('Unrecognized verification state', $label);
+    $this->assertStringNotContainsString('Pending', $label);
+    $this->assertStringNotContainsString('No scheduled verification has run yet', $detail);
+    $this->assertStringContainsString('mystery_future_reason', $detail);
+
+    $pending = ScheduledVerificationPresentation::forReason('pending', ['rows' => 3]);
+    $this->assertSame('Pending', (string) $pending['label']);
+    $this->assertStringContainsString('No scheduled verification has run yet', (string) $pending['detail']);
+
+    \Drupal::moduleHandler()->loadInclude('audit_chain', 'install');
+    $requirement = _audit_chain_scheduled_verification_requirement(
+      [
+        'status' => 'warn',
+        'reason' => 'mystery_future_reason',
+        'time' => NULL,
+      ],
+      FALSE,
+      [],
+    );
+    $this->assertIsArray($requirement);
+    $this->assertSame(REQUIREMENT_WARNING, $requirement['severity']);
+    $this->assertStringContainsString('Unrecognized verification state', (string) $requirement['value']);
+    $this->assertStringNotContainsString('Pending', (string) $requirement['value']);
+    $this->assertStringNotContainsString('No scheduled verification has run yet', (string) $requirement['description']);
+    $this->assertStringNotContainsString('Enabled, but no run recorded yet', (string) $requirement['value']);
+  }
+
+  /**
+   * Every classified reason has a named card, not the unknown fallback.
+   *
+   * @covers \Drupal\audit_chain\ScheduledVerificationPresentation::forReason
+   */
+  public function testClassifiedReasonsAreNotTheUnknownCard(): void {
+    $reasons = [
+      'disabled',
+      'pending',
+      'seal_foreign',
+      'unsigned_prefix',
+      'historical_exception',
+      'failed',
+      'chain_rewound',
+      'witness_unreachable',
+      'witness_ambiguous',
+      'overdue',
+      'passing',
+    ];
+    foreach ($reasons as $reason) {
+      $presented = ScheduledVerificationPresentation::forReason($reason);
+      $this->assertNotSame(
+        'Unrecognized verification state',
+        (string) $presented['label'],
+        $reason,
+      );
     }
   }
 

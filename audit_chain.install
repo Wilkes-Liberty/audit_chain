@@ -10,6 +10,7 @@ declare(strict_types=1);
 use Drupal\audit_chain\AuditChainLogger;
 use Drupal\audit_chain\EvidenceExporter;
 use Drupal\audit_chain\ScheduledVerificationIntegrity;
+use Drupal\audit_chain\ScheduledVerificationPresentation;
 use Drupal\audit_chain\ScheduledVerifier;
 
 /**
@@ -443,160 +444,87 @@ function _audit_chain_requirements_scheduled_verification(array &$requirements):
     $interval,
     \Drupal::time()->getRequestTime(),
   );
-  $severity = match ($classified['status']) {
-    'ok' => REQUIREMENT_OK,
-    'crit' => REQUIREMENT_ERROR,
-    'warn' => REQUIREMENT_WARNING,
-    default => throw new \InvalidArgumentException('Unknown integrity status: ' . $classified['status']),
-  };
-  $run_reason = is_array($run) ? (string) ($run['reason'] ?? '') : '';
-  $title = t('Audit Chain: scheduled verification');
-  // Only states that show a last-run time need date.formatter; other
-  // hook_requirements callers may not have system date formats installed.
-  $when = in_array($classified['reason'], [
-    'seal_foreign',
-    'unsigned_prefix',
-    'historical_exception',
-    'failed',
-    'overdue',
-    'passing',
-    'chain_rewound',
-    'witness_unreachable',
-    'witness_ambiguous',
-  ], TRUE)
-    ? \Drupal::service('date.formatter')->format((int) ($classified['time'] ?? 0))
-    : NULL;
-
-  $requirement = match ($classified['reason']) {
-    'disabled' => $require_keyed ? [
-      'title' => $title,
-      'value' => t('Assurance profile enabled, but no verification schedule'),
-      'severity' => $severity,
-      'description' => t('verify_require_keyed is on while verify_interval is 0: keyed verification is required but never runs. Set a verification interval so integrity is proven on a cadence rather than on demand.'),
-    ] : NULL,
-    'pending' => [
-      'title' => $title,
-      'value' => t('Enabled, but no run recorded yet'),
-      'severity' => $severity,
-      'description' => t('The schedule is configured but cron has not executed a verification yet. Run cron, then re-check this report.'),
-    ],
-    'seal_foreign' => [
-      'title' => $title,
-      'value' => t('FOREIGN SEAL — unverified copy (last run @time)', [
-        '@time' => $when,
-      ]),
-      'severity' => $severity,
-      'description' => t('The sealed prefix hashes are unchanged, but this environment cannot authenticate the copied seal with a current or retired signing key. No prefix-hash change was detected. Verification remains fail-closed and evidence export stays blocked. Verify on the source environment, or make its signing key available as a retired key only if your key-separation policy permits.'),
-    ],
-    'unsigned_prefix' => [
-      'title' => $title,
-      'value' => t('Documented unsigned prefix (last run @time)', [
-        '@time' => $when,
-      ]),
-      'severity' => $severity,
-      'description' => t('A leading run of entries was hashed with unkeyed SHA-256. Those rows stay in the log. They are not cryptographically verifiable, and they are not re-signed or deleted. The signed rows after that prefix are the authoritative chain. An edited signed row, a missing signing key, or an unsigned row after the signed successor is still an error.'),
-    ],
-    'historical_exception' => _audit_chain_requirements_historical_exception(
-      $title,
-      $severity,
-      $when,
-      is_array($run) ? $run : [],
-    ),
-    'failed' => [
-      'title' => $title,
-      'value' => t('FAILED — @reason (last run @time)', [
-        '@reason' => $run_reason,
-        '@time' => $when,
-      ]),
-      'severity' => $severity,
-      'description' => t('The last scheduled verification did not pass. The chain was not modified by the check; investigate the reported reason with <code>drush audit-chain:verify</code> before trusting new entries.'),
-    ],
-    'chain_rewound' => [
-      'title' => $title,
-      'value' => t('CHAIN REWOUND (last run @time)', [
-        '@time' => $when,
-      ]),
-      'severity' => $severity,
-      'description' => t('A confirmed witness is no longer present in the live chain. A database restore can rewind the chain without breaking its hashes. The chain was not modified by the check. Investigate before trusting new entries.'),
-    ],
-    'witness_unreachable' => [
-      'title' => $title,
-      'value' => t('Rewind check unavailable (last run @time)', [
-        '@time' => $when,
-      ]),
-      'severity' => $severity,
-      'description' => t('The configured witness could not be read, so this run does not show whether a database restore rewound the chain. The hash-chain result is recorded separately.'),
-    ],
-    'witness_ambiguous' => [
-      'title' => $title,
-      'value' => t('Witness ambiguous (last run @time)', [
-        '@time' => $when,
-      ]),
-      'severity' => $severity,
-      'description' => t('Two confirmed witnesses name different checkpoints, so this run does not choose a chain head. The witness was read. The hash-chain result is recorded separately.'),
-    ],
-    'overdue' => [
-      'title' => $title,
-      'value' => t('Overdue — last successful run @time', [
-        '@time' => $when,
-      ]),
-      'severity' => $severity,
-      'description' => t('No verification has run within twice the configured interval. Confirm cron is executing; an unverified chain is an unproven one.'),
-    ],
-    'passing' => [
-      'title' => $title,
-      'value' => t('Passing — last run @time', [
-        '@time' => $when,
-      ]),
-      'severity' => $severity,
-    ],
-    default => throw new \InvalidArgumentException('Unknown integrity reason: ' . $classified['reason']),
-  };
-
+  $requirement = _audit_chain_scheduled_verification_requirement(
+    $classified,
+    $require_keyed,
+    is_array($run) ? $run : [],
+  );
   if ($requirement !== NULL) {
     $requirements['audit_chain_scheduled_verification'] = $requirement;
   }
 }
 
 /**
- * Builds the documented historical-exception status-report row.
+ * Builds one scheduled-verification status-report row from a classified reason.
  *
- * @param \Drupal\Core\StringTranslation\TranslatableMarkup $title
- *   Shared scheduled-verification title.
- * @param int $severity
- *   Classified severity.
- * @param string|\Drupal\Core\StringTranslation\TranslatableMarkup|null $when
- *   Formatted last-run time.
+ * Unknown reasons must not throw. They are not the pending-first-run card.
+ *
+ * @param array $classified
+ *   Output of ScheduledVerificationIntegrity::classify().
+ * @param bool $require_keyed
+ *   Whether the assurance profile is on.
  * @param array $run
- *   The stored scheduled-verification run.
+ *   The stored scheduled-verification run, or empty when none exists.
  *
- * @return array
- *   A hook_requirements row.
+ * @return array|null
+ *   A hook_requirements row, or NULL when the classifier is silent.
  */
-function _audit_chain_requirements_historical_exception(mixed $title, int $severity, mixed $when, array $run): array {
+function _audit_chain_scheduled_verification_requirement(array $classified, bool $require_keyed, array $run): ?array {
   $successor = is_array($run['successor'] ?? NULL) ? $run['successor'] : [];
   $verdict = is_array($run['verdict'] ?? NULL) ? $run['verdict'] : [];
   $historical = is_array($successor['historical_verdict'] ?? NULL)
     ? $successor['historical_verdict']
     : [];
+  $rewind = is_array($run['rewind'] ?? NULL) ? $run['rewind'] : [];
   $broken_at = is_numeric($verdict['broken_at'] ?? NULL)
     ? (int) $verdict['broken_at']
     : (is_numeric($historical['broken_at'] ?? NULL) ? (int) $historical['broken_at'] : NULL);
-  $segment_id = is_string($successor['segment_id'] ?? NULL) && $successor['segment_id'] !== ''
-    ? $successor['segment_id']
-    : NULL;
-  $placeholders = [
-    '@broken_at' => $broken_at ?? (string) t('unknown'),
-    '@segment_id' => $segment_id ?? (string) t('unknown'),
-    '@historical_ok' => !empty($successor['historical_ok']) ? 'true' : 'false',
-    '@segment_ok' => !empty($successor['segment_ok']) ? 'true' : 'false',
-    '@time' => $when,
+  $context = [
+    'require_keyed' => $require_keyed,
+    'run_reason' => (string) ($run['reason'] ?? ''),
+    'broken_at' => $broken_at,
+    'segment_id' => is_string($successor['segment_id'] ?? NULL) && $successor['segment_id'] !== ''
+      ? $successor['segment_id']
+      : NULL,
+    'historical_ok' => !empty($successor['historical_ok']),
+    'segment_ok' => !empty($successor['segment_ok']),
+    'rewind_through_id' => is_numeric($rewind['through_id'] ?? NULL)
+      ? (int) $rewind['through_id']
+      : NULL,
   ];
+  $reason = (string) ($classified['reason'] ?? '');
+  $presented = ScheduledVerificationPresentation::forReason($reason, $context);
+  if ($presented['omit']) {
+    return NULL;
+  }
+  // Only states that show a last-run time need date.formatter; other
+  // hook_requirements callers may not have system date formats installed.
+  $when = NULL;
+  if ($presented['uses_time']) {
+    $when = \Drupal::service('date.formatter')->format((int) ($classified['time'] ?? 0));
+    $presented = ScheduledVerificationPresentation::forReason(
+      $reason,
+      $context + ['when' => $when],
+    );
+  }
+  $severity = match ($presented['severity']) {
+    'ok' => REQUIREMENT_OK,
+    'crit' => REQUIREMENT_ERROR,
+    'warn' => REQUIREMENT_WARNING,
+    default => REQUIREMENT_WARNING,
+  };
+  $value = $presented['label'];
+  if ($presented['uses_time'] && $when !== NULL) {
+    $value = t('@label (last run @time)', [
+      '@label' => $presented['label'],
+      '@time' => $when,
+    ]);
+  }
   return [
-    'title' => $title,
-    'value' => t('Documented historical exception at row @broken_at (last run @time)', $placeholders),
+    'title' => t('Audit Chain: scheduled verification'),
+    'value' => $value,
     'severity' => $severity,
-    'description' => t('Audit Chain whole-history verification still reports the preserved failure at row @broken_at (historical_ok=@historical_ok). Successor segment @segment_id verifies independently (segment_ok=@segment_ok). This is a documented preserved failure, not a new break. Rows were not rewritten. A missing successor, or a successor that no longer verifies (segment_ok=false), is still a critical failure — investigate with <code>drush audit-chain:verify</code> and <code>drush audit-chain:recovery-verify</code>.', $placeholders),
+    'description' => $presented['detail'],
   ];
 }
 

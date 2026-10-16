@@ -151,7 +151,7 @@ final class ChainRewindTest extends KernelTestBase {
     $requirements = $this->runtimeRequirements();
     $requirement = $requirements['audit_chain_scheduled_verification'];
     $this->assertSame(REQUIREMENT_ERROR, $requirement['severity']);
-    $this->assertStringContainsString('CHAIN REWOUND', (string) $requirement['value']);
+    $this->assertStringContainsString('Chain rewound', (string) $requirement['value']);
 
     $controller = AuditChainDashboardController::create($this->container);
     $build = $controller->dashboard(Request::create('/admin/reports/audit-chain'));

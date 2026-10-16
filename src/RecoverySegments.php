@@ -8,7 +8,6 @@ use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Component\Uuid\Uuid;
 use Drupal\Core\Database\Connection;
 use Drupal\Core\Extension\ModuleExtensionList;
-use Drupal\Core\Site\Settings;
 use Drupal\Core\State\StateInterface;
 
 /**
@@ -90,7 +89,7 @@ final class RecoverySegments {
       $manifest = [
         'version' => 1,
         'segment_id' => $segmentId,
-        'instance_id' => $this->instanceId(),
+        'instance_id' => $this->recoverySupport->instanceId('Configure a unique runtime audit_chain_instance_id before recovery.'),
         'approved_at' => $this->time->getCurrentTime(),
         'source_version' => $this->modules?->getExtensionInfo('audit_chain')['version'] ?? 'unversioned',
         'snapshot_digest' => $expectedSnapshot,
@@ -392,7 +391,7 @@ final class RecoverySegments {
     }
     $tips = array_filter($tips, static fn (string $hash): bool => !isset($parents[$hash]));
     return [
-      'instance_id' => $this->instanceId(),
+      'instance_id' => $this->recoverySupport->instanceId('Configure a unique runtime audit_chain_instance_id before recovery.'),
       'count' => $count,
       'through_id' => $highWater,
       'head_hash' => $head,
@@ -415,24 +414,13 @@ final class RecoverySegments {
     }
     $manifest = json_decode($record['manifest'], TRUE, 64, JSON_THROW_ON_ERROR);
     if (!is_array($manifest) || ($manifest['version'] ?? NULL) !== 1
-      || ($manifest['instance_id'] ?? NULL) !== $this->instanceId()
+      || ($manifest['instance_id'] ?? NULL) !== $this->recoverySupport->instanceId('Configure a unique runtime audit_chain_instance_id before recovery.')
       || ($manifest['segment_id'] ?? NULL) !== $record['segment_id']
       || ($manifest['signing_key_id'] ?? NULL) !== $record['key_id']
       || ($manifest['historical_ok'] ?? NULL) !== FALSE) {
       throw new \RuntimeException('The recovery manifest does not match this instance or segment.');
     }
     return $manifest;
-  }
-
-  /**
-   * Requires a deployment identity kept outside exported configuration.
-   */
-  private function instanceId(): string {
-    $identity = Settings::get('audit_chain_instance_id');
-    if (!is_string($identity) || trim($identity) === '' || strlen($identity) > 255) {
-      throw new \RuntimeException('Configure a unique runtime audit_chain_instance_id before recovery.');
-    }
-    return $identity;
   }
 
   /**

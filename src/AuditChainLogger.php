@@ -69,9 +69,9 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
    * Verify() reason: rows are intact but were hashed without the signing key.
    *
    * A distinct verdict because the remedy is distinct. Reporting this as
-   * tampering — which is what this module did until now — sends an operator
-   * hunting for an intruder when what actually happened is that a Key entity
-   * did not resolve in the environment those rows were written in.
+   * tampering sends an operator hunting for an intruder when what actually
+   * happened is that a Key entity did not resolve in the environment those
+   * rows were written in.
    */
   public const REASON_WRITTEN_UNKEYED = 'written_unkeyed';
 
@@ -479,7 +479,7 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
    * {@inheritdoc}
    */
   public function sealPrefix(int $throughId, string $reason): array {
-    return $this->withChainLock(function () use ($throughId, $reason): array {
+    return $this->recoverySupport()->withChainLock(function () use ($throughId, $reason): array {
       if ($this->hasRecoveryRecord()) {
         return [
           'sealed' => FALSE,
@@ -655,7 +655,7 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
    * {@inheritdoc}
    */
   public function reencrypt(string $fromProfile, string $toProfile, int $limit = 0): array {
-    return $this->withChainLock(function () use ($fromProfile, $toProfile, $limit): array {
+    return $this->recoverySupport()->withChainLock(function () use ($fromProfile, $toProfile, $limit): array {
       if ($this->hasRecoveryRecord()) {
         return [
           'updated' => 0,
@@ -821,15 +821,6 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
       ->fields(['locked' => 1])
       ->condition('id', self::MUTEX_ID)
       ->execute();
-  }
-
-  /**
-   * Runs a chain operation under the same transaction lock as appends.
-   *
-   * Recovery callers must not perform network I/O inside this callback.
-   */
-  private function withChainLock(callable $operation): mixed {
-    return $this->recoverySupport()->withChainLock($operation);
   }
 
   /**

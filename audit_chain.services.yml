@@ -20,7 +20,7 @@ services:
 
   # Request-scoped buffer for consumers that would otherwise log per access
   # check. Deduplicates and writes once at kernel.terminate — see the README
-  # section "Writing to the chain".
+  # section "Two constraints every consumer must respect".
   audit_chain.collector:
     class: Drupal\audit_chain\AuditChainCollector
     arguments:

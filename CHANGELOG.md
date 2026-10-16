@@ -6,6 +6,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Status report, dashboard integrity card, and scheduled-verifier logging
+  share one presentation mapping for `ScheduledVerificationIntegrity`
+  reasons. `classify()` is still the only classifier. Unknown reasons no
+  longer throw from `hook_requirements` or reuse the Pending dashboard
+  card.
+- `AuditChainLogger` calls `recoverySupport()->withChainLock()` directly.
+  Recovery instance identity lives on `AuditChainRecoverySupport`. Hash,
+  mutex, and seal behavior is unchanged.
+
 ## [1.12.1] - 2026-10-15
 
 ### Changed

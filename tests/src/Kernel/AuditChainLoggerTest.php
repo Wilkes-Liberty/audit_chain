@@ -140,7 +140,8 @@ final class AuditChainLoggerTest extends KernelTestBase {
    * An uncommitted append holds the mutex against another connection.
    *
    * SQLite in-memory connections do not share a database, so this cannot
-   * express the race there. MySQL/PostgreSQL kernel runs (d.o GitLab) do.
+   * express the race there. GitHub and Drupal.org MySQL/PostgreSQL kernel
+   * runs do.
    */
   public function testUncommittedAppendBlocksSecondConnection(): void {
     $database = $this->container->get('database');
@@ -1305,7 +1306,7 @@ final class AuditChainLoggerTest extends KernelTestBase {
       $this->fail('Expected AuditChainSigningUnavailableException.');
     }
     catch (AuditChainSigningUnavailableException) {
-      // Expected.
+      // The append must have written nothing; asserted below.
     }
     $this->assertCount(0, $this->rows());
   }

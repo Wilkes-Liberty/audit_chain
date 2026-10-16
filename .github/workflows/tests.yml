@@ -342,11 +342,10 @@ jobs:
           # question rather than a similar one.
           ~/.composer/vendor/bin/phpcs --standard=phpcs.xml.dist -p
 
-  # phpstan exists on the drupalcode pipeline (commit-code-check.sh) and,
-  # until now, only there. A support claim CI does not exercise is not a
-  # claim: GitHub could stay green while d.o failed on the committed
-  # phpstan.neon.dist. This job runs that file at level 6, so the two
-  # venues check the same thing rather than two similar things.
+  # GitHub analyzes the optional MCP tools. Drupal.org prefers phpstan.neon,
+  # which excludes modules/audit_chain_mcp because that composer install does
+  # not have drupal/tool or drupal/mcp_sentinel. This job installs both and
+  # must stay on phpstan.neon.dist.
   phpstan:
     name: PHPStan
     runs-on: ubuntu-latest
@@ -443,8 +442,7 @@ jobs:
         working-directory: drupal
         run: |
           set -euo pipefail
-          # The module's own phpstan.neon.dist (level 6), so this and the
-          # drupalcode phpstan job answer the same question.
+          # Must stay on phpstan.neon.dist. See the job comment above.
           vendor/bin/phpstan analyze web/modules/contrib/audit_chain \
             -c web/modules/contrib/audit_chain/phpstan.neon.dist \
             --autoload-file=vendor/autoload.php \

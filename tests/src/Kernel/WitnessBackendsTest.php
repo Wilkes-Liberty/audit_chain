@@ -13,6 +13,7 @@ use Drupal\audit_chain\WitnessOperator;
 use Drupal\audit_chain\WitnessReceipt;
 use Drupal\audit_chain\WitnessVerdict;
 use Drupal\Component\Datetime\TimeInterface;
+use Drupal\Core\Database\Connection;
 use Drupal\Core\Site\Settings;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\key\Entity\Key;
@@ -359,7 +360,9 @@ final class WitnessBackendsTest extends KernelTestBase {
     }
     $this->assertSame($original, $this->storedToken($receipt->id));
 
-    $race = new RacingWitnessBackend();
+    $database = $this->container->get('database');
+    $this->assertInstanceOf(Connection::class, $database);
+    $race = new RacingWitnessBackend($database);
     $manager->addBackend($race);
     $this->checkpoint(self::DIGEST);
     $raced = $manager->submit(self::DIGEST, 'race');
@@ -826,6 +829,13 @@ final class RacingWitnessBackend implements IdentifiedWitnessBackendInterface {
   public int $calls = 0;
 
   /**
+   * The connection the first upgrade races against.
+   */
+  public function __construct(
+    private readonly Connection $database,
+  ) {}
+
+  /**
    * {@inheritdoc}
    */
   public function id(): string {
@@ -845,7 +855,7 @@ final class RacingWitnessBackend implements IdentifiedWitnessBackendInterface {
   public function upgrade(WitnessReceipt $pending): WitnessReceipt {
     $this->calls++;
     if ($this->calls === 1) {
-      \Drupal::database()->update('audit_chain_witness_receipt')
+      $this->database->update('audit_chain_witness_receipt')
         ->fields([
           'status' => WitnessReceipt::STATUS_CONFIRMED,
           'opaque_token' => 'token-confirmed',

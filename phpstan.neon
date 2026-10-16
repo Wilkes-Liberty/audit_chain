@@ -1,0 +1,13 @@
+# Drupal.org phpstan config. PHPStan prefers this file over phpstan.neon.dist.
+#
+# The optional audit_chain_mcp tools extend classes from drupal/tool and
+# drupal/mcp_sentinel. GitHub's phpstan job installs both and analyzes those
+# tools via phpstan.neon.dist. Drupal.org composer does not install them.
+# Scanning the submodule here is unknown-class noise, and a red allow_failure
+# job still sends pipeline mail. Exclude the submodule on drupal.org only.
+includes:
+  - phpstan.neon.dist
+
+parameters:
+  excludePaths:
+    - modules/audit_chain_mcp

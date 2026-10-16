@@ -16,6 +16,7 @@
   --ac-color-on-primary: var(--gin-color-button-text, #fff);
   --ac-bg: var(--gin-bg-layer, #fff);
   --ac-border: var(--gin-border-color, #dee2e6);
+
   margin: 1em 0;
 }
 

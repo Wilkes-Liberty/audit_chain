@@ -1,0 +1,46 @@
+# Project-specific words allowed by the cspell CI job.
+# One word per line; blank lines and lines starting with # are ignored.
+# https://project.pages.drupalcode.org/gitlab_templates/jobs/cspell/
+autowirable
+behaviour
+cerda
+cgnat
+chainwork
+channelless
+chartjs
+checkpointed
+checkpointing
+ciphertext
+decryptable
+dedup
+desync
+devnet
+esplora
+exfiltration
+highcharts
+litecoin
+merkle
+opentimestamps
+recognisable
+rewalk
+sekret
+serialised
+serialises
+serialising
+siem
+synthesised
+testkey
+uncheckpointed
+unconfigured
+unencodable
+unkeyed
+unparseable
+unpromoted
+unreviewed
+unwritable
+varbytes
+varuint
+xaxis
+xrpl
+xrplcluster
+yaxis

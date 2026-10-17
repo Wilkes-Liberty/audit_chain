@@ -213,8 +213,28 @@ final class ScheduledVerificationPresentation {
    *   The context array accepted by forReason().
    *
    * @phpstan-param array<string, mixed> $run
-   * @phpstan-param array<string, mixed> $extra
-   * @phpstan-return array<string, mixed>
+   * @phpstan-param array{
+   *   rows?: int|string,
+   *   when?: string|null,
+   *   run_reason?: string,
+   *   require_keyed?: bool,
+   *   broken_at?: int|string|null,
+   *   segment_id?: string|null,
+   *   historical_ok?: mixed,
+   *   segment_ok?: mixed,
+   *   rewind_through_id?: int|string|null
+   * } $extra
+   * @phpstan-return array{
+   *   rows?: int|string,
+   *   when?: string|null,
+   *   run_reason?: string,
+   *   require_keyed?: bool,
+   *   broken_at?: int|string|null,
+   *   segment_id?: string|null,
+   *   historical_ok?: mixed,
+   *   segment_ok?: mixed,
+   *   rewind_through_id?: int|string|null
+   * }
    */
   public static function contextFromRun(array $run, array $extra = []): array {
     $successor = is_array($run['successor'] ?? NULL) ? $run['successor'] : [];
@@ -233,14 +253,17 @@ final class ScheduledVerificationPresentation {
     $rewindThrough = $rewind['through_id'] ?? NULL;
     $rewindThrough = is_numeric($rewindThrough) ? (int) $rewindThrough : NULL;
 
-    return array_replace([
-      'run_reason' => (string) ($run['reason'] ?? ''),
-      'broken_at' => $brokenAt,
-      'segment_id' => $segmentId,
-      'historical_ok' => !empty($successor['historical_ok']),
-      'segment_ok' => !empty($successor['segment_ok']),
-      'rewind_through_id' => $rewindThrough,
-    ], $extra);
+    return [
+      'rows' => $extra['rows'] ?? 0,
+      'when' => $extra['when'] ?? NULL,
+      'run_reason' => $extra['run_reason'] ?? (string) ($run['reason'] ?? ''),
+      'require_keyed' => $extra['require_keyed'] ?? FALSE,
+      'broken_at' => $extra['broken_at'] ?? $brokenAt,
+      'segment_id' => $extra['segment_id'] ?? $segmentId,
+      'historical_ok' => $extra['historical_ok'] ?? !empty($successor['historical_ok']),
+      'segment_ok' => $extra['segment_ok'] ?? !empty($successor['segment_ok']),
+      'rewind_through_id' => $extra['rewind_through_id'] ?? $rewindThrough,
+    ];
   }
 
 }

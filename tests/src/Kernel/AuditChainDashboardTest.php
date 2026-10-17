@@ -198,7 +198,7 @@ final class AuditChainDashboardTest extends KernelTestBase {
   }
 
   /**
-   * verify_require_keyed with no interval matches the status-report copy.
+   * The keyed-assurance card with no interval matches the status report.
    *
    * @covers ::dashboard
    */

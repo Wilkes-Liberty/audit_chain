@@ -170,6 +170,72 @@ final class AuditChainDashboardTest extends KernelTestBase {
   }
 
   /**
+   * A failed card prints the stored run reason, not "unknown".
+   *
+   * @covers ::dashboard
+   */
+  public function testFailedCardShowsStoredRunReason(): void {
+    $this->config('audit_chain.settings')->set('verify_interval', 3600)->save();
+    $this->container->get('state')->set(ScheduledVerifier::STATE_KEY, [
+      'time' => \Drupal::time()->getRequestTime(),
+      'ok' => FALSE,
+      'reason' => 'tampered',
+      'verdict' => [
+        'ok' => FALSE,
+        'reason' => 'tampered',
+        'broken_at' => 3,
+      ],
+    ]);
+
+    $request = Request::create('/admin/reports/audit-chain');
+    $controller = AuditChainDashboardController::create($this->container);
+    $build = $controller->dashboard($request);
+
+    $this->assertSame('crit', $build['#chain']['state']);
+    $this->assertSame('Failed', $build['#chain']['label']);
+    $this->assertStringContainsString('tampered', $build['#chain']['detail']);
+    $this->assertStringNotContainsString('unknown', $build['#chain']['detail']);
+  }
+
+  /**
+   * verify_require_keyed with no interval matches the status-report copy.
+   *
+   * @covers ::dashboard
+   */
+  public function testAssuranceProfileWithoutScheduleMatchesStatusReport(): void {
+    $this->config('audit_chain.settings')
+      ->set('verify_require_keyed', TRUE)
+      ->set('verify_interval', 0)
+      ->save();
+
+    $request = Request::create('/admin/reports/audit-chain');
+    $controller = AuditChainDashboardController::create($this->container);
+    $build = $controller->dashboard($request);
+    \Drupal::moduleHandler()->loadInclude('audit_chain', 'install');
+    $requirements = audit_chain_requirements('runtime');
+
+    $this->assertSame('warn', $build['#chain']['state']);
+    $this->assertSame(
+      'Assurance profile enabled, but no verification schedule',
+      $build['#chain']['label'],
+    );
+    $this->assertStringContainsString(
+      'verify_require_keyed is on while verify_interval is 0',
+      $build['#chain']['detail'],
+    );
+    $this->assertStringNotContainsString('Not scheduled', $build['#chain']['label']);
+    $this->assertArrayHasKey('audit_chain_scheduled_verification', $requirements);
+    $this->assertSame(
+      $build['#chain']['label'],
+      (string) $requirements['audit_chain_scheduled_verification']['value'],
+    );
+    $this->assertSame(
+      $build['#chain']['detail'],
+      (string) $requirements['audit_chain_scheduled_verification']['description'],
+    );
+  }
+
+  /**
    * An unknown window query argument is ignored.
    *
    * @covers ::dashboard

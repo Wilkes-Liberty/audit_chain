@@ -470,29 +470,10 @@ function _audit_chain_requirements_scheduled_verification(array &$requirements):
  *   A hook_requirements row, or NULL when the classifier is silent.
  */
 function _audit_chain_scheduled_verification_requirement(array $classified, bool $require_keyed, array $run): ?array {
-  $successor = is_array($run['successor'] ?? NULL) ? $run['successor'] : [];
-  $verdict = is_array($run['verdict'] ?? NULL) ? $run['verdict'] : [];
-  $historical = is_array($successor['historical_verdict'] ?? NULL)
-    ? $successor['historical_verdict']
-    : [];
-  $rewind = is_array($run['rewind'] ?? NULL) ? $run['rewind'] : [];
-  $broken_at = is_numeric($verdict['broken_at'] ?? NULL)
-    ? (int) $verdict['broken_at']
-    : (is_numeric($historical['broken_at'] ?? NULL) ? (int) $historical['broken_at'] : NULL);
-  $context = [
-    'require_keyed' => $require_keyed,
-    'run_reason' => (string) ($run['reason'] ?? ''),
-    'broken_at' => $broken_at,
-    'segment_id' => is_string($successor['segment_id'] ?? NULL) && $successor['segment_id'] !== ''
-      ? $successor['segment_id']
-      : NULL,
-    'historical_ok' => !empty($successor['historical_ok']),
-    'segment_ok' => !empty($successor['segment_ok']),
-    'rewind_through_id' => is_numeric($rewind['through_id'] ?? NULL)
-      ? (int) $rewind['through_id']
-      : NULL,
-  ];
   $reason = (string) ($classified['reason'] ?? '');
+  $context = ScheduledVerificationPresentation::contextFromRun($run, [
+    'require_keyed' => $require_keyed,
+  ]);
   $presented = ScheduledVerificationPresentation::forReason($reason, $context);
   if ($presented['omit']) {
     return NULL;

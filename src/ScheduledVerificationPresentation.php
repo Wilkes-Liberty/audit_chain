@@ -196,4 +196,74 @@ final class ScheduledVerificationPresentation {
     };
   }
 
+  /**
+   * Assembles forReason() placeholders from a stored run.
+   *
+   * The classify() method remains the only classifier. This method only
+   * unpacks successor, verdict, historical, and rewind fields so every
+   * operator surface passes the same placeholders.
+   *
+   * @param array $run
+   *   The stored scheduled-verification run, or empty when none exists.
+   * @param array $extra
+   *   Additional placeholders merged over the run-derived context. Typical
+   *   keys: rows, when, require_keyed.
+   *
+   * @return array
+   *   The context array accepted by forReason().
+   *
+   * @phpstan-param array<string, mixed> $run
+   * @phpstan-param array{
+   *   rows?: int|string,
+   *   when?: string|null,
+   *   run_reason?: string,
+   *   require_keyed?: bool,
+   *   broken_at?: int|string|null,
+   *   segment_id?: string|null,
+   *   historical_ok?: mixed,
+   *   segment_ok?: mixed,
+   *   rewind_through_id?: int|string|null
+   * } $extra
+   * @phpstan-return array{
+   *   rows?: int|string,
+   *   when?: string|null,
+   *   run_reason?: string,
+   *   require_keyed?: bool,
+   *   broken_at?: int|string|null,
+   *   segment_id?: string|null,
+   *   historical_ok?: mixed,
+   *   segment_ok?: mixed,
+   *   rewind_through_id?: int|string|null
+   * }
+   */
+  public static function contextFromRun(array $run, array $extra = []): array {
+    $successor = is_array($run['successor'] ?? NULL) ? $run['successor'] : [];
+    $verdict = is_array($run['verdict'] ?? NULL) ? $run['verdict'] : [];
+    $historical = is_array($successor['historical_verdict'] ?? NULL)
+      ? $successor['historical_verdict']
+      : [];
+    $rewind = is_array($run['rewind'] ?? NULL) ? $run['rewind'] : [];
+    $brokenAt = is_numeric($verdict['broken_at'] ?? NULL)
+      ? (int) $verdict['broken_at']
+      : (is_numeric($historical['broken_at'] ?? NULL)
+        ? (int) $historical['broken_at']
+        : NULL);
+    $segmentId = $successor['segment_id'] ?? NULL;
+    $segmentId = is_string($segmentId) && $segmentId !== '' ? $segmentId : NULL;
+    $rewindThrough = $rewind['through_id'] ?? NULL;
+    $rewindThrough = is_numeric($rewindThrough) ? (int) $rewindThrough : NULL;
+
+    return [
+      'rows' => $extra['rows'] ?? 0,
+      'when' => $extra['when'] ?? NULL,
+      'run_reason' => $extra['run_reason'] ?? (string) ($run['reason'] ?? ''),
+      'require_keyed' => $extra['require_keyed'] ?? FALSE,
+      'broken_at' => $extra['broken_at'] ?? $brokenAt,
+      'segment_id' => $extra['segment_id'] ?? $segmentId,
+      'historical_ok' => $extra['historical_ok'] ?? !empty($successor['historical_ok']),
+      'segment_ok' => $extra['segment_ok'] ?? !empty($successor['segment_ok']),
+      'rewind_through_id' => $extra['rewind_through_id'] ?? $rewindThrough,
+    ];
+  }
+
 }

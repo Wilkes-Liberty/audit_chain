@@ -472,6 +472,43 @@ final class ScheduledVerificationIntegrityTest extends KernelTestBase {
   }
 
   /**
+   * Run-context assembly unpacks successor, verdict, historical, and rewind.
+   *
+   * @covers \Drupal\audit_chain\ScheduledVerificationPresentation::contextFromRun
+   */
+  public function testContextFromRunAssemblesSuccessorVerdictAndRewind(): void {
+    $run = $this->documentedExceptionRun(1700000000);
+    $run['rewind'] = ['through_id' => 42];
+    $context = ScheduledVerificationPresentation::contextFromRun($run, [
+      'rows' => 9,
+      'when' => 'formatted',
+      'require_keyed' => TRUE,
+    ]);
+
+    $this->assertSame(AuditChainLogger::REASON_TAMPERED, $context['run_reason']);
+    $this->assertSame(11425, $context['broken_at']);
+    $this->assertSame('957345ba-a0c8-42d5-9dcb-92ba4430a820', $context['segment_id']);
+    $this->assertFalse($context['historical_ok']);
+    $this->assertTrue($context['segment_ok']);
+    $this->assertSame(42, $context['rewind_through_id']);
+    $this->assertSame(9, $context['rows']);
+    $this->assertSame('formatted', $context['when']);
+    $this->assertTrue($context['require_keyed']);
+
+    $empty = ScheduledVerificationPresentation::contextFromRun([]);
+    $this->assertSame('', $empty['run_reason']);
+    $this->assertNull($empty['broken_at']);
+    $this->assertNull($empty['segment_id']);
+    $this->assertFalse($empty['historical_ok']);
+    $this->assertFalse($empty['segment_ok']);
+    $this->assertNull($empty['rewind_through_id']);
+
+    $run['verdict']['broken_at'] = 7;
+    $preferVerdict = ScheduledVerificationPresentation::contextFromRun($run);
+    $this->assertSame(7, $preferVerdict['broken_at']);
+  }
+
+  /**
    * Builds a disclosed historical-exception run, with optional overlays.
    *
    * @param int $now

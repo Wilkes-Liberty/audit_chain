@@ -8,6 +8,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 - Status report, dashboard integrity card, and scheduled-verifier logging
+  share one run-context assembly for successor, verdict, historical, and
+  rewind placeholders. A failed dashboard card shows the stored run
+  reason. A disabled schedule with `verify_require_keyed` uses the same
+  assurance copy as the status report. `classify()` is still the only
+  classifier.
+- Status report, dashboard integrity card, and scheduled-verifier logging
   share one presentation mapping for `ScheduledVerificationIntegrity`
   reasons. `classify()` is still the only classifier. Unknown reasons no
   longer throw from `hook_requirements` or reuse the Pending dashboard

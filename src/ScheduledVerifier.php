@@ -180,27 +180,10 @@ final class ScheduledVerifier {
       max($interval, 1),
       (int) ($run['time'] ?? $this->time->getRequestTime()),
     );
-    $successor = is_array($run['successor'] ?? NULL) ? $run['successor'] : [];
-    $verdict = is_array($run['verdict'] ?? NULL) ? $run['verdict'] : [];
-    $historical = is_array($successor['historical_verdict'] ?? NULL)
-      ? $successor['historical_verdict']
-      : [];
-    $rewind = is_array($run['rewind'] ?? NULL) ? $run['rewind'] : [];
-    $brokenAt = is_numeric($verdict['broken_at'] ?? NULL)
-      ? (int) $verdict['broken_at']
-      : (is_numeric($historical['broken_at'] ?? NULL) ? (int) $historical['broken_at'] : NULL);
-    $presented = ScheduledVerificationPresentation::forReason($classified['reason'], [
-      'run_reason' => (string) ($run['reason'] ?? ''),
-      'broken_at' => $brokenAt,
-      'segment_id' => is_string($successor['segment_id'] ?? NULL) && $successor['segment_id'] !== ''
-        ? $successor['segment_id']
-        : NULL,
-      'historical_ok' => !empty($successor['historical_ok']),
-      'segment_ok' => !empty($successor['segment_ok']),
-      'rewind_through_id' => is_numeric($rewind['through_id'] ?? NULL)
-        ? (int) $rewind['through_id']
-        : NULL,
-    ]);
+    $presented = ScheduledVerificationPresentation::forReason(
+      $classified['reason'],
+      ScheduledVerificationPresentation::contextFromRun($run),
+    );
     if ($presented['log_level'] === 'error') {
       $this->logger->error((string) $presented['detail']);
     }

@@ -52,7 +52,7 @@ final class AuditChainDashboardTest extends KernelTestBase {
   }
 
   /**
-   * Asserts the status report interpolates the live row count like the dashboard.
+   * Asserts status-report and dashboard row counts match.
    *
    * @param int $rows
    *   Expected live audit_chain_log row count.

@@ -52,6 +52,25 @@ final class AuditChainDashboardTest extends KernelTestBase {
   }
 
   /**
+   * Asserts status-report and dashboard row counts match.
+   *
+   * @param int $rows
+   *   Expected live audit_chain_log row count.
+   */
+  private function assertStatusReportRowCountMatchesDashboard(int $rows): void {
+    $request = Request::create('/admin/reports/audit-chain');
+    $controller = AuditChainDashboardController::create($this->container);
+    $build = $controller->dashboard($request);
+    \Drupal::moduleHandler()->loadInclude('audit_chain', 'install');
+    $requirements = audit_chain_requirements('runtime');
+
+    $this->assertArrayHasKey('audit_chain_scheduled_verification', $requirements);
+    $description = (string) $requirements['audit_chain_scheduled_verification']['description'];
+    $this->assertStringContainsString($rows . ' rows', $description);
+    $this->assertSame($build['#chain']['detail'], $description);
+  }
+
+  /**
    * Inserts a chain row with only the indexed columns the dashboard reads.
    */
   private function insertRow(string $channel, string $operation, string $keyId = ''): void {
@@ -195,6 +214,40 @@ final class AuditChainDashboardTest extends KernelTestBase {
     $this->assertSame('Failed', $build['#chain']['label']);
     $this->assertStringContainsString('tampered', $build['#chain']['detail']);
     $this->assertStringNotContainsString('unknown', $build['#chain']['detail']);
+  }
+
+  /**
+   * Pending status-report copy uses the live row count, matching the dashboard.
+   *
+   * @covers ::dashboard
+   */
+  public function testPendingStatusReportUsesLiveRowCount(): void {
+    $this->insertRow('personnel', 'field_read', 'hmac');
+    $this->insertRow('mcp', 'tool_call', '');
+    $this->insertRow('personnel', 'field_update', 'hmac');
+    $this->config('audit_chain.settings')->set('verify_interval', 3600)->save();
+    $this->container->get('state')->delete(ScheduledVerifier::STATE_KEY);
+
+    $this->assertStatusReportRowCountMatchesDashboard(3);
+  }
+
+  /**
+   * Passing status-report copy uses the live row count, matching the dashboard.
+   *
+   * @covers ::dashboard
+   */
+  public function testPassingStatusReportUsesLiveRowCount(): void {
+    $this->insertRow('personnel', 'field_read', 'hmac');
+    $this->insertRow('mcp', 'tool_call', '');
+    $this->insertRow('personnel', 'field_update', 'hmac');
+    $this->config('audit_chain.settings')->set('verify_interval', 3600)->save();
+    $this->container->get('state')->set(ScheduledVerifier::STATE_KEY, [
+      'time' => \Drupal::time()->getRequestTime(),
+      'ok' => TRUE,
+      'reason' => NULL,
+    ]);
+
+    $this->assertStatusReportRowCountMatchesDashboard(3);
   }
 
   /**

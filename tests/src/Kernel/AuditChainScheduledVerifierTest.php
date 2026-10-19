@@ -182,10 +182,7 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
       'The assurance profile must fail, not fall back to unkeyed verification.');
     $this->assertSame('keyed_verification_unavailable', $run['reason']);
 
-    $this->assertNotEmpty(
-      array_filter($spy->records, fn (array $r): bool => $r['level'] === 'error'),
-      'The failure must alert through the logger channel.'
-    );
+    $this->assertErrorCopyContainsFormattedTime($spy, $run);
 
     $requirements = $this->runtimeRequirements();
     $this->assertArrayHasKey('audit_chain_scheduled_verification', $requirements);
@@ -237,10 +234,7 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
       'The failure must dispatch the verification-failed event for consumers.');
     $this->assertFalse($captured[0]['ok']);
 
-    $this->assertNotEmpty(
-      array_filter($spy->records, fn (array $r): bool => $r['level'] === 'error'),
-      'The failure must alert through the logger channel.'
-    );
+    $this->assertErrorCopyContainsFormattedTime($spy, $run);
 
     $rowsAfter = $this->chainSnapshot();
     $this->assertSame($rowsBefore, $rowsAfter,
@@ -514,6 +508,37 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
     $this->assertSame(REQUIREMENT_WARNING, $requirements['audit_chain_scheduled_verification']['severity'],
       'Requiring keyed verification while never scheduling it must warn.');
     $this->assertRequirementMatchesClassifier($requirements);
+  }
+
+  /**
+   * Asserts watchdog error copy uses the formatted run time, not "unknown".
+   *
+   * @param object $spy
+   *   The logger spy returned by spyChannel().
+   * @param array $run
+   *   The recorded scheduled-verification run.
+   */
+  private function assertErrorCopyContainsFormattedTime(object $spy, array $run): void {
+    $errors = array_values(array_filter(
+      $spy->records,
+      fn (array $r): bool => $r['level'] === 'error',
+    ));
+    $this->assertNotEmpty(
+      $errors,
+      'The failure must alert through the logger channel.',
+    );
+    $when = \Drupal::service('date.formatter')->format((int) $run['time']);
+    $matched = array_filter(
+      $errors,
+      fn (array $r): bool => str_contains($r['message'], $when),
+    );
+    $this->assertNotEmpty(
+      $matched,
+      'Error copy must contain the formatted last-run time, not "unknown".',
+    );
+    foreach ($matched as $record) {
+      $this->assertStringNotContainsString('unknown', $record['message']);
+    }
   }
 
   /**

@@ -6,6 +6,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- Scheduled-verifier watchdog copy interpolates the formatted last-run
+  time instead of "unknown". `classify()` is still the only classifier.
+
 ### Changed
 - Status report, dashboard integrity card, and scheduled-verifier logging
   share one run-context assembly for successor, verdict, historical, and

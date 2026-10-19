@@ -166,11 +166,12 @@ final class ScheduledVerifier {
   }
 
   /**
-   * Logs and dispatches from the shared presentation mapping.
+   * Dispatches and logs from the shared presentation mapping.
    *
    * The classify() method is the only classifier. Interval is forced above
    * zero and "now" is the run time so disabled/overdue/pending cannot mask
-   * this run.
+   * this run. Dispatch runs before logging so a throwing logger cannot skip
+   * the verification-failed event.
    *
    * @param array $run
    *   The recorded scheduled-verification run.
@@ -191,17 +192,17 @@ final class ScheduledVerifier {
         'when' => $this->dates->format($now, 'custom', DATE_ATOM),
       ]),
     );
-    if ($presented['log_level'] === 'error') {
-      $this->logger->error((string) $presented['detail']);
-    }
-    elseif ($presented['log_level'] !== NULL) {
-      $this->logger->warning((string) $presented['detail']);
-    }
     if ($presented['dispatch']) {
       $this->eventDispatcher->dispatch(
         new AuditChainVerificationFailedEvent($run),
         AuditChainVerificationFailedEvent::EVENT_NAME,
       );
+    }
+    if ($presented['log_level'] === 'error') {
+      $this->logger->error((string) $presented['detail']);
+    }
+    elseif ($presented['log_level'] !== NULL) {
+      $this->logger->warning((string) $presented['detail']);
     }
   }
 

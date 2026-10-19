@@ -199,13 +199,7 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
    * to abort runNow() after state->set() had already stored the verdict.
    */
   public function testRunNowCompletesWithoutDateFormatConfig(): void {
-    $storage = $this->container->get('entity_type.manager')->getStorage('date_format');
-    foreach ($storage->loadMultiple() as $format) {
-      $format->delete();
-    }
-    $storage->resetCache();
-    $this->assertNull($storage->load('medium'));
-    $this->assertNull($storage->load('fallback'));
+    $this->deleteDateFormatConfig();
 
     $spy = $this->spyChannel();
     $this->config('audit_chain.settings')
@@ -238,6 +232,93 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
     );
     $this->assertStringContainsString('keyed_verification_unavailable', $errors[0]['message']);
     $this->assertStringNotContainsString('unknown', $errors[0]['message']);
+  }
+
+  /**
+   * A tampered chain still dispatches the failure event without date formats.
+   */
+  public function testTamperDispatchesWithoutDateFormatConfig(): void {
+    $this->makeKey('chain_key');
+    $this->config('audit_chain.settings')
+      ->set('hash_key', 'chain_key')
+      ->set('verify_interval', 3600)
+      ->save();
+    $logger = \Drupal::service('audit_chain.logger');
+    $logger->log('personnel', 'field_read', ['id' => '1']);
+    $logger->log('personnel', 'field_read', ['id' => '2']);
+
+    $firstId = (int) \Drupal::database()->select('audit_chain_log', 'l')
+      ->fields('l', ['id'])
+      ->orderBy('id')
+      ->range(0, 1)
+      ->execute()->fetchField();
+    \Drupal::database()->update('audit_chain_log')
+      ->fields(['operation' => 'tampered_operation'])
+      ->condition('id', $firstId)
+      ->execute();
+
+    $this->deleteDateFormatConfig();
+    $captured = [];
+    $this->listenForFailureEvents($captured);
+
+    $run = \Drupal::service('audit_chain.scheduled_verifier')->runNow();
+    $this->assertFalse($run['ok'], 'A tampered chain must fail the scheduled run.');
+    $this->assertSame('tampered', $run['reason']);
+    $this->assertCount(
+      1,
+      $captured,
+      'A tamper failure must dispatch even without date-format config.',
+    );
+    $this->assertFalse($captured[0]['ok']);
+    $this->assertSame('tampered', $captured[0]['reason']);
+    $this->assertSame($run, $this->lastRun());
+  }
+
+  /**
+   * A throwing logger must not skip the verification-failed event.
+   */
+  public function testThrowingLoggerStillDispatchesFailureEvent(): void {
+    $this->config('audit_chain.settings')
+      ->set('verify_interval', 3600)
+      ->set('verify_require_keyed', TRUE)
+      ->save();
+
+    $throwing = new class() extends AbstractLogger {
+
+      /**
+       * {@inheritdoc}
+       */
+      public function log($level, string|\Stringable $message, array $context = []): void {
+        throw new \RuntimeException('scheduled-verifier logger failed');
+      }
+
+    };
+    $this->container->set('logger.channel.audit_chain', $throwing);
+    $this->container->set('audit_chain.scheduled_verifier', NULL);
+    $captured = [];
+    $this->listenForFailureEvents($captured);
+
+    try {
+      \Drupal::service('audit_chain.scheduled_verifier')->runNow();
+      $this->fail('A throwing logger must surface from runNow().');
+    }
+    catch (\RuntimeException $exception) {
+      $this->assertSame(
+        'scheduled-verifier logger failed',
+        $exception->getMessage(),
+      );
+    }
+
+    $this->assertCount(
+      1,
+      $captured,
+      'Dispatch must not depend on the logger succeeding.',
+    );
+    $this->assertFalse($captured[0]['ok']);
+    $this->assertSame('keyed_verification_unavailable', $captured[0]['reason']);
+    $stored = $this->lastRun();
+    $this->assertIsArray($stored);
+    $this->assertFalse($stored['ok']);
   }
 
   /**
@@ -557,6 +638,34 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
     $this->assertSame(REQUIREMENT_WARNING, $requirements['audit_chain_scheduled_verification']['severity'],
       'Requiring keyed verification while never scheduling it must warn.');
     $this->assertRequirementMatchesClassifier($requirements);
+  }
+
+  /**
+   * Removes every system date-format config entity.
+   */
+  private function deleteDateFormatConfig(): void {
+    $storage = $this->container->get('entity_type.manager')->getStorage('date_format');
+    foreach ($storage->loadMultiple() as $format) {
+      $format->delete();
+    }
+    $storage->resetCache();
+    $this->assertNull($storage->load('medium'));
+    $this->assertNull($storage->load('fallback'));
+  }
+
+  /**
+   * Listens for verification-failed events and appends each run record.
+   *
+   * @param array $captured
+   *   Captured run records, filled by the listener as events fire.
+   */
+  private function listenForFailureEvents(array &$captured): void {
+    \Drupal::service('event_dispatcher')->addListener(
+      AuditChainVerificationFailedEvent::EVENT_NAME,
+      function (AuditChainVerificationFailedEvent $event) use (&$captured): void {
+        $captured[] = $event->run;
+      },
+    );
   }
 
   /**

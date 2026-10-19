@@ -11,6 +11,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   type `custom` and `DATE_ATOM`, so `runNow()` cannot throw after the
   verdict is persisted when `core.date_format.medium` or the fallback
   format is missing. Hash, mutex, and seal behavior is unchanged.
+- Scheduled-verifier failure events dispatch before watchdog logging, so
+  a throwing logger cannot skip `AuditChainVerificationFailedEvent`.
+
+### Changed
+- Scheduled-verifier watchdog `@when` is ISO-8601 (`DATE_ATOM`) rather
+  than the localized medium date format.
 
 ## [1.12.2] - 2026-10-19
 

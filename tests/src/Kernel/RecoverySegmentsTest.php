@@ -365,6 +365,59 @@ final class RecoverySegmentsTest extends KernelTestBase {
   }
 
   /**
+   * A successor defect still dispatches when the logger throws.
+   */
+  public function testSuccessorDefectThrowingLoggerStillDispatches(): void {
+    $this->config('audit_chain.settings')->set('verify_interval', 60)->save();
+    $prepared = $this->recovery->prepare();
+    $this->recovery->activate(self::SEGMENT, $prepared['snapshot_digest'], $this->context());
+    $this->container->get('database')->update('audit_chain_log')
+      ->fields(['entity_label' => 'changed after review'])
+      ->condition('id', 1)->execute();
+    $status = $this->recovery->currentStatus();
+    $this->assertIsArray($status);
+    $this->assertFalse($status['segment_ok']);
+
+    $throwing = new class() extends AbstractLogger {
+
+      /**
+       * {@inheritdoc}
+       */
+      public function log($level, string|\Stringable $message, array $context = []): void {
+        throw new \RuntimeException('scheduled-verifier logger failed');
+      }
+
+    };
+    $this->container->set('logger.channel.audit_chain', $throwing);
+    $this->container->set('audit_chain.scheduled_verifier', NULL);
+    $captured = [];
+    \Drupal::service('event_dispatcher')->addListener(
+      AuditChainVerificationFailedEvent::EVENT_NAME,
+      function (AuditChainVerificationFailedEvent $event) use (&$captured): void {
+        $captured[] = $event->run;
+      }
+    );
+
+    try {
+      $this->container->get('audit_chain.scheduled_verifier')->runNow();
+      $this->fail('A throwing logger must surface from runNow().');
+    }
+    catch (\RuntimeException $exception) {
+      $this->assertSame(
+        'scheduled-verifier logger failed',
+        $exception->getMessage(),
+      );
+    }
+
+    $this->assertCount(1, $captured, 'The failure event must dispatch once.');
+    $stored = $this->container->get('state')->get('audit_chain.scheduled_verification');
+    $this->assertIsArray($stored);
+    $this->assertSame($stored, $captured[0]);
+    $this->assertFalse($stored['ok']);
+    $this->assertFalse($stored['successor']['segment_ok']);
+  }
+
+  /**
    * Schema installation is repeatable and preserves the exact history.
    */
   public function testUpgradeDoesNotActivateOrRewrite(): void {

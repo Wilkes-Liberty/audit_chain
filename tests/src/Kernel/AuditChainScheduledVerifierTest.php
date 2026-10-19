@@ -269,8 +269,7 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
       $captured,
       'A tamper failure must dispatch even without date-format config.',
     );
-    $this->assertFalse($captured[0]['ok']);
-    $this->assertSame('tampered', $captured[0]['reason']);
+    $this->assertSame($run, $captured[0]);
     $this->assertSame($run, $this->lastRun());
   }
 
@@ -314,11 +313,59 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
       $captured,
       'Dispatch must not depend on the logger succeeding.',
     );
-    $this->assertFalse($captured[0]['ok']);
-    $this->assertSame('keyed_verification_unavailable', $captured[0]['reason']);
     $stored = $this->lastRun();
     $this->assertIsArray($stored);
+    $this->assertSame($stored, $captured[0]);
     $this->assertFalse($stored['ok']);
+    $this->assertSame('keyed_verification_unavailable', $stored['reason']);
+  }
+
+  /**
+   * A throwing subscriber must not skip the watchdog error.
+   */
+  public function testThrowingSubscriberStillLogsWatchdogError(): void {
+    $spy = $this->spyChannel();
+    $this->config('audit_chain.settings')
+      ->set('verify_interval', 3600)
+      ->set('verify_require_keyed', TRUE)
+      ->save();
+
+    $captured = [];
+    \Drupal::service('event_dispatcher')->addListener(
+      AuditChainVerificationFailedEvent::EVENT_NAME,
+      function (AuditChainVerificationFailedEvent $event) use (&$captured): void {
+        $captured[] = $event->run;
+        throw new \RuntimeException('scheduled-verifier subscriber failed');
+      },
+    );
+
+    try {
+      \Drupal::service('audit_chain.scheduled_verifier')->runNow();
+      $this->fail('A throwing subscriber must surface from runNow().');
+    }
+    catch (\RuntimeException $exception) {
+      $this->assertSame(
+        'scheduled-verifier subscriber failed',
+        $exception->getMessage(),
+      );
+    }
+
+    $this->assertCount(1, $captured, 'The failure event must dispatch once.');
+    $stored = $this->lastRun();
+    $this->assertIsArray($stored);
+    $this->assertSame($stored, $captured[0]);
+    $errors = array_values(array_filter(
+      $spy->records,
+      fn (array $record): bool => $record['level'] === 'error',
+    ));
+    $this->assertNotEmpty(
+      $errors,
+      'A throwing subscriber must not skip the watchdog error.',
+    );
+    $this->assertStringContainsString(
+      'keyed_verification_unavailable',
+      $errors[0]['message'],
+    );
   }
 
   /**
@@ -348,12 +395,7 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
     $rowsBefore = $this->chainSnapshot();
 
     $captured = [];
-    \Drupal::service('event_dispatcher')->addListener(
-      AuditChainVerificationFailedEvent::EVENT_NAME,
-      function (AuditChainVerificationFailedEvent $event) use (&$captured): void {
-        $captured[] = $event->run;
-      }
-    );
+    $this->listenForFailureEvents($captured);
 
     $this->runCron();
     $run = $this->lastRun();
@@ -362,7 +404,7 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
 
     $this->assertCount(1, $captured,
       'The failure must dispatch the verification-failed event for consumers.');
-    $this->assertFalse($captured[0]['ok']);
+    $this->assertSame($run, $captured[0]);
 
     $this->assertErrorCopyContainsFormattedTime($spy, $run);
 

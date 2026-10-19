@@ -6,6 +6,7 @@ namespace Drupal\Tests\audit_chain\Kernel;
 
 use Drupal\audit_chain\AuditChainLogger;
 use Drupal\audit_chain\AuditChainMetrics;
+use Drupal\audit_chain\Controller\AuditChainDashboardController;
 use Drupal\audit_chain\RewindDetector;
 use Drupal\audit_chain\ScheduledVerificationIntegrity;
 use Drupal\audit_chain\ScheduledVerificationPresentation;
@@ -13,6 +14,7 @@ use Drupal\audit_chain\ScheduledVerifier;
 use Drupal\KernelTests\KernelTestBase;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
+use Symfony\Component\HttpFoundation\Request;
 
 /**
  * Shared scheduled-verification integrity classifier.
@@ -397,6 +399,59 @@ final class ScheduledVerificationIntegrityTest extends KernelTestBase {
         $this->assertStringContainsString('drush audit-chain:verify', $description);
         $this->assertStringContainsString('recovery-verify', $description);
       }
+    }
+  }
+
+  /**
+   * Pending and passing status-report copy use the live row count.
+   *
+   * @covers \Drupal\audit_chain\ScheduledVerificationPresentation::contextFromRun
+   */
+  public function testPendingAndPassingStatusReportUseLiveRowCount(): void {
+    $now = \Drupal::time()->getRequestTime();
+    for ($i = 0; $i < 3; $i++) {
+      $this->container->get('database')->insert('audit_chain_log')->fields([
+        'channel' => 'personnel',
+        'timestamp' => $now - 60,
+        'uid' => 1,
+        'operation' => 'field_read',
+        'key_id' => '',
+      ])->execute();
+    }
+    $this->config('audit_chain.settings')->set('verify_interval', 3600)->save();
+
+    $cases = [
+      'pending' => NULL,
+      'passing' => [
+        'time' => $now,
+        'ok' => TRUE,
+        'reason' => NULL,
+      ],
+    ];
+    foreach ($cases as $reason => $run) {
+      if ($run === NULL) {
+        $this->container->get('state')->delete(ScheduledVerifier::STATE_KEY);
+      }
+      else {
+        $this->container->get('state')->set(ScheduledVerifier::STATE_KEY, $run);
+      }
+      // Fresh metrics: AuditChainMetrics caches per request.
+      $this->container->set('audit_chain.metrics', $this->freshMetrics());
+
+      $integrity = $this->freshMetrics()->integrity();
+      $this->assertSame($reason, $integrity['reason'], $reason);
+      $this->assertSame(3, $integrity['rows'], $reason);
+
+      $request = Request::create('/admin/reports/audit-chain');
+      $controller = AuditChainDashboardController::create($this->container);
+      $build = $controller->dashboard($request);
+      \Drupal::moduleHandler()->loadInclude('audit_chain', 'install');
+      $requirements = audit_chain_requirements('runtime');
+
+      $this->assertArrayHasKey('audit_chain_scheduled_verification', $requirements, $reason);
+      $description = (string) $requirements['audit_chain_scheduled_verification']['description'];
+      $this->assertStringContainsString('3 rows', $description, $reason);
+      $this->assertSame($build['#chain']['detail'], $description, $reason);
     }
   }
 

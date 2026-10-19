@@ -9,6 +9,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 - Scheduled-verifier watchdog copy interpolates the formatted last-run
   time instead of "unknown". `classify()` is still the only classifier.
+- The scheduled-verification status report interpolates the live
+  `audit_chain_log` row count (`@n rows`) from
+  `AuditChainMetrics::integrity()`, matching the Reports > Audit Chain
+  dashboard. `classify()` is still the only classifier.
 
 ### Changed
 - Status report, dashboard integrity card, and scheduled-verifier logging

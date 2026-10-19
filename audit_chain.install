@@ -471,8 +471,12 @@ function _audit_chain_requirements_scheduled_verification(array &$requirements):
  */
 function _audit_chain_scheduled_verification_requirement(array $classified, bool $require_keyed, array $run): ?array {
   $reason = (string) ($classified['reason'] ?? '');
+  /** @var \Drupal\audit_chain\AuditChainMetrics $metrics */
+  $metrics = \Drupal::service('audit_chain.metrics');
   $context = ScheduledVerificationPresentation::contextFromRun($run, [
     'require_keyed' => $require_keyed,
+    // Same live count the dashboard integrity card already interpolates.
+    'rows' => $metrics->integrity()['rows'],
   ]);
   $presented = ScheduledVerificationPresentation::forReason($reason, $context);
   if ($presented['omit']) {
@@ -485,7 +489,7 @@ function _audit_chain_scheduled_verification_requirement(array $classified, bool
     $when = \Drupal::service('date.formatter')->format((int) ($classified['time'] ?? 0));
     $presented = ScheduledVerificationPresentation::forReason(
       $reason,
-      $context + ['when' => $when],
+      ['when' => $when] + $context,
     );
   }
   $severity = match ($presented['severity']) {

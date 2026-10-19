@@ -186,7 +186,9 @@ final class ScheduledVerifier {
     $presented = ScheduledVerificationPresentation::forReason(
       $classified['reason'],
       ScheduledVerificationPresentation::contextFromRun($run, [
-        'when' => $this->dates->format($now),
+        // Type custom with DATE_ATOM does not load date-format config
+        // entities. Type medium throws after persist when those are missing.
+        'when' => $this->dates->format($now, 'custom', DATE_ATOM),
       ]),
     );
     if ($presented['log_level'] === 'error') {

@@ -192,6 +192,55 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
   }
 
   /**
+   * A missing date-format config must not abort runNow() after persist.
+   *
+   * DateFormatter type medium loads core.date_format.medium, then fallback.
+   * When those entities are gone, format() throws on getPattern(). That used
+   * to abort runNow() after state->set() had already stored the verdict.
+   */
+  public function testRunNowCompletesWithoutDateFormatConfig(): void {
+    $storage = $this->container->get('entity_type.manager')->getStorage('date_format');
+    foreach ($storage->loadMultiple() as $format) {
+      $format->delete();
+    }
+    $storage->resetCache();
+    $this->assertNull($storage->load('medium'));
+    $this->assertNull($storage->load('fallback'));
+
+    $spy = $this->spyChannel();
+    $this->config('audit_chain.settings')
+      ->set('verify_interval', 3600)
+      ->set('verify_require_keyed', TRUE)
+      ->save();
+
+    $run = \Drupal::service('audit_chain.scheduled_verifier')->runNow();
+    $stored = $this->lastRun();
+    $this->assertIsArray(
+      $stored,
+      'The verdict must remain stored after presentation.',
+    );
+    $this->assertSame($run, $stored);
+    $this->assertFalse($stored['ok']);
+    $this->assertSame('keyed_verification_unavailable', $stored['reason']);
+    $this->assertArrayHasKey('verdict', $stored);
+
+    $errors = array_values(array_filter(
+      $spy->records,
+      fn (array $record): bool => $record['level'] === 'error',
+    ));
+    $this->assertNotEmpty($errors, 'Presentation must still log the failed run.');
+    $this->assertTrue(
+      (bool) preg_match(
+        '/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+\-]\d{2}:\d{2}/',
+        $errors[0]['message'],
+      ),
+      'Presentation must show a sane ISO-8601 timestamp.',
+    );
+    $this->assertStringContainsString('keyed_verification_unavailable', $errors[0]['message']);
+    $this->assertStringNotContainsString('unknown', $errors[0]['message']);
+  }
+
+  /**
    * A tampered chain fails, alerts, dispatches the event, and is untouched.
    */
   public function testTamperFailureAlertsAndPreservesChain(): void {
@@ -527,7 +576,11 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
       $errors,
       'The failure must alert through the logger channel.',
     );
-    $when = \Drupal::service('date.formatter')->format((int) $run['time']);
+    $when = \Drupal::service('date.formatter')->format(
+      (int) $run['time'],
+      'custom',
+      DATE_ATOM,
+    );
     $matched = array_filter(
       $errors,
       fn (array $r): bool => str_contains($r['message'], $when),

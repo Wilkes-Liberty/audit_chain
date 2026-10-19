@@ -6,6 +6,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- Scheduled-verifier presentation formats last-run time with DateFormatter
+  type `custom` and `DATE_ATOM`, so `runNow()` cannot throw after the
+  verdict is persisted when `core.date_format.medium` or the fallback
+  format is missing. Hash, mutex, and seal behavior is unchanged.
+
 ## [1.12.2] - 2026-10-19
 
 ### Fixed

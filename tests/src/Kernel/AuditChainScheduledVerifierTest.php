@@ -222,7 +222,11 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
       $spy->records,
       fn (array $record): bool => $record['level'] === 'error',
     ));
-    $this->assertNotEmpty($errors, 'Presentation must still log the failed run.');
+    $this->assertCount(
+      1,
+      $errors,
+      'Presentation must write one watchdog error.',
+    );
     $this->assertTrue(
       (bool) preg_match(
         '/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+\-]\d{2}:\d{2}/',
@@ -358,9 +362,10 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
       $spy->records,
       fn (array $record): bool => $record['level'] === 'error',
     ));
-    $this->assertNotEmpty(
+    $this->assertCount(
+      1,
       $errors,
-      'A throwing subscriber must not skip the watchdog error.',
+      'A throwing subscriber must not skip or duplicate the watchdog error.',
     );
     $this->assertStringContainsString(
       'keyed_verification_unavailable',
@@ -723,9 +728,10 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
       $spy->records,
       fn (array $r): bool => $r['level'] === 'error',
     ));
-    $this->assertNotEmpty(
+    $this->assertCount(
+      1,
       $errors,
-      'The failure must alert through the logger channel.',
+      'The failure must alert through the logger channel once.',
     );
     $when = \Drupal::service('date.formatter')->format(
       (int) $run['time'],

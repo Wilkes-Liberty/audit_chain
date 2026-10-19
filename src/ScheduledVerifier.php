@@ -76,7 +76,11 @@ final class ScheduledVerifier {
    * then dispatches, and successor-defect plus presentation logging run in
    * a finally block: a throwing logger cannot skip the event, and a throwing
    * subscriber cannot skip the watchdog log. Logger and subscriber exceptions
-   * still propagate after the verdict is saved.
+   * still propagate after the verdict is saved. If both throw, the logger
+   * exception surfaces with the subscriber exception as getPrevious().
+   * Drupal\Core\Utility\Error::logException() does not log previous
+   * exceptions, so a subscriber failure is omitted from cron logs in that
+   * case.
    *
    * @return array
    *   The recorded run: time, ok, reason, keyed, and (when the verification
@@ -172,6 +176,9 @@ final class ScheduledVerifier {
    * this run. Dispatch runs in try; successor-defect and presentation
    * logging run in finally so neither a throwing logger nor a throwing
    * subscriber can suppress the other. Those exceptions still propagate.
+   * If both throw, the logger exception surfaces with the subscriber
+   * exception as getPrevious(). Error::logException() does not log
+   * previous exceptions, so cron logs omit the subscriber failure then.
    *
    * @param array $run
    *   The recorded scheduled-verification run.

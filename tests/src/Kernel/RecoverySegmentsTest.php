@@ -55,7 +55,9 @@ final class RecoverySegmentsTest extends KernelTestBase {
     parent::setUp();
     $this->installEntitySchema('user');
     $this->installAuditChainTables();
-    $this->installConfig(['audit_chain']);
+    // The system date formats back the date.formatter calls scheduled
+    // verification makes when logging last-run times.
+    $this->installConfig(['system', 'audit_chain']);
     new Settings(['audit_chain_instance_id' => 'synthetic-instance-a'] + Settings::getAll());
     Key::create([
       'id' => 'recovery_key',

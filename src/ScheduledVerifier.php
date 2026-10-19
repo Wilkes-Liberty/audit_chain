@@ -7,6 +7,7 @@ namespace Drupal\audit_chain;
 use Drupal\audit_chain\Event\AuditChainVerificationFailedEvent;
 use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
+use Drupal\Core\Datetime\DateFormatterInterface;
 use Drupal\Core\State\StateInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
@@ -45,6 +46,7 @@ final class ScheduledVerifier {
     private readonly TimeInterface $time,
     private readonly EventDispatcherInterface $eventDispatcher,
     private readonly LoggerInterface $logger,
+    private readonly DateFormatterInterface $dates,
     private readonly ?RecoverySegments $recovery = NULL,
     private readonly ?RewindDetector $rewind = NULL,
   ) {}
@@ -175,14 +177,17 @@ final class ScheduledVerifier {
    */
   private function recordPresentation(array $run): void {
     $interval = (int) $this->configFactory->get('audit_chain.settings')->get('verify_interval');
+    $now = (int) ($run['time'] ?? $this->time->getRequestTime());
     $classified = ScheduledVerificationIntegrity::classify(
       $run,
       max($interval, 1),
-      (int) ($run['time'] ?? $this->time->getRequestTime()),
+      $now,
     );
     $presented = ScheduledVerificationPresentation::forReason(
       $classified['reason'],
-      ScheduledVerificationPresentation::contextFromRun($run),
+      ScheduledVerificationPresentation::contextFromRun($run, [
+        'when' => $this->dates->format($now),
+      ]),
     );
     if ($presented['log_level'] === 'error') {
       $this->logger->error((string) $presented['detail']);

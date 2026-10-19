@@ -56,6 +56,7 @@ services:
       - '@datetime.time'
       - '@event_dispatcher'
       - '@logger.channel.audit_chain'
+      - '@date.formatter'
       - '@audit_chain.recovery'
       - '@audit_chain.rewind_detector'
 

@@ -192,6 +192,183 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
   }
 
   /**
+   * A missing date-format config must not abort runNow() after persist.
+   *
+   * DateFormatter type medium loads core.date_format.medium, then fallback.
+   * When those entities are gone, format() throws on getPattern(). That used
+   * to abort runNow() after state->set() had already stored the verdict.
+   */
+  public function testRunNowCompletesWithoutDateFormatConfig(): void {
+    $this->deleteDateFormatConfig();
+
+    $spy = $this->spyChannel();
+    $this->config('audit_chain.settings')
+      ->set('verify_interval', 3600)
+      ->set('verify_require_keyed', TRUE)
+      ->save();
+
+    $run = \Drupal::service('audit_chain.scheduled_verifier')->runNow();
+    $stored = $this->lastRun();
+    $this->assertIsArray(
+      $stored,
+      'The verdict must remain stored after presentation.',
+    );
+    $this->assertSame($run, $stored);
+    $this->assertFalse($stored['ok']);
+    $this->assertSame('keyed_verification_unavailable', $stored['reason']);
+    $this->assertArrayHasKey('verdict', $stored);
+
+    $errors = array_values(array_filter(
+      $spy->records,
+      fn (array $record): bool => $record['level'] === 'error',
+    ));
+    $this->assertNotEmpty($errors, 'Presentation must still log the failed run.');
+    $this->assertTrue(
+      (bool) preg_match(
+        '/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+\-]\d{2}:\d{2}/',
+        $errors[0]['message'],
+      ),
+      'Presentation must show a sane ISO-8601 timestamp.',
+    );
+    $this->assertStringContainsString('keyed_verification_unavailable', $errors[0]['message']);
+    $this->assertStringNotContainsString('unknown', $errors[0]['message']);
+  }
+
+  /**
+   * A tampered chain still dispatches the failure event without date formats.
+   */
+  public function testTamperDispatchesWithoutDateFormatConfig(): void {
+    $this->makeKey('chain_key');
+    $this->config('audit_chain.settings')
+      ->set('hash_key', 'chain_key')
+      ->set('verify_interval', 3600)
+      ->save();
+    $logger = \Drupal::service('audit_chain.logger');
+    $logger->log('personnel', 'field_read', ['id' => '1']);
+    $logger->log('personnel', 'field_read', ['id' => '2']);
+
+    $firstId = (int) \Drupal::database()->select('audit_chain_log', 'l')
+      ->fields('l', ['id'])
+      ->orderBy('id')
+      ->range(0, 1)
+      ->execute()->fetchField();
+    \Drupal::database()->update('audit_chain_log')
+      ->fields(['operation' => 'tampered_operation'])
+      ->condition('id', $firstId)
+      ->execute();
+
+    $this->deleteDateFormatConfig();
+    $captured = [];
+    $this->listenForFailureEvents($captured);
+
+    $run = \Drupal::service('audit_chain.scheduled_verifier')->runNow();
+    $this->assertFalse($run['ok'], 'A tampered chain must fail the scheduled run.');
+    $this->assertSame('tampered', $run['reason']);
+    $this->assertCount(
+      1,
+      $captured,
+      'A tamper failure must dispatch even without date-format config.',
+    );
+    $this->assertSame($run, $captured[0]);
+    $this->assertSame($run, $this->lastRun());
+  }
+
+  /**
+   * A throwing logger must not skip the verification-failed event.
+   */
+  public function testThrowingLoggerStillDispatchesFailureEvent(): void {
+    $this->config('audit_chain.settings')
+      ->set('verify_interval', 3600)
+      ->set('verify_require_keyed', TRUE)
+      ->save();
+
+    $throwing = new class() extends AbstractLogger {
+
+      /**
+       * {@inheritdoc}
+       */
+      public function log($level, string|\Stringable $message, array $context = []): void {
+        throw new \RuntimeException('scheduled-verifier logger failed');
+      }
+
+    };
+    $this->container->set('logger.channel.audit_chain', $throwing);
+    $this->container->set('audit_chain.scheduled_verifier', NULL);
+    $captured = [];
+    $this->listenForFailureEvents($captured);
+
+    try {
+      \Drupal::service('audit_chain.scheduled_verifier')->runNow();
+      $this->fail('A throwing logger must surface from runNow().');
+    }
+    catch (\RuntimeException $exception) {
+      $this->assertSame(
+        'scheduled-verifier logger failed',
+        $exception->getMessage(),
+      );
+    }
+
+    $this->assertCount(
+      1,
+      $captured,
+      'Dispatch must not depend on the logger succeeding.',
+    );
+    $stored = $this->lastRun();
+    $this->assertIsArray($stored);
+    $this->assertSame($stored, $captured[0]);
+    $this->assertFalse($stored['ok']);
+    $this->assertSame('keyed_verification_unavailable', $stored['reason']);
+  }
+
+  /**
+   * A throwing subscriber must not skip the watchdog error.
+   */
+  public function testThrowingSubscriberStillLogsWatchdogError(): void {
+    $spy = $this->spyChannel();
+    $this->config('audit_chain.settings')
+      ->set('verify_interval', 3600)
+      ->set('verify_require_keyed', TRUE)
+      ->save();
+
+    $captured = [];
+    \Drupal::service('event_dispatcher')->addListener(
+      AuditChainVerificationFailedEvent::EVENT_NAME,
+      function (AuditChainVerificationFailedEvent $event) use (&$captured): void {
+        $captured[] = $event->run;
+        throw new \RuntimeException('scheduled-verifier subscriber failed');
+      },
+    );
+
+    try {
+      \Drupal::service('audit_chain.scheduled_verifier')->runNow();
+      $this->fail('A throwing subscriber must surface from runNow().');
+    }
+    catch (\RuntimeException $exception) {
+      $this->assertSame(
+        'scheduled-verifier subscriber failed',
+        $exception->getMessage(),
+      );
+    }
+
+    $this->assertCount(1, $captured, 'The failure event must dispatch once.');
+    $stored = $this->lastRun();
+    $this->assertIsArray($stored);
+    $this->assertSame($stored, $captured[0]);
+    $errors = array_values(array_filter(
+      $spy->records,
+      fn (array $record): bool => $record['level'] === 'error',
+    ));
+    $this->assertNotEmpty(
+      $errors,
+      'A throwing subscriber must not skip the watchdog error.',
+    );
+    $this->assertStringContainsString(
+      'keyed_verification_unavailable',
+      $errors[0]['message'],
+    );
+  }
+
+  /**
    * A tampered chain fails, alerts, dispatches the event, and is untouched.
    */
   public function testTamperFailureAlertsAndPreservesChain(): void {
@@ -218,12 +395,7 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
     $rowsBefore = $this->chainSnapshot();
 
     $captured = [];
-    \Drupal::service('event_dispatcher')->addListener(
-      AuditChainVerificationFailedEvent::EVENT_NAME,
-      function (AuditChainVerificationFailedEvent $event) use (&$captured): void {
-        $captured[] = $event->run;
-      }
-    );
+    $this->listenForFailureEvents($captured);
 
     $this->runCron();
     $run = $this->lastRun();
@@ -232,7 +404,7 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
 
     $this->assertCount(1, $captured,
       'The failure must dispatch the verification-failed event for consumers.');
-    $this->assertFalse($captured[0]['ok']);
+    $this->assertSame($run, $captured[0]);
 
     $this->assertErrorCopyContainsFormattedTime($spy, $run);
 
@@ -511,6 +683,34 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
   }
 
   /**
+   * Removes every system date-format config entity.
+   */
+  private function deleteDateFormatConfig(): void {
+    $storage = $this->container->get('entity_type.manager')->getStorage('date_format');
+    foreach ($storage->loadMultiple() as $format) {
+      $format->delete();
+    }
+    $storage->resetCache();
+    $this->assertNull($storage->load('medium'));
+    $this->assertNull($storage->load('fallback'));
+  }
+
+  /**
+   * Listens for verification-failed events and appends each run record.
+   *
+   * @param array $captured
+   *   Captured run records, filled by the listener as events fire.
+   */
+  private function listenForFailureEvents(array &$captured): void {
+    \Drupal::service('event_dispatcher')->addListener(
+      AuditChainVerificationFailedEvent::EVENT_NAME,
+      function (AuditChainVerificationFailedEvent $event) use (&$captured): void {
+        $captured[] = $event->run;
+      },
+    );
+  }
+
+  /**
    * Asserts watchdog error copy uses the formatted run time, not "unknown".
    *
    * @param object $spy
@@ -527,7 +727,11 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
       $errors,
       'The failure must alert through the logger channel.',
     );
-    $when = \Drupal::service('date.formatter')->format((int) $run['time']);
+    $when = \Drupal::service('date.formatter')->format(
+      (int) $run['time'],
+      'custom',
+      DATE_ATOM,
+    );
     $matched = array_filter(
       $errors,
       fn (array $r): bool => str_contains($r['message'], $when),

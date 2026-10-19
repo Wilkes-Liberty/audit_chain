@@ -6,6 +6,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- Scheduled-verifier presentation formats last-run time with DateFormatter
+  type `custom` and `DATE_ATOM`, so missing `core.date_format.medium` or
+  fallback cannot abort `runNow()` after the verdict is persisted.
+- After the scheduled-verification verdict is saved, the failure event
+  dispatches in a try and successor-defect plus presentation logging run
+  in finally. A throwing logger does not skip the event; a throwing
+  subscriber does not skip the watchdog log. Logger and subscriber
+  exceptions still propagate. Hash, mutex, and seal behavior is unchanged.
+
+### Changed
+- Scheduled-verifier watchdog `@when` is ISO-8601 (`DATE_ATOM`) rather
+  than the localized medium date format.
+
 ## [1.12.2] - 2026-10-19
 
 ### Fixed

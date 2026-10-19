@@ -72,6 +72,12 @@ final class ScheduledVerifier {
   /**
    * Runs the verification immediately and records the outcome.
    *
+   * The verdict is written to state before presentation. The failure event
+   * then dispatches, and successor-defect plus presentation logging run in
+   * a finally block: a throwing logger cannot skip the event, and a throwing
+   * subscriber cannot skip the watchdog log. Logger and subscriber exceptions
+   * still propagate after the verdict is saved.
+   *
    * @return array
    *   The recorded run: time, ok, reason, keyed, and (when the verification
    *   executed) the full verify() verdict under 'verdict'.
@@ -125,13 +131,6 @@ final class ScheduledVerifier {
       $run['reason'] = RewindDetector::REASON_REWOUND;
     }
     $this->state->set(self::STATE_KEY, $run);
-    if ($run['successor'] !== NULL && !$run['successor']['segment_ok']) {
-      $this->logger->error(
-        'Audit successor verification FAILED: @reason. The historical exception remains unresolved.',
-        ['@reason' => $run['successor']['reason']],
-      );
-    }
-
     $this->recordPresentation($run);
 
     return $run;
@@ -166,11 +165,13 @@ final class ScheduledVerifier {
   }
 
   /**
-   * Logs and dispatches from the shared presentation mapping.
+   * Dispatches the failure event, then logs successor and presentation copy.
    *
    * The classify() method is the only classifier. Interval is forced above
    * zero and "now" is the run time so disabled/overdue/pending cannot mask
-   * this run.
+   * this run. Dispatch runs in try; successor-defect and presentation
+   * logging run in finally so neither a throwing logger nor a throwing
+   * subscriber can suppress the other. Those exceptions still propagate.
    *
    * @param array $run
    *   The recorded scheduled-verification run.
@@ -186,20 +187,32 @@ final class ScheduledVerifier {
     $presented = ScheduledVerificationPresentation::forReason(
       $classified['reason'],
       ScheduledVerificationPresentation::contextFromRun($run, [
-        'when' => $this->dates->format($now),
+        // Type custom with DATE_ATOM does not load date-format config
+        // entities. Type medium throws after persist when those are missing.
+        'when' => $this->dates->format($now, 'custom', DATE_ATOM),
       ]),
     );
-    if ($presented['log_level'] === 'error') {
-      $this->logger->error((string) $presented['detail']);
+    try {
+      if ($presented['dispatch']) {
+        $this->eventDispatcher->dispatch(
+          new AuditChainVerificationFailedEvent($run),
+          AuditChainVerificationFailedEvent::EVENT_NAME,
+        );
+      }
     }
-    elseif ($presented['log_level'] !== NULL) {
-      $this->logger->warning((string) $presented['detail']);
-    }
-    if ($presented['dispatch']) {
-      $this->eventDispatcher->dispatch(
-        new AuditChainVerificationFailedEvent($run),
-        AuditChainVerificationFailedEvent::EVENT_NAME,
-      );
+    finally {
+      if ($run['successor'] !== NULL && !$run['successor']['segment_ok']) {
+        $this->logger->error(
+          'Audit successor verification FAILED: @reason. The historical exception remains unresolved.',
+          ['@reason' => $run['successor']['reason']],
+        );
+      }
+      if ($presented['log_level'] === 'error') {
+        $this->logger->error((string) $presented['detail']);
+      }
+      elseif ($presented['log_level'] !== NULL) {
+        $this->logger->warning((string) $presented['detail']);
+      }
     }
   }
 

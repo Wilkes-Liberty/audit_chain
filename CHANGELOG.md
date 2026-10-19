@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.12.2] - 2026-10-19
+
 ### Fixed
 - Scheduled-verifier watchdog copy interpolates the formatted last-run
   time instead of "unknown". `classify()` is still the only classifier.

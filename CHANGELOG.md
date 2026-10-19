@@ -13,8 +13,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - After the scheduled-verification verdict is saved, the failure event
   dispatches in a try and successor-defect plus presentation logging run
   in finally. A throwing logger does not skip the event; a throwing
-  subscriber does not skip the watchdog log. Logger and subscriber
-  exceptions still propagate. Hash, mutex, and seal behavior is unchanged.
+  subscriber does not skip the watchdog log. If both throw, the logger
+  exception surfaces with the subscriber exception chained as
+  getPrevious(). Core cron's Error::logException() does not log previous
+  exceptions, so the subscriber failure will not appear in cron logs in
+  that case. Hash, mutex, and seal behavior is unchanged.
 
 ### Changed
 - Scheduled-verifier watchdog `@when` is ISO-8601 (`DATE_ATOM`) rather

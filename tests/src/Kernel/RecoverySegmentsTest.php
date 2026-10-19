@@ -356,12 +356,51 @@ final class RecoverySegmentsTest extends KernelTestBase {
     $this->container->get('database')->update('audit_chain_log')
       ->fields(['entity_label' => 'changed after review'])
       ->condition('id', 1)->execute();
+    $spy = new class() extends AbstractLogger {
+
+      /**
+       * Captured log records.
+       *
+       * @var array<int, array{level: mixed, message: string}>
+       */
+      public array $records = [];
+
+      /**
+       * {@inheritdoc}
+       */
+      public function log($level, string|\Stringable $message, array $context = []): void {
+        $this->records[] = ['level' => $level, 'message' => (string) $message];
+      }
+
+    };
+    $this->container->set('logger.channel.audit_chain', $spy);
+    $this->container->set('audit_chain.scheduled_verifier', NULL);
     $run = $this->container->get('audit_chain.scheduled_verifier')->runNow();
     $this->assertFalse($run['ok']);
     $this->assertFalse($run['successor']['segment_ok']);
     $integrity = $this->container->get('audit_chain.metrics')->integrity();
     $this->assertSame('failed', $integrity['reason']);
     $this->assertSame('crit', $integrity['status']);
+    $errors = array_values(array_filter(
+      $spy->records,
+      fn (array $record): bool => $record['level'] === 'error',
+    ));
+    $successor = array_values(array_filter(
+      $errors,
+      fn (array $record): bool => str_contains(
+        $record['message'],
+        'Audit successor verification FAILED',
+      ),
+    ));
+    $presentation = array_values(array_filter(
+      $errors,
+      fn (array $record): bool => str_contains(
+        $record['message'],
+        'Last scheduled verification failed',
+      ),
+    ));
+    $this->assertCount(1, $successor, 'Successor-defect watchdog once.');
+    $this->assertCount(1, $presentation, 'Presentation watchdog once.');
   }
 
   /**

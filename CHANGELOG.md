@@ -7,6 +7,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- The status report reads the stored scheduled-verification run on every
+  call. A verification saved earlier in the same request is no longer
+  hidden by the dashboard metric cache, so a tampered signed row still
+  fails the status report after that run.
 - Scheduled-verifier presentation formats last-run time with DateFormatter
   type `custom` and `DATE_ATOM`, so missing `core.date_format.medium` or
   fallback cannot abort `runNow()` after the verdict is persisted.

@@ -183,6 +183,32 @@ final class AuditChainMetrics {
    *   classified, rows, run, when, context, and presented.
    *
    * @phpstan-param (callable(int): string)|null $formatWhen
+   * @phpstan-return array{
+   *   classified: array{status: string, reason: string, time: int|null},
+   *   rows: int,
+   *   run: array<string, mixed>,
+   *   when: string|null,
+   *   context: array{
+   *     rows?: int|string,
+   *     when?: string|null,
+   *     run_reason?: string,
+   *     require_keyed?: bool,
+   *     broken_at?: int|string|null,
+   *     segment_id?: string|null,
+   *     historical_ok?: mixed,
+   *     segment_ok?: mixed,
+   *     rewind_through_id?: int|string|null
+   *   },
+   *   presented: array{
+   *     label: \Drupal\Core\StringTranslation\TranslatableMarkup,
+   *     detail: \Drupal\Core\StringTranslation\TranslatableMarkup,
+   *     severity: string,
+   *     log_level: string|null,
+   *     dispatch: bool,
+   *     omit: bool,
+   *     uses_time: bool
+   *   }
+   * }
    */
   public function snapshot(?callable $formatWhen = NULL): array {
     $loaded = $this->loadScheduledVerification();
@@ -224,10 +250,13 @@ final class AuditChainMetrics {
   }
 
   /**
-   * Loads the stored run, interval, and live row count once per request.
+   * Loads the stored run, interval, and live row count.
    *
-   * A thrown query degrades to pending: interval 1 with no run, matching
-   * the previous integrity() fallback.
+   * State and config are read on every call. Caching them for the request
+   * hid a verification recorded earlier in that request, so the status
+   * report kept the previous classification. A thrown query degrades to
+   * pending: interval 1 with no run, matching the previous integrity()
+   * fallback. The failure is remembered so a broken query logs once.
    *
    * @return array
    *   Inputs for ScheduledVerificationPresentation::snapshot().
@@ -248,7 +277,11 @@ final class AuditChainMetrics {
       'rows' => 0,
       'require_keyed' => FALSE,
     ];
-    return $this->guard(__FUNCTION__, NULL, $fallback, function (): array {
+    $failureKey = __FUNCTION__ . ':failed';
+    if (array_key_exists($failureKey, $this->staticCache)) {
+      return $fallback;
+    }
+    try {
       $rows = 0;
       if ($this->database->schema()->tableExists('audit_chain_log')) {
         $rows = (int) $this->database->select('audit_chain_log', 'l')
@@ -264,7 +297,15 @@ final class AuditChainMetrics {
         'rows' => $rows,
         'require_keyed' => (bool) $settings->get('verify_require_keyed'),
       ];
-    });
+    }
+    catch (\Throwable $e) {
+      $this->logger->error('Dashboard metric @metric failed: @message', [
+        '@metric' => __FUNCTION__,
+        '@message' => $e->getMessage(),
+      ]);
+      $this->staticCache[$failureKey] = TRUE;
+      return $fallback;
+    }
   }
 
   /**

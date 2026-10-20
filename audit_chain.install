@@ -465,10 +465,13 @@ function _audit_chain_requirements_scheduled_verification(array &$requirements):
  *     label: mixed,
  *     detail: mixed,
  *     severity: string,
+ *     log_level: string|null,
+ *     dispatch: bool,
  *     omit: bool,
  *     uses_time: bool
  *   },
- *   when?: string|null
+ *   when?: string|null,
+ *   ...
  * } $snapshot
  */
 function _audit_chain_scheduled_verification_requirement(array $snapshot): ?array {

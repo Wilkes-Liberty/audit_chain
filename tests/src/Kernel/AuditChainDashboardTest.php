@@ -52,7 +52,7 @@ final class AuditChainDashboardTest extends KernelTestBase {
   }
 
   /**
-   * Asserts status-report and dashboard row counts match.
+   * Asserts status-report and dashboard copy match the shared snapshot.
    *
    * @param int $rows
    *   Expected live audit_chain_log row count.
@@ -63,10 +63,19 @@ final class AuditChainDashboardTest extends KernelTestBase {
     $build = $controller->dashboard($request);
     \Drupal::moduleHandler()->loadInclude('audit_chain', 'install');
     $requirements = audit_chain_requirements('runtime');
+    $snapshot = $this->container->get('audit_chain.metrics')->snapshot(
+      fn (int $time): string => $this->container->get('date.formatter')
+        ->format($time),
+    );
 
     $this->assertArrayHasKey('audit_chain_scheduled_verification', $requirements);
     $description = (string) $requirements['audit_chain_scheduled_verification']['description'];
     $this->assertStringContainsString($rows . ' rows', $description);
+    $this->assertSame($rows, $snapshot['rows']);
+    $this->assertSame(
+      (string) $snapshot['presented']['detail'],
+      $build['#chain']['detail'],
+    );
     $this->assertSame($build['#chain']['detail'], $description);
   }
 

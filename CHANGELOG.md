@@ -7,6 +7,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- The status report reads the stored scheduled-verification run on every
+  call. A verification saved earlier in the same request is no longer
+  hidden by the dashboard metric cache, so a tampered signed row still
+  fails the status report after that run.
 - Scheduled-verifier presentation formats last-run time with DateFormatter
   type `custom` and `DATE_ATOM`, so missing `core.date_format.medium` or
   fallback cannot abort `runNow()` after the verdict is persisted.
@@ -20,6 +24,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that case. Hash, mutex, and seal behavior is unchanged.
 
 ### Changed
+- Status report, dashboard integrity card, and scheduled-verifier logging
+  share one scheduled-verification snapshot (classified state, live row
+  count, stored run, and formatted last-run time) and call `forReason()`
+  once. `classify()` is still the only classifier. Hash, mutex, and seal
+  behavior is unchanged.
 - Scheduled-verifier watchdog `@when` is ISO-8601 (`DATE_ATOM`) rather
   than the localized medium date format.
 

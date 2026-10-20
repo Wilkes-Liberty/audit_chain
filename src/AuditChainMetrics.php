@@ -18,8 +18,10 @@ use Psr\Log\LoggerInterface;
  * never read metadata, IP addresses, user agents, or entity labels.
  * recordedGaps() is the exception: it decrypts chain_gap_recorded rows and
  * returns the fork and lost range only. Verification is not re-run on this
- * path: integrity() reads the last scheduled-verification record from state
- * and classifies it with ScheduledVerificationIntegrity.
+ * path: snapshot() reads the last scheduled-verification record from state
+ * and assembles it with ScheduledVerificationPresentation::snapshot().
+ * classify() remains the only classifier. integrity() projects the
+ * classified fields and row count from that snapshot.
  */
 final class AuditChainMetrics {
 
@@ -151,40 +153,75 @@ final class AuditChainMetrics {
    * Returns the stored scheduled-verification integrity result.
    *
    * Does not re-walk the chain. Classification is
-   * ScheduledVerificationIntegrity::classify(); this method adds the row count.
+   * ScheduledVerificationIntegrity::classify() via snapshot().
    *
    * @return array{status: string, reason: string, time: int|null, rows: int}
    *   status is ok/warn/crit. reason is a stable machine key.
    */
   public function integrity(): array {
-    $fallback = [
-      'status' => 'warn',
-      'reason' => 'pending',
-      'time' => NULL,
-      'rows' => 0,
+    $snapshot = $this->snapshot();
+    return [
+      'status' => $snapshot['classified']['status'],
+      'reason' => $snapshot['classified']['reason'],
+      'time' => $snapshot['classified']['time'],
+      'rows' => $snapshot['rows'],
     ];
-    return $this->guard(__FUNCTION__, NULL, $fallback, function (): array {
-      $rows = 0;
-      if ($this->database->schema()->tableExists('audit_chain_log')) {
-        $rows = (int) $this->database->select('audit_chain_log', 'l')
-          ->countQuery()
-          ->execute()
-          ->fetchField();
-      }
+  }
 
-      $interval = (int) $this->configFactory->get('audit_chain.settings')->get('verify_interval');
-      $classified = ScheduledVerificationIntegrity::classify(
-        $this->state->get(ScheduledVerifier::STATE_KEY),
-        $interval,
-        $this->time->getRequestTime(),
-      );
-      return [
-        'status' => $classified['status'],
-        'reason' => $classified['reason'],
-        'time' => $classified['time'],
-        'rows' => $rows,
-      ];
-    });
+  /**
+   * Returns one scheduled-verification snapshot for operator surfaces.
+   *
+   * Does not re-walk the chain. classify() remains the only classifier.
+   * Callers that interpolate last-run time pass a formatter; the scheduled
+   * verifier passes extra.when as DATE_ATOM instead.
+   *
+   * @param callable|null $formatWhen
+   *   (optional) Formats classified last-run time. Unused when the
+   *   classified state has no last-run time (disabled/pending).
+   *
+   * @return array
+   *   classified, rows, run, when, context, and presented.
+   *
+   * @phpstan-param (callable(int): string)|null $formatWhen
+   * @phpstan-return array{
+   *   classified: array{status: string, reason: string, time: int|null},
+   *   rows: int,
+   *   run: array<string, mixed>,
+   *   when: string|null,
+   *   context: array{
+   *     rows?: int|string,
+   *     when?: string|null,
+   *     run_reason?: string,
+   *     require_keyed?: bool,
+   *     broken_at?: int|string|null,
+   *     segment_id?: string|null,
+   *     historical_ok?: mixed,
+   *     segment_ok?: mixed,
+   *     rewind_through_id?: int|string|null
+   *   },
+   *   presented: array{
+   *     label: \Drupal\Core\StringTranslation\TranslatableMarkup,
+   *     detail: \Drupal\Core\StringTranslation\TranslatableMarkup,
+   *     severity: string,
+   *     log_level: string|null,
+   *     dispatch: bool,
+   *     omit: bool,
+   *     uses_time: bool
+   *   }
+   * }
+   */
+  public function snapshot(?callable $formatWhen = NULL): array {
+    $loaded = $this->loadScheduledVerification();
+    return ScheduledVerificationPresentation::snapshot(
+      $loaded['run'],
+      $loaded['interval'],
+      $loaded['now'],
+      [
+        'rows' => $loaded['rows'],
+        'require_keyed' => $loaded['require_keyed'],
+      ],
+      $formatWhen,
+    );
   }
 
   /**
@@ -210,6 +247,65 @@ final class AuditChainMetrics {
   public function recoveryStatus(): ?array {
     $run = $this->state->get(ScheduledVerifier::STATE_KEY);
     return is_array($run) && is_array($run['successor'] ?? NULL) ? $run['successor'] : NULL;
+  }
+
+  /**
+   * Loads the stored run, interval, and live row count.
+   *
+   * State and config are read on every call. Caching them for the request
+   * hid a verification recorded earlier in that request, so the status
+   * report kept the previous classification. A thrown query degrades to
+   * pending: interval 1 with no run, matching the previous integrity()
+   * fallback. The failure is remembered so a broken query logs once.
+   *
+   * @return array
+   *   Inputs for ScheduledVerificationPresentation::snapshot().
+   *
+   * @phpstan-return array{
+   *   run: mixed,
+   *   interval: int,
+   *   now: int,
+   *   rows: int,
+   *   require_keyed: bool
+   * }
+   */
+  private function loadScheduledVerification(): array {
+    $fallback = [
+      'run' => NULL,
+      'interval' => 1,
+      'now' => $this->time->getRequestTime(),
+      'rows' => 0,
+      'require_keyed' => FALSE,
+    ];
+    $failureKey = __FUNCTION__ . ':failed';
+    if (array_key_exists($failureKey, $this->staticCache)) {
+      return $fallback;
+    }
+    try {
+      $rows = 0;
+      if ($this->database->schema()->tableExists('audit_chain_log')) {
+        $rows = (int) $this->database->select('audit_chain_log', 'l')
+          ->countQuery()
+          ->execute()
+          ->fetchField();
+      }
+      $settings = $this->configFactory->get('audit_chain.settings');
+      return [
+        'run' => $this->state->get(ScheduledVerifier::STATE_KEY),
+        'interval' => (int) $settings->get('verify_interval'),
+        'now' => $this->time->getRequestTime(),
+        'rows' => $rows,
+        'require_keyed' => (bool) $settings->get('verify_require_keyed'),
+      ];
+    }
+    catch (\Throwable $e) {
+      $this->logger->error('Dashboard metric @metric failed: @message', [
+        '@metric' => __FUNCTION__,
+        '@message' => $e->getMessage(),
+      ]);
+      $this->staticCache[$failureKey] = TRUE;
+      return $fallback;
+    }
   }
 
   /**

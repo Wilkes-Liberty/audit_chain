@@ -48,9 +48,6 @@ parameters:
         - src/AuditChainLogger.php
         - src/AuditChainMetrics.php
     -
-      identifier: nullCoalesce.unnecessary
-      path: src/ScheduledVerifier.php
-    -
       identifier: notIdentical.alwaysFalse
       path: src/Form/AuditChainSettingsForm.php
     # Binary OTS parser. Do not change witness/OTS to silence analysis.

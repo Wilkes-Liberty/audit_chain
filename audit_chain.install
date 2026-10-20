@@ -9,8 +9,6 @@ declare(strict_types=1);
 
 use Drupal\audit_chain\AuditChainLogger;
 use Drupal\audit_chain\EvidenceExporter;
-use Drupal\audit_chain\ScheduledVerificationIntegrity;
-use Drupal\audit_chain\ScheduledVerificationPresentation;
 use Drupal\audit_chain\ScheduledVerifier;
 
 /**
@@ -412,9 +410,10 @@ function audit_chain_update_10002(): string {
 /**
  * Reports the scheduled-verification health (d.o #3616535).
  *
- * Classification is ScheduledVerificationIntegrity::classify(); this function
- * maps those states onto requirement copy. The assurance-profile-without-
- * schedule warning is presentation: the classifier only sees interval and run.
+ * Classification is ScheduledVerificationIntegrity::classify() via
+ * ScheduledVerificationPresentation::snapshot(); this function maps that
+ * snapshot onto requirement copy. The assurance-profile-without-schedule
+ * warning is presentation: the classifier only sees interval and run.
  *
  * An integrity or assurance failure is an ERROR. A leading unsigned prefix
  * with a verifying signed successor is a documented WARNING: those rows stay
@@ -435,63 +434,50 @@ function audit_chain_update_10002(): string {
  *   The requirements array, added to by reference.
  */
 function _audit_chain_requirements_scheduled_verification(array &$requirements): void {
-  $settings = \Drupal::config('audit_chain.settings');
-  $interval = (int) $settings->get('verify_interval');
-  $require_keyed = (bool) $settings->get('verify_require_keyed');
-  $run = \Drupal::state()->get(ScheduledVerifier::STATE_KEY);
-  $classified = ScheduledVerificationIntegrity::classify(
-    $run,
-    $interval,
-    \Drupal::time()->getRequestTime(),
+  /** @var \Drupal\audit_chain\AuditChainMetrics $metrics */
+  $metrics = \Drupal::service('audit_chain.metrics');
+  // snapshot() formats last-run time only for classified states that have
+  // one; disabled/pending skip date.formatter so hook_requirements callers
+  // without system date formats still render.
+  $snapshot = $metrics->snapshot(
+    static fn (int $time): string => \Drupal::service('date.formatter')
+      ->format($time),
   );
-  $requirement = _audit_chain_scheduled_verification_requirement(
-    $classified,
-    $require_keyed,
-    is_array($run) ? $run : [],
-  );
+  $requirement = _audit_chain_scheduled_verification_requirement($snapshot);
   if ($requirement !== NULL) {
     $requirements['audit_chain_scheduled_verification'] = $requirement;
   }
 }
 
 /**
- * Builds one scheduled-verification status-report row from a classified reason.
+ * Builds one scheduled-verification status-report row from a snapshot.
  *
  * Unknown reasons must not throw. They are not the pending-first-run card.
  *
- * @param array $classified
- *   Output of ScheduledVerificationIntegrity::classify().
- * @param bool $require_keyed
- *   Whether the assurance profile is on.
- * @param array $run
- *   The stored scheduled-verification run, or empty when none exists.
+ * @param array $snapshot
+ *   Output of ScheduledVerificationPresentation::snapshot().
  *
  * @return array|null
  *   A hook_requirements row, or NULL when the classifier is silent.
+ *
+ * @phpstan-param array{
+ *   presented: array{
+ *     label: mixed,
+ *     detail: mixed,
+ *     severity: string,
+ *     omit: bool,
+ *     uses_time: bool
+ *   },
+ *   when?: string|null
+ * } $snapshot
  */
-function _audit_chain_scheduled_verification_requirement(array $classified, bool $require_keyed, array $run): ?array {
-  $reason = (string) ($classified['reason'] ?? '');
-  /** @var \Drupal\audit_chain\AuditChainMetrics $metrics */
-  $metrics = \Drupal::service('audit_chain.metrics');
-  $context = ScheduledVerificationPresentation::contextFromRun($run, [
-    'require_keyed' => $require_keyed,
-    // Same live count the dashboard integrity card already interpolates.
-    'rows' => $metrics->integrity()['rows'],
-  ]);
-  $presented = ScheduledVerificationPresentation::forReason($reason, $context);
+function _audit_chain_scheduled_verification_requirement(array $snapshot): ?array {
+  $presented = $snapshot['presented'];
   if ($presented['omit']) {
     return NULL;
   }
-  // Only states that show a last-run time need date.formatter; other
-  // hook_requirements callers may not have system date formats installed.
-  $when = NULL;
-  if ($presented['uses_time']) {
-    $when = \Drupal::service('date.formatter')->format((int) ($classified['time'] ?? 0));
-    $presented = ScheduledVerificationPresentation::forReason(
-      $reason,
-      ['when' => $when] + $context,
-    );
-  }
+  $when = $snapshot['when'] ?? NULL;
+  $when = is_string($when) && $when !== '' ? $when : NULL;
   $severity = match ($presented['severity']) {
     'ok' => REQUIREMENT_OK,
     'crit' => REQUIREMENT_ERROR,

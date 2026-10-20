@@ -171,11 +171,12 @@ final class ScheduledVerifier {
   /**
    * Dispatches the failure event, then logs successor and presentation copy.
    *
-   * The classify() method is the only classifier. Interval is forced above
-   * zero and "now" is the run time so disabled/overdue/pending cannot mask
-   * this run. Dispatch runs in try; successor-defect and presentation
-   * logging run in finally so neither a throwing logger nor a throwing
-   * subscriber can suppress the other. Those exceptions still propagate.
+   * The classify() method is the only classifier, via snapshot(). Interval
+   * is forced above zero and "now" is the run time so disabled/overdue/
+   * pending cannot mask this run. Dispatch runs in try; successor-defect
+   * and presentation logging run in finally so neither a throwing logger
+   * nor a throwing subscriber can suppress the other. Those exceptions
+   * still propagate.
    * If both throw, the logger exception surfaces with the subscriber
    * exception as getPrevious(). Error::logException() does not log
    * previous exceptions, so cron logs omit the subscriber failure then.
@@ -185,20 +186,18 @@ final class ScheduledVerifier {
    */
   private function recordPresentation(array $run): void {
     $interval = (int) $this->configFactory->get('audit_chain.settings')->get('verify_interval');
-    $now = (int) ($run['time'] ?? $this->time->getRequestTime());
-    $classified = ScheduledVerificationIntegrity::classify(
+    $now = (int) $run['time'];
+    $snapshot = ScheduledVerificationPresentation::snapshot(
       $run,
       max($interval, 1),
       $now,
-    );
-    $presented = ScheduledVerificationPresentation::forReason(
-      $classified['reason'],
-      ScheduledVerificationPresentation::contextFromRun($run, [
+      [
         // Type custom with DATE_ATOM does not load date-format config
         // entities. Type medium throws after persist when those are missing.
         'when' => $this->dates->format($now, 'custom', DATE_ATOM),
-      ]),
+      ],
     );
+    $presented = $snapshot['presented'];
     try {
       if ($presented['dispatch']) {
         $this->eventDispatcher->dispatch(

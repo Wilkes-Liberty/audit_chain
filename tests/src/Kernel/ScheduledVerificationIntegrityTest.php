@@ -215,10 +215,12 @@ final class ScheduledVerificationIntegrityTest extends KernelTestBase {
   }
 
   /**
-   * Metrics and hook_requirements both consume the shared classifier.
+   * Metrics snapshot, integrity(), and hook_requirements share classify().
    *
    * @covers ::classify
    * @covers ::isDocumentedHistoricalException
+   * @covers \Drupal\audit_chain\ScheduledVerificationPresentation::snapshot
+   * @covers \Drupal\audit_chain\AuditChainMetrics::snapshot
    */
   public function testSurfacesShareClassifier(): void {
     $now = \Drupal::time()->getRequestTime();
@@ -358,10 +360,14 @@ final class ScheduledVerificationIntegrityTest extends KernelTestBase {
         $now,
       );
       // Fresh instance: AuditChainMetrics caches per request.
-      $integrity = $this->freshMetrics()->integrity();
+      $metrics = $this->freshMetrics();
+      $snapshot = $metrics->snapshot();
+      $integrity = $metrics->integrity();
+      $this->assertSame($classified, $snapshot['classified'], "snapshot case $index");
       $this->assertSame($classified['reason'], $integrity['reason'], "metrics reason case $index");
       $this->assertSame($classified['status'], $integrity['status'], "metrics status case $index");
       $this->assertSame($classified['time'], $integrity['time'], "metrics time case $index");
+      $this->assertSame($snapshot['rows'], $integrity['rows'], "integrity projects snapshot rows case $index");
 
       \Drupal::moduleHandler()->loadInclude('audit_chain', 'install');
       $requirements = audit_chain_requirements('runtime');
@@ -480,15 +486,10 @@ final class ScheduledVerificationIntegrityTest extends KernelTestBase {
     $this->assertStringContainsString('No scheduled verification has run yet', (string) $pending['detail']);
 
     \Drupal::moduleHandler()->loadInclude('audit_chain', 'install');
-    $requirement = _audit_chain_scheduled_verification_requirement(
-      [
-        'status' => 'warn',
-        'reason' => 'mystery_future_reason',
-        'time' => NULL,
-      ],
-      FALSE,
-      [],
-    );
+    $requirement = _audit_chain_scheduled_verification_requirement([
+      'presented' => $presented,
+      'when' => NULL,
+    ]);
     $this->assertIsArray($requirement);
     $this->assertSame(REQUIREMENT_WARNING, $requirement['severity']);
     $this->assertStringContainsString('Unrecognized verification state', (string) $requirement['value']);
@@ -561,6 +562,89 @@ final class ScheduledVerificationIntegrityTest extends KernelTestBase {
     $run['verdict']['broken_at'] = 7;
     $preferVerdict = ScheduledVerificationPresentation::contextFromRun($run);
     $this->assertSame(7, $preferVerdict['broken_at']);
+  }
+
+  /**
+   * One snapshot feeds status report, dashboard, and DATE_ATOM verifier copy.
+   *
+   * @covers \Drupal\audit_chain\ScheduledVerificationPresentation::snapshot
+   * @covers \Drupal\audit_chain\AuditChainMetrics::snapshot
+   */
+  public function testSnapshotAssemblesClassifiedRowsRunAndWhen(): void {
+    $now = \Drupal::time()->getRequestTime();
+    for ($i = 0; $i < 2; $i++) {
+      $this->container->get('database')->insert('audit_chain_log')->fields([
+        'channel' => 'personnel',
+        'timestamp' => $now - 60,
+        'uid' => 1,
+        'operation' => 'field_read',
+        'key_id' => '',
+      ])->execute();
+    }
+    $this->config('audit_chain.settings')->set('verify_interval', 3600)->save();
+    $run = [
+      'time' => $now,
+      'ok' => TRUE,
+      'reason' => NULL,
+    ];
+    $this->container->get('state')->set(ScheduledVerifier::STATE_KEY, $run);
+
+    $dates = $this->container->get('date.formatter');
+    $when = $dates->format($now);
+    $atom = $dates->format($now, 'custom', DATE_ATOM);
+    $snapshot = $this->freshMetrics()->snapshot(
+      fn (int $time): string => $dates->format($time),
+    );
+    $classified = ScheduledVerificationIntegrity::classify($run, 3600, $now);
+
+    $this->assertSame($classified, $snapshot['classified']);
+    $this->assertSame(2, $snapshot['rows']);
+    $this->assertSame($run, $snapshot['run']);
+    $this->assertSame($when, $snapshot['when']);
+    $this->assertSame($when, $snapshot['context']['when']);
+    $this->assertSame(
+      (string) ScheduledVerificationPresentation::forReason(
+        $classified['reason'],
+        $snapshot['context'],
+      )['detail'],
+      (string) $snapshot['presented']['detail'],
+    );
+
+    $request = Request::create('/admin/reports/audit-chain');
+    $controller = AuditChainDashboardController::create($this->container);
+    $build = $controller->dashboard($request);
+    $this->assertSame(
+      (string) $snapshot['presented']['label'],
+      $build['#chain']['label'],
+    );
+    $this->assertSame(
+      (string) $snapshot['presented']['detail'],
+      $build['#chain']['detail'],
+    );
+    $this->assertSame($snapshot['presented']['severity'], $build['#chain']['state']);
+
+    \Drupal::moduleHandler()->loadInclude('audit_chain', 'install');
+    $requirements = audit_chain_requirements('runtime');
+    $this->assertSame(
+      (string) $snapshot['presented']['detail'],
+      (string) $requirements['audit_chain_scheduled_verification']['description'],
+    );
+
+    $verifierSnapshot = ScheduledVerificationPresentation::snapshot(
+      $run,
+      3600,
+      $now,
+      ['when' => $atom],
+    );
+    $this->assertSame($atom, $verifierSnapshot['when']);
+    $this->assertStringContainsString(
+      $atom,
+      (string) $verifierSnapshot['presented']['detail'],
+    );
+    $this->assertStringNotContainsString(
+      'unknown',
+      (string) $verifierSnapshot['presented']['detail'],
+    );
   }
 
   /**

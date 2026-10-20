@@ -6,8 +6,6 @@ namespace Drupal\audit_chain\Controller;
 
 use Drupal\audit_chain\AuditChainChartRenderer;
 use Drupal\audit_chain\AuditChainMetrics;
-use Drupal\audit_chain\ScheduledVerificationPresentation;
-use Drupal\audit_chain\ScheduledVerifier;
 use Drupal\Core\Controller\ControllerBase;
 use Drupal\Core\Datetime\DateFormatterInterface;
 use Drupal\Core\Url;
@@ -100,22 +98,10 @@ final class AuditChainDashboardController extends ControllerBase {
    *   The chain card.
    */
   private function buildChain(): array {
-    $integrity = $this->metrics->integrity();
-    $time = $integrity['time'];
-    $when = $time ? $this->dates->format($time) : self::PLACEHOLDER;
-    $run = $this->state()->get(ScheduledVerifier::STATE_KEY);
-    $presented = ScheduledVerificationPresentation::forReason(
-      $integrity['reason'],
-      ScheduledVerificationPresentation::contextFromRun(
-        is_array($run) ? $run : [],
-        [
-          'rows' => $integrity['rows'],
-          'when' => $when,
-          'require_keyed' => (bool) $this->config('audit_chain.settings')
-            ->get('verify_require_keyed'),
-        ],
-      ),
+    $snapshot = $this->metrics->snapshot(
+      fn (int $time): string => $this->dates->format($time),
     );
+    $presented = $snapshot['presented'];
 
     return [
       'state' => $presented['severity'],

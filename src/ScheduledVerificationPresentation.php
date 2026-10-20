@@ -9,10 +9,10 @@ use Drupal\Core\StringTranslation\TranslatableMarkup;
 /**
  * Presents a ScheduledVerificationIntegrity reason on every operator surface.
  *
- * The classify() method remains the only classifier. This mapping turns a
- * reason key into copy, severity, log level, and whether the failure event
- * fires. An unknown reason is its own card: it must not throw and must not
- * reuse the pending-first-run presentation.
+ * The classify() method remains the only classifier. snapshot() is the
+ * assembly: classified state, row count, stored run, and formatted last-run
+ * time, then one forReason() call. An unknown reason is its own card: it
+ * must not throw and must not reuse the pending-first-run presentation.
  */
 final class ScheduledVerificationPresentation {
 
@@ -67,7 +67,6 @@ final class ScheduledVerificationPresentation {
     $placeholders = [
       '@n' => $rows,
       '@when' => $when ?? (string) $unknown,
-      '@time' => $when ?? (string) $unknown,
       '@reason' => $runReason !== '' ? $runReason : (string) $unknown,
       '@broken_at' => $brokenAt ?? (string) $unknown,
       '@segment_id' => $segmentId ?? (string) $unknown,
@@ -263,6 +262,99 @@ final class ScheduledVerificationPresentation {
       'historical_ok' => $extra['historical_ok'] ?? !empty($successor['historical_ok']),
       'segment_ok' => $extra['segment_ok'] ?? !empty($successor['segment_ok']),
       'rewind_through_id' => $extra['rewind_through_id'] ?? $rewindThrough,
+    ];
+  }
+
+  /**
+   * Assembles one snapshot of classified state, run, rows, and formatted when.
+   *
+   * The classify() method remains the only classifier. This method unpacks
+   * the stored run, applies caller-supplied rows and require_keyed, formats
+   * last-run time when asked, and calls forReason() once so every operator
+   * surface consumes the same payload.
+   *
+   * @param mixed $run
+   *   The scheduled-verification state value, or NULL when none exists.
+   * @param int $interval
+   *   Configured verify_interval in seconds. Zero or less means unscheduled.
+   * @param int $now
+   *   Current unix time, or the run time when presenting a just-recorded run.
+   * @param array $extra
+   *   Additional placeholders merged over the run-derived context. Typical
+   *   keys: rows, when, require_keyed.
+   * @param callable|null $formatWhen
+   *   (optional) Formats classified last-run time when extra.when is absent
+   *   and the classified state has a last-run time. Unused for
+   *   disabled/pending.
+   *
+   * @return array
+   *   classified, rows, run, when, context, and presented.
+   *
+   * @phpstan-param array{
+   *   rows?: int|string,
+   *   when?: string|null,
+   *   run_reason?: string,
+   *   require_keyed?: bool,
+   *   broken_at?: int|string|null,
+   *   segment_id?: string|null,
+   *   historical_ok?: mixed,
+   *   segment_ok?: mixed,
+   *   rewind_through_id?: int|string|null
+   * } $extra
+   * @phpstan-param (callable(int): string)|null $formatWhen
+   * @phpstan-return array{
+   *   classified: array{status: string, reason: string, time: int|null},
+   *   rows: int,
+   *   run: array<string, mixed>,
+   *   when: string|null,
+   *   context: array{
+   *     rows?: int|string,
+   *     when?: string|null,
+   *     run_reason?: string,
+   *     require_keyed?: bool,
+   *     broken_at?: int|string|null,
+   *     segment_id?: string|null,
+   *     historical_ok?: mixed,
+   *     segment_ok?: mixed,
+   *     rewind_through_id?: int|string|null
+   *   },
+   *   presented: array{
+   *     label: \Drupal\Core\StringTranslation\TranslatableMarkup,
+   *     detail: \Drupal\Core\StringTranslation\TranslatableMarkup,
+   *     severity: string,
+   *     log_level: string|null,
+   *     dispatch: bool,
+   *     omit: bool,
+   *     uses_time: bool
+   *   }
+   * }
+   */
+  public static function snapshot(
+    mixed $run,
+    int $interval,
+    int $now,
+    array $extra = [],
+    ?callable $formatWhen = NULL,
+  ): array {
+    $classified = ScheduledVerificationIntegrity::classify($run, $interval, $now);
+    $stored = is_array($run) ? $run : [];
+    $when = $extra['when'] ?? NULL;
+    $when = is_string($when) && $when !== '' ? $when : NULL;
+    if ($when === NULL && $formatWhen !== NULL && $classified['time'] !== NULL) {
+      $reason = $classified['reason'];
+      if ($reason !== 'disabled' && $reason !== 'pending') {
+        $when = $formatWhen((int) $classified['time']);
+      }
+    }
+    $context = self::contextFromRun($stored, ['when' => $when] + $extra);
+    $presented = self::forReason($classified['reason'], $context);
+    return [
+      'classified' => $classified,
+      'rows' => (int) ($context['rows'] ?? 0),
+      'run' => $stored,
+      'when' => $when,
+      'context' => $context,
+      'presented' => $presented,
     ];
   }
 

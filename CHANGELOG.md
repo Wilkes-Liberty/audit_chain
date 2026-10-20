@@ -20,6 +20,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that case. Hash, mutex, and seal behavior is unchanged.
 
 ### Changed
+- Status report, dashboard integrity card, and scheduled-verifier logging
+  share one scheduled-verification snapshot (classified state, live row
+  count, stored run, and formatted last-run time) and call `forReason()`
+  once. `classify()` is still the only classifier. Hash, mutex, and seal
+  behavior is unchanged.
 - Scheduled-verifier watchdog `@when` is ISO-8601 (`DATE_ATOM`) rather
   than the localized medium date format.
 

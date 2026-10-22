@@ -16,7 +16,7 @@ audit_chain.settings:
       label: 'Encryption profile for metadata at rest — Encryption Profile entity ID'
     stream_enabled:
       type: boolean
-      label: 'Emit each entry to the audit_chain logger channel (SIEM streaming)'
+      label: 'Emit each entry to the SIEM stream (syslog/Monolog, not dblog)'
     verify_interval:
       type: integer
       label: 'Scheduled verification interval in seconds (0 = disabled)'

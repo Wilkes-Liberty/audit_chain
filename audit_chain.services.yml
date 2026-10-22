@@ -4,6 +4,23 @@ services:
     arguments:
       - 'audit_chain'
 
+  # PHP syslog fallback for stream_enabled when the only Drupal logger
+  # backend is dblog. Not tagged `logger`: that would fan it out onto every
+  # channel, including the operational audit_chain channel used for errors.
+  audit_chain.stream_syslog:
+    class: Drupal\audit_chain\Logger\PhpSyslogStreamLogger
+    public: false
+
+  # Narrow SIEM channel. AuditChainServiceProvider attaches every tagged
+  # logger except logger.dblog, so syslog/Monolog keep the same
+  # audit_chain_event record without writing {watchdog}.
+  audit_chain.stream:
+    class: Drupal\Core\Logger\LoggerChannel
+    arguments: ['audit_chain']
+    calls:
+      - [setCurrentUser, ['@current_user']]
+      - [setRequestStack, ['@request_stack']]
+
   audit_chain.logger:
     class: Drupal\audit_chain\AuditChainLogger
     arguments:
@@ -17,6 +34,7 @@ services:
       - '@encryption'
       - '@entity_type.manager'
       - '@state'
+      - '@audit_chain.stream'
 
   # Request-scoped buffer for consumers that would otherwise log per access
   # check. Deduplicates and writes once at kernel.terminate — see the README

@@ -114,6 +114,8 @@ $builder = new class('appendWorker') extends TestCase {
       $this->createMock(EncryptServiceInterface::class),
       $this->createMock(EntityTypeManagerInterface::class),
       $this->createMock(StateInterface::class),
+      // stream_enabled is FALSE in this fixture; the sink is unused.
+      new NullLogger(),
     );
   }
 

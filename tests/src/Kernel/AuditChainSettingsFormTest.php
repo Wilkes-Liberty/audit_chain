@@ -6,6 +6,7 @@ namespace Drupal\Tests\audit_chain\Kernel;
 
 use Drupal\audit_chain\Form\AuditChainSettingsForm;
 use Drupal\Core\Form\FormState;
+use Drupal\Core\Url;
 use Drupal\KernelTests\KernelTestBase;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
@@ -60,6 +61,24 @@ final class AuditChainSettingsFormTest extends KernelTestBase {
     $this->assertStringContainsString('plaintext', $description);
     $this->assertStringContainsString('loadable', $description);
     $this->assertStringContainsString('drush audit-chain:reencrypt', $description);
+  }
+
+  /**
+   * Stream copy names the SIEM sink and says dblog is not the destination.
+   *
+   * @covers ::buildForm
+   */
+  public function testStreamCopySaysDblogIsNotTheDestination(): void {
+    $form_object = AuditChainSettingsForm::create($this->container);
+    $form_state = new FormState();
+    $form = $form_object->buildForm([], $form_state);
+    $description = (string) $form['stream_enabled']['#description'];
+
+    $this->assertStringContainsString('Database Logging', $description);
+    $this->assertStringContainsString('Reports → Audit Chain', $description);
+    $this->assertStringContainsString('audit_chain_event', $description);
+    $this->assertStringContainsString('no update hook', $description);
+    $this->assertStringContainsString(Url::fromRoute('audit_chain.dashboard')->toString(), $description);
   }
 
   /**

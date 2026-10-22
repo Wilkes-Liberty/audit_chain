@@ -131,6 +131,18 @@ services:
     tags:
       - { name: audit_chain.witness_backend }
 
+  audit_chain.witness_backend.rfc3161:
+    class: Drupal\audit_chain\Rfc3161WitnessBackend
+    arguments:
+      - '@config.factory'
+      - '@audit_chain.witness_transport'
+      - '@audit_chain.witness_dns'
+      - '@uuid'
+      - '@key.repository'
+      - '@datetime.time'
+    tags:
+      - { name: audit_chain.witness_backend }
+
   audit_chain.witness_operator:
     class: Drupal\audit_chain\WitnessOperator
     arguments:

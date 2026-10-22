@@ -154,6 +154,13 @@ final class WitnessOperator {
     if ($receipt->backendId === 'xrpl') {
       return new WitnessOperation(0, [$receipt->id . '.json'], $receipt->opaqueToken);
     }
+    if ($receipt->backendId === 'rfc3161') {
+      $bytes = base64_decode($receipt->opaqueToken, TRUE);
+      if ($bytes === FALSE) {
+        return new WitnessOperation(1, ['receipt_malformed']);
+      }
+      return new WitnessOperation(0, [$receipt->id . '.rfc3161'], $bytes);
+    }
     return new WitnessOperation(1, ['receipt_not_exportable']);
   }
 

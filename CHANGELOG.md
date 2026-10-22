@@ -16,7 +16,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `witness_backend` stays empty. XRPL remains optional, disabled by
   default, and testnet-only: the demo points at an external relay and
   does not sign. Demo steps walk OpenTimestamps then XRPL even when
-  receipt UUIDs sort the other way. See docs/WITNESS_DEMO.md.
+  receipt UUIDs sort the other way. The runbook's live-demo lead-time
+  section says to submit OpenTimestamps 12-24 hours ahead and to fund
+  XRPL testnet the same day. See docs/WITNESS_DEMO.md.
 
 ### Fixed
 - The status report reads the stored scheduled-verification run on every

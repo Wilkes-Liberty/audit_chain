@@ -11,6 +11,35 @@ lives in the separate `moneta` service (DEV-850). Point this demo at
 that relay. Do not put a family seed in Drupal config or in this
 repository.
 
+## Before a live demo: lead time
+
+OpenTimestamps will not be Bitcoin-confirmed when you submit. Plan for
+that. Do not start a live walk hoping the calendar finishes during the
+talk.
+
+1. The evening before, or 12–24 hours ahead, run `prepare`,
+   `checkpoint`, and `submit` on the demo site. That posts the digest to
+   the public calendars. Leave the receipt in place. Do not `reset`.
+2. Before the audience arrives, run `drush audit-chain:witness-demo
+   status` and `drush audit-chain:witness-demo upgrade`. The
+   OpenTimestamps line must be `confirmed` (Bitcoin attestation in the
+   proof). If it is still `pending`, wait or use the fallback below.
+   `upgrade` does not wait inside the command.
+3. Keep a pre-confirmed receipt as fallback: a digest you already
+   upgraded to Bitcoin, plus its receipt id. If the live checkpoint is
+   still pending, show verify and tamper against that older receipt
+   (`drush audit-chain:witness-verify --receipt=… --digest=…` and the
+   demo `tamper` step with `--digest`). Do not claim a pending proof is
+   confirmed.
+
+XRPL testnet usually confirms in seconds once the relay submits. Testnet
+resets can wipe funded accounts. Fund the witness and sink from
+`https://faucet.altnet.rippletest.net/accounts` the same day as the
+demo. Do not rely on balances from an earlier week.
+
+The shipped `witness_backend` setting stays empty. This lead time is
+only for the controlled demo site.
+
 ## What the demo shows
 
 1. A persisted archive checkpoint.

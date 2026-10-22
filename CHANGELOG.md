@@ -6,6 +6,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- RFC 3161 witness backend (`rfc3161`) for persisted checkpoint
+  digests. Submit stores a confirmed TimeStampToken plus the OCSP
+  evidence captured at submit. Upgrade is a no-op. Verify checks
+  imprint, policy, CMS signature, trust chain, critical timeStamping
+  EKU, algorithm floor, and revocation, and re-checks OCSP while the
+  signer is unexpired. Install defaults are empty (fail closed). A TSA
+  credential, if the vendor needs one, is a Key entity id. Crypto uses
+  the PHP openssl extension; phpseclib is used for ASN.1 structure
+  only.
+
 ### Fixed
 - The status report reads the stored scheduled-verification run on every
   call. A verification saved earlier in the same request is no longer

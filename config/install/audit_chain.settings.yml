@@ -26,3 +26,9 @@ witness_xrpl:
   network: ''
   sink_address: ''
   witness_account: ''
+witness_rfc3161:
+  tsa_url: ''
+  policy_oid: ''
+  trust_anchors: ''
+  ocsp_override: ''
+  credential_key: ''

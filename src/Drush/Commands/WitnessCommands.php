@@ -102,7 +102,7 @@ final class WitnessCommands extends DrushCommands {
    */
   #[CLI\Command(name: 'audit-chain:witness-status')]
   #[CLI\Option(name: 'digest', description: 'Persisted checkpoint digest.')]
-  #[CLI\Option(name: 'require', description: 'opentimestamps, xrpl, or all. Empty prints only.')]
+  #[CLI\Option(name: 'require', description: 'opentimestamps, xrpl, rfc3161, or all. Empty prints only.')]
   public function status(
     array $options = [
       'digest' => '',

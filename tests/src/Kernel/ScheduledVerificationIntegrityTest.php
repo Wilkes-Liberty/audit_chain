@@ -7,6 +7,7 @@ namespace Drupal\Tests\audit_chain\Kernel;
 use Drupal\audit_chain\AuditChainLogger;
 use Drupal\audit_chain\AuditChainMetrics;
 use Drupal\audit_chain\Controller\AuditChainDashboardController;
+use Drupal\audit_chain\Hook\AuditChainRequirements;
 use Drupal\audit_chain\RewindDetector;
 use Drupal\audit_chain\ScheduledVerificationIntegrity;
 use Drupal\audit_chain\ScheduledVerificationPresentation;
@@ -28,6 +29,7 @@ use Symfony\Component\HttpFoundation\Request;
 final class ScheduledVerificationIntegrityTest extends KernelTestBase {
 
   use AuditChainSchemaTrait;
+  use RuntimeRequirementsTrait;
 
   /**
    * {@inheritdoc}
@@ -215,7 +217,7 @@ final class ScheduledVerificationIntegrityTest extends KernelTestBase {
   }
 
   /**
-   * Metrics snapshot, integrity(), and hook_requirements share classify().
+   * Metrics snapshot, integrity(), and runtime requirements share classify().
    *
    * @covers ::classify
    * @covers ::isDocumentedHistoricalException
@@ -369,8 +371,7 @@ final class ScheduledVerificationIntegrityTest extends KernelTestBase {
       $this->assertSame($classified['time'], $integrity['time'], "metrics time case $index");
       $this->assertSame($snapshot['rows'], $integrity['rows'], "integrity projects snapshot rows case $index");
 
-      \Drupal::moduleHandler()->loadInclude('audit_chain', 'install');
-      $requirements = audit_chain_requirements('runtime');
+      $requirements = $this->runtimeRequirements();
       if ($classified['reason'] === 'disabled' && !$case['require_keyed']) {
         $this->assertArrayNotHasKey(
           'audit_chain_scheduled_verification',
@@ -379,12 +380,12 @@ final class ScheduledVerificationIntegrityTest extends KernelTestBase {
         );
         continue;
       }
-      $expected = match ($classified['status']) {
-        'ok' => REQUIREMENT_OK,
-        'crit' => REQUIREMENT_ERROR,
-        'warn' => REQUIREMENT_WARNING,
+      $expected = $this->requirementSeverity(match ($classified['status']) {
+        'ok' => 'ok',
+        'crit' => 'crit',
+        'warn' => 'warn',
         default => throw new \InvalidArgumentException('Unknown integrity status: ' . $classified['status']),
-      };
+      });
       $this->assertArrayHasKey('audit_chain_scheduled_verification', $requirements);
       $this->assertSame(
         $expected,
@@ -451,8 +452,7 @@ final class ScheduledVerificationIntegrityTest extends KernelTestBase {
       $request = Request::create('/admin/reports/audit-chain');
       $controller = AuditChainDashboardController::create($this->container);
       $build = $controller->dashboard($request);
-      \Drupal::moduleHandler()->loadInclude('audit_chain', 'install');
-      $requirements = audit_chain_requirements('runtime');
+      $requirements = $this->runtimeRequirements();
 
       $this->assertArrayHasKey('audit_chain_scheduled_verification', $requirements, $reason);
       $description = (string) $requirements['audit_chain_scheduled_verification']['description'];
@@ -485,13 +485,12 @@ final class ScheduledVerificationIntegrityTest extends KernelTestBase {
     $this->assertSame('Pending', (string) $pending['label']);
     $this->assertStringContainsString('No scheduled verification has run yet', (string) $pending['detail']);
 
-    \Drupal::moduleHandler()->loadInclude('audit_chain', 'install');
-    $requirement = _audit_chain_scheduled_verification_requirement([
+    $requirement = AuditChainRequirements::scheduledVerificationRequirement([
       'presented' => $presented,
       'when' => NULL,
     ]);
     $this->assertIsArray($requirement);
-    $this->assertSame(REQUIREMENT_WARNING, $requirement['severity']);
+    $this->assertSame($this->requirementSeverity('warn'), $requirement['severity']);
     $this->assertStringContainsString('Unrecognized verification state', (string) $requirement['value']);
     $this->assertStringNotContainsString('Pending', (string) $requirement['value']);
     $this->assertStringNotContainsString('No scheduled verification has run yet', (string) $requirement['description']);
@@ -623,8 +622,7 @@ final class ScheduledVerificationIntegrityTest extends KernelTestBase {
     );
     $this->assertSame($snapshot['presented']['severity'], $build['#chain']['state']);
 
-    \Drupal::moduleHandler()->loadInclude('audit_chain', 'install');
-    $requirements = audit_chain_requirements('runtime');
+    $requirements = $this->runtimeRequirements();
     $this->assertSame(
       (string) $snapshot['presented']['detail'],
       (string) $requirements['audit_chain_scheduled_verification']['description'],

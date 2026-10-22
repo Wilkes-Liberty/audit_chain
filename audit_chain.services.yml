@@ -155,6 +155,18 @@ services:
       - '@logger.channel.audit_chain'
       - '@audit_chain.chain_gap'
 
+  # Class-id service so Drupal 10.6's procedural hook_requirements() can
+  # call runtime() before hook_runtime_requirements exists. 11.2+ discovers
+  # the same class via #[Hook]; the D10 bridge is then skipped.
+  Drupal\audit_chain\Hook\AuditChainRequirements:
+    arguments:
+      - '@audit_chain.logger'
+      - '@audit_chain.metrics'
+      - '@database'
+      - '@state'
+      - '@config.factory'
+      - '@date.formatter'
+
   audit_chain.chart_renderer:
     class: Drupal\audit_chain\AuditChainChartRenderer
     arguments:

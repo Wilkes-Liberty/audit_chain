@@ -16,13 +16,16 @@ include:
 variables:
   _GITLAB_TEMPLATES_REPO: project/gitlab_templates
   _GITLAB_TEMPLATES_REF: main
-  # This module declares `^10.6 || ^11.3`. The default phpunit job runs against
-  # current core only, so without these the floors would be advertised and never
-  # exercised — a claim CI does not run is not a claim. OPT_IN_* surfaces the job;
-  # _AUTORUN_* ('all') makes it run rather than sit as a manual button nobody presses.
+  # This module declares `^10.6 || ^11.3 || ^12`. The default phpunit job runs
+  # against current core only, so without these the floors would be advertised
+  # and never exercised — a claim CI does not run is not a claim. OPT_IN_*
+  # surfaces the job; _AUTORUN_* ('all') makes it run rather than sit as a
+  # manual button nobody presses.
   #
   # PREVIOUS_MAJOR = newest 10.x satisfying the constraint (10.6, the D10 floor).
   # PREVIOUS_MINOR = prior minor of the current major (11.3, the D11 floor).
+  # NEXT_MAJOR (Drupal 12) is not opted in: Key and Encrypt have not declared
+  # ^12 yet, so that job cannot resolve this module's hard dependencies.
   OPT_IN_TEST_PREVIOUS_MAJOR: '1'
   OPT_IN_TEST_PREVIOUS_MINOR: '1'
   _AUTORUN_PREVIOUS_MAJOR: 'all'

@@ -30,6 +30,7 @@ use Symfony\Component\HttpFoundation\Request;
 final class ChainRewindTest extends KernelTestBase {
 
   use AuditChainSchemaTrait;
+  use RuntimeRequirementsTrait;
 
   private const WITNESS_ACCOUNT = 'rWitness11111111111111111111111';
 
@@ -150,7 +151,7 @@ final class ChainRewindTest extends KernelTestBase {
 
     $requirements = $this->runtimeRequirements();
     $requirement = $requirements['audit_chain_scheduled_verification'];
-    $this->assertSame(REQUIREMENT_ERROR, $requirement['severity']);
+    $this->assertSame($this->requirementSeverity('crit'), $requirement['severity']);
     $this->assertStringContainsString('Chain rewound', (string) $requirement['value']);
 
     $controller = AuditChainDashboardController::create($this->container);
@@ -180,7 +181,7 @@ final class ChainRewindTest extends KernelTestBase {
 
     $requirements = $this->runtimeRequirements();
     $requirement = $requirements['audit_chain_scheduled_verification'];
-    $this->assertSame(REQUIREMENT_WARNING, $requirement['severity']);
+    $this->assertSame($this->requirementSeverity('warn'), $requirement['severity']);
     $this->assertStringContainsString('Rewind check unavailable', (string) $requirement['value']);
   }
 
@@ -220,7 +221,7 @@ final class ChainRewindTest extends KernelTestBase {
 
     $requirements = $this->runtimeRequirements();
     $requirement = $requirements['audit_chain_scheduled_verification'];
-    $this->assertSame(REQUIREMENT_WARNING, $requirement['severity']);
+    $this->assertSame($this->requirementSeverity('warn'), $requirement['severity']);
     $this->assertStringContainsString('Witness ambiguous', (string) $requirement['value']);
     $this->assertStringNotContainsString('could not be read', (string) $requirement['description']);
 
@@ -429,17 +430,6 @@ final class ChainRewindTest extends KernelTestBase {
       ];
     }
     return $rows;
-  }
-
-  /**
-   * Returns runtime requirements keyed by requirement id.
-   *
-   * @return array<string, array<string, mixed>>
-   *   hook_requirements() runtime results.
-   */
-  private function runtimeRequirements(): array {
-    $this->container->get('module_handler')->loadInclude('audit_chain', 'install');
-    return audit_chain_requirements('runtime');
   }
 
 }

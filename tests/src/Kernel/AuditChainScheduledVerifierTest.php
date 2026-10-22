@@ -28,6 +28,7 @@ use PHPUnit\Framework\Attributes\Group;
 final class AuditChainScheduledVerifierTest extends KernelTestBase {
 
   use AuditChainSchemaTrait;
+  use RuntimeRequirementsTrait;
 
   /**
    * {@inheritdoc}
@@ -76,14 +77,6 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
    */
   private function lastRun(): ?array {
     return \Drupal::state()->get('audit_chain.scheduled_verification');
-  }
-
-  /**
-   * Returns runtime requirements keyed by requirement id.
-   */
-  private function runtimeRequirements(): array {
-    \Drupal::moduleHandler()->loadInclude('audit_chain', 'install');
-    return audit_chain_requirements('runtime');
   }
 
   /**
@@ -186,7 +179,7 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
 
     $requirements = $this->runtimeRequirements();
     $this->assertArrayHasKey('audit_chain_scheduled_verification', $requirements);
-    $this->assertSame(REQUIREMENT_ERROR, $requirements['audit_chain_scheduled_verification']['severity'],
+    $this->assertSame($this->requirementSeverity('crit'), $requirements['audit_chain_scheduled_verification']['severity'],
       'A failed scheduled verification must be a non-success health state.');
     $this->assertRequirementMatchesClassifier($requirements);
   }
@@ -418,7 +411,7 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
       'Verification must never rewrite the chain it inspected — tampered rows included.');
 
     $requirements = $this->runtimeRequirements();
-    $this->assertSame(REQUIREMENT_ERROR, $requirements['audit_chain_scheduled_verification']['severity']);
+    $this->assertSame($this->requirementSeverity('crit'), $requirements['audit_chain_scheduled_verification']['severity']);
     $this->assertRequirementMatchesClassifier($requirements);
   }
 
@@ -469,7 +462,7 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
 
     $requirements = $this->runtimeRequirements();
     $this->assertSame(
-      REQUIREMENT_WARNING,
+      $this->requirementSeverity('warn'),
       $requirements['audit_chain_scheduled_verification']['severity'],
       'The status report must distinguish an unauthenticated copy from tampering.'
     );
@@ -518,7 +511,7 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
     $this->assertSame('written_unkeyed', $run['reason']);
     $this->assertFalse($run['verdict']['unsigned_prefix']);
     $requirements = $this->runtimeRequirements();
-    $this->assertSame(REQUIREMENT_ERROR, $requirements['audit_chain_scheduled_verification']['severity'],
+    $this->assertSame($this->requirementSeverity('crit'), $requirements['audit_chain_scheduled_verification']['severity'],
       'Unkeyed history with no signed successor stays an error under the assurance profile.');
   }
 
@@ -568,7 +561,7 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
     );
 
     $requirements = $this->runtimeRequirements();
-    $this->assertSame(REQUIREMENT_WARNING, $requirements['audit_chain_scheduled_verification']['severity']);
+    $this->assertSame($this->requirementSeverity('warn'), $requirements['audit_chain_scheduled_verification']['severity']);
     $description = (string) $requirements['audit_chain_scheduled_verification']['description'];
     $this->assertStringContainsString('not re-signed', $description);
     $this->assertStringContainsString('authoritative chain', $description);
@@ -595,7 +588,7 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
     $this->assertSame($signedId, $run['verdict']['broken_at']);
     $requirements = $this->runtimeRequirements();
     $this->assertSame(
-      REQUIREMENT_ERROR,
+      $this->requirementSeverity('crit'),
       $requirements['audit_chain_scheduled_verification']['severity'],
       'An edited signed row must still fail the status report.',
     );
@@ -624,7 +617,7 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
     $this->assertSame(AuditChainLogger::REASON_WRITTEN_UNKEYED, $run['reason']);
     $this->assertFalse($run['verdict']['unsigned_prefix']);
     $requirements = $this->runtimeRequirements();
-    $this->assertSame(REQUIREMENT_ERROR, $requirements['audit_chain_scheduled_verification']['severity']);
+    $this->assertSame($this->requirementSeverity('crit'), $requirements['audit_chain_scheduled_verification']['severity']);
   }
 
   /**
@@ -666,7 +659,7 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
 
     $requirements = $this->runtimeRequirements();
     $this->assertArrayHasKey('audit_chain_scheduled_verification', $requirements);
-    $this->assertSame(REQUIREMENT_WARNING, $requirements['audit_chain_scheduled_verification']['severity'],
+    $this->assertSame($this->requirementSeverity('warn'), $requirements['audit_chain_scheduled_verification']['severity'],
       'A run older than twice the interval must warn: silence is not health.');
     $this->assertRequirementMatchesClassifier($requirements);
   }
@@ -682,7 +675,7 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
 
     $requirements = $this->runtimeRequirements();
     $this->assertArrayHasKey('audit_chain_scheduled_verification', $requirements);
-    $this->assertSame(REQUIREMENT_WARNING, $requirements['audit_chain_scheduled_verification']['severity'],
+    $this->assertSame($this->requirementSeverity('warn'), $requirements['audit_chain_scheduled_verification']['severity'],
       'Requiring keyed verification while never scheduling it must warn.');
     $this->assertRequirementMatchesClassifier($requirements);
   }
@@ -768,12 +761,12 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
       $this->assertArrayNotHasKey('audit_chain_scheduled_verification', $requirements);
       return;
     }
-    $expected = match ($classified['status']) {
-      'ok' => REQUIREMENT_OK,
-      'crit' => REQUIREMENT_ERROR,
-      'warn' => REQUIREMENT_WARNING,
+    $expected = $this->requirementSeverity(match ($classified['status']) {
+      'ok' => 'ok',
+      'crit' => 'crit',
+      'warn' => 'warn',
       default => throw new \InvalidArgumentException('Unknown integrity status: ' . $classified['status']),
-    };
+    });
     $this->assertArrayHasKey('audit_chain_scheduled_verification', $requirements);
     $this->assertSame($expected, $requirements['audit_chain_scheduled_verification']['severity']);
   }

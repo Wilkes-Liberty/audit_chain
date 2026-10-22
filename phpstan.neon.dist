@@ -30,6 +30,12 @@ parameters:
     # reflected on, so the tests themselves pass there; this is a cross-version
     # static-analysis artifact. Reassess when the floor rises above Drupal 10.
     - "#Attribute class PHPUnit.*Attributes.* does not exist#"
+    # Drupal 10.6 has no Hook / LegacyRequirementsHook / RequirementSeverity.
+    # The previous-major analyser would report those as missing classes. The
+    # attributes are inert unless reflected on; enum_exists() guards the enum
+    # at runtime. Reassess when the floor rises above Drupal 10.
+    - "#Attribute class Drupal\\\\Core\\\\Hook\\\\Attribute\\\\.* does not exist#"
+    - "#Class Drupal\\\\Core\\\\Extension\\\\Requirement\\\\RequirementSeverity not found#"
     # Drupal calls hook implementations with a fixed argument list. PHP 8
     # rejects extra arguments, so an unused hook parameter stays.
     -

@@ -6,6 +6,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Core requirement is now `^10.6 || ^11.3 || ^12` on the base module and in
+  `composer.json`. Status-report findings move to
+  `hook_runtime_requirements()` (`AuditChainRequirements`) so Drupal 12 can
+  drop the `REQUIREMENT_*` integers; Drupal 10.6 still runs the same copy
+  through a `#[LegacyRequirementsHook]` bridge. The optional MCP submodule
+  stays on `^10.6 || ^11.3` because MCP Sentinel has not declared Drupal 12.
+  Hash, mutex, and seal behavior is unchanged.
+
 ### Fixed
 - The status report reads the stored scheduled-verification run on every
   call. A verification saved earlier in the same request is no longer

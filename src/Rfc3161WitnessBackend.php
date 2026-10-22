@@ -143,7 +143,10 @@ final class Rfc3161WitnessBackend implements IdentifiedWitnessBackendInterface {
     }
     catch (\RuntimeException $exception) {
       $reason = $exception->getMessage();
-      if ($this->knownReason($reason)) {
+      // Submit uses extra throw tokens (unconfigured, nonce, transport).
+      // Verify only reports the documented reasons so an operator never
+      // sees an undocumented verdict as "valid" or as a private code.
+      if ($this->verifyReason($reason)) {
         return new WitnessVerdict(FALSE, $reason);
       }
       return new WitnessVerdict(FALSE, 'receipt_malformed');
@@ -261,7 +264,7 @@ final class Rfc3161WitnessBackend implements IdentifiedWitnessBackendInterface {
       if ($submit) {
         throw $exception;
       }
-      if ($this->knownReason($exception->getMessage())) {
+      if ($this->verifyReason($exception->getMessage())) {
         throw $exception;
       }
       throw new \RuntimeException('revocation_unreachable', 0, $exception);
@@ -432,9 +435,13 @@ final class Rfc3161WitnessBackend implements IdentifiedWitnessBackendInterface {
   }
 
   /**
-   * Whether a thrown message is a documented verify reason.
+   * Whether a thrown message is a documented verify failure reason.
+   *
+   * The listed tokens are the only ones verify may return. Submit may
+   * still throw nonce_mismatch, backend_unreachable, or
+   * witness_rfc3161_unconfigured; those stay off the verify surface.
    */
-  private function knownReason(string $reason): bool {
+  private function verifyReason(string $reason): bool {
     return in_array($reason, [
       'receipt_malformed',
       'digest_mismatch',
@@ -445,9 +452,6 @@ final class Rfc3161WitnessBackend implements IdentifiedWitnessBackendInterface {
       'certificate_invalid',
       'certificate_revoked',
       'revocation_unreachable',
-      'nonce_mismatch',
-      'backend_unreachable',
-      'witness_rfc3161_unconfigured',
     ], TRUE);
   }
 

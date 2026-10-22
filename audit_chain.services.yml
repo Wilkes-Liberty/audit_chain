@@ -131,6 +131,7 @@ services:
     tags:
       - { name: audit_chain.witness_backend }
 
+  # RFC 3161 TSA backend. Empty install defaults fail closed.
   audit_chain.witness_backend.rfc3161:
     class: Drupal\audit_chain\Rfc3161WitnessBackend
     arguments:

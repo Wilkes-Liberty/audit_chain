@@ -564,6 +564,9 @@ final class Rfc3161Asn1 {
   public static function ocspIssuerHashes(string $signerDer, string $issuerDer): array {
     $issuer = self::certIdMaterial($issuerDer);
     $signer = self::certIdMaterial($signerDer);
+    // Name hash is the TSA certificate's issuer Name TLV. Key hash is
+    // the issuer certificate's subjectPublicKey bits. The two certs
+    // must be a pair or CertID will not match the responder.
     return [
       'name_hash' => hash('sha1', $signer['name'], TRUE),
       'key_hash' => hash('sha1', $issuer['key'], TRUE),

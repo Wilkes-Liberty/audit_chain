@@ -202,7 +202,7 @@ final class WitnessDemo {
       return new WitnessOperation(1, ['witness_demo_digest_required']);
     }
     $lines = ['digest=' . $resolved];
-    foreach ($this->witnesses->recordsForDigest($resolved) as $record) {
+    foreach ($this->records($resolved) as $record) {
       $lines[] = $record['id'] . ' ' . $record['backend_id'] . ' ' . $record['status'];
     }
     return new WitnessOperation(0, $lines);
@@ -221,7 +221,7 @@ final class WitnessDemo {
     }
     $lines = ['digest=' . $resolved];
     $failed = FALSE;
-    foreach ($this->witnesses->recordsForDigest($resolved) as $record) {
+    foreach ($this->records($resolved) as $record) {
       try {
         $receipt = $this->witnesses->upgrade($record['id']);
         $lines[] = $receipt->id . ' ' . $receipt->backendId . ' ' . $receipt->status;
@@ -244,7 +244,7 @@ final class WitnessDemo {
     }
     $lines = ['digest=' . $resolved];
     $failed = FALSE;
-    foreach ($this->witnesses->recordsForDigest($resolved) as $record) {
+    foreach ($this->records($resolved) as $record) {
       $verdict = $this->witnesses->verify($record['id'], $resolved);
       $state = $verdict->valid ? 'valid' : 'invalid';
       $lines[] = $record['id'] . ' ' . $record['backend_id'] . ' ' . $record['status'] . ' ' . $state . ' ' . $verdict->reason;
@@ -273,7 +273,7 @@ final class WitnessDemo {
       'tampered=' . $tampered,
     ];
     $sawInvalid = FALSE;
-    foreach ($this->witnesses->recordsForDigest($resolved) as $record) {
+    foreach ($this->records($resolved) as $record) {
       $verdict = $this->witnesses->verify($record['id'], $tampered);
       $lines[] = $record['id'] . ' ' . $record['backend_id'] . ' tamper ' . ($verdict->valid ? 'valid' : 'invalid') . ' ' . $verdict->reason;
       if (!$verdict->valid) {
@@ -337,6 +337,27 @@ final class WitnessDemo {
       }
     }
     return new WitnessOperation($exit, $lines);
+  }
+
+  /**
+   * Receipts for one digest, in the documented backend order.
+   *
+   * Database order is oldest-first by submitted time and UUID. Both
+   * demo receipts share a timestamp, so UUID order can put XRPL first
+   * and is not the walk operators see.
+   *
+   * @return list<array{id: string, backend_id: string, status: string, submitted: int, updated: int, opaque_token: string}>
+   *   Receipt rows for the digest.
+   */
+  private function records(string $digest): array {
+    $order = array_flip(self::BACKENDS);
+    $records = $this->witnesses->recordsForDigest($digest);
+    usort($records, static function (array $left, array $right) use ($order): int {
+      $leftRank = $order[$left['backend_id']] ?? PHP_INT_MAX;
+      $rightRank = $order[$right['backend_id']] ?? PHP_INT_MAX;
+      return $leftRank <=> $rightRank ?: $left['id'] <=> $right['id'];
+    });
+    return $records;
   }
 
   /**

@@ -15,7 +15,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `drush audit-chain:witness-demo` for a controlled site. Shipped
   `witness_backend` stays empty. XRPL remains optional, disabled by
   default, and testnet-only: the demo points at an external relay and
-  does not sign. See docs/WITNESS_DEMO.md.
+  does not sign. Demo steps walk OpenTimestamps then XRPL even when
+  receipt UUIDs sort the other way. See docs/WITNESS_DEMO.md.
 
 ### Fixed
 - The status report reads the stored scheduled-verification run on every

@@ -143,10 +143,12 @@ final class WitnessDemoTest extends KernelTestBase {
     $this->transport->script[] = [
       'status' => 200,
       'body' => $this->pendingBody((string) hex2bin($digest), 'https://alice.example'),
+      'match' => 'calendar.example',
     ];
     $this->transport->script[] = [
       'status' => 200,
       'body' => json_encode(['outcome' => 'pending', 'tx_hash' => self::HASH], JSON_THROW_ON_ERROR),
+      'match' => 'relay.example',
     ];
     $submitted = $demo->step('submit', $digest);
     $this->assertSame(0, $submitted->exitCode, implode("\n", $submitted->lines));
@@ -157,10 +159,17 @@ final class WitnessDemoTest extends KernelTestBase {
     $this->assertSame(0, $status->exitCode);
     $this->assertCount(2, $this->receipts($digest));
 
-    $this->transport->script[] = ['status' => 404, 'body' => ''];
+    // Queue the ledger read first so a UUID-oldest XRPL receipt cannot
+    // consume the OpenTimestamps 404 and starve the calendar request.
     $this->transport->script[] = [
       'status' => 200,
       'body' => json_encode($this->xrplTransaction(TRUE, $digest), JSON_THROW_ON_ERROR),
+      'match' => 'read.example/transactions',
+    ];
+    $this->transport->script[] = [
+      'status' => 404,
+      'body' => '',
+      'match' => 'alice.example',
     ];
     $upgraded = $demo->step('upgrade', $digest);
     $this->assertSame(0, $upgraded->exitCode, implode("\n", $upgraded->lines));
@@ -170,6 +179,7 @@ final class WitnessDemoTest extends KernelTestBase {
     $this->transport->script[] = [
       'status' => 200,
       'body' => json_encode($this->xrplTransaction(TRUE, $digest), JSON_THROW_ON_ERROR),
+      'match' => 'read.example/transactions',
     ];
     $verified = $demo->step('verify', $digest);
     $this->assertSame(0, $verified->exitCode, implode("\n", $verified->lines));
@@ -180,6 +190,7 @@ final class WitnessDemoTest extends KernelTestBase {
       'body' => json_encode([
         'transactions' => [$this->xrplTransaction(TRUE, $digest)],
       ], JSON_THROW_ON_ERROR),
+      'match' => 'read.example/accounts',
     ];
     $tamper = $demo->step('tamper', $digest);
     $this->assertSame(0, $tamper->exitCode, implode("\n", $tamper->lines));

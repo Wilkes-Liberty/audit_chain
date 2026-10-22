@@ -7,8 +7,6 @@ namespace Drupal\Tests\audit_chain\Kernel;
 use Drupal\audit_chain\OpenTimestampsWitnessBackend;
 use Drupal\audit_chain\IdentifiedWitnessBackendInterface;
 use Drupal\audit_chain\Witness\OtsProof;
-use Drupal\audit_chain\Witness\WitnessDnsResolverInterface;
-use Drupal\audit_chain\Witness\WitnessTransportInterface;
 use Drupal\audit_chain\WitnessOperator;
 use Drupal\audit_chain\WitnessReceipt;
 use Drupal\audit_chain\WitnessVerdict;
@@ -315,6 +313,47 @@ final class WitnessBackendsTest extends KernelTestBase {
     $litecoinId = $this->insertReceipt($litecoin, 'confirmed');
     $this->assertSame('attestation_mismatch', $manager->verify($litecoinId, self::DIGEST)->reason);
     $this->assertEquals($before, $this->chainRows());
+  }
+
+  /**
+   * A calendar Bitcoin attestation replaces the pending proof.
+   */
+  public function testUpgradeReplacesPendingReceiptWithBitcoinAttestation(): void {
+    $this->configureOpenTimestamps();
+    $this->checkpoint(self::DIGEST);
+    $manager = $this->container->get('audit_chain.witness_manager');
+    $raw = (string) hex2bin(self::DIGEST);
+    $pending = $this->pendingBody($raw, 'https://alice.example');
+    $token = base64_encode(OtsProof::detachedFromCalendar($raw, $pending));
+    $id = $this->insertReceipt($token, 'pending');
+
+    $this->transport->script[] = ['status' => 404, 'body' => ''];
+    $still = $manager->upgrade($id);
+    $this->assertSame('pending', $still->status);
+    $this->assertSame($token, $still->opaqueToken);
+
+    $bitcoin = "\x00" . hex2bin('0588960d73d71901') . "\x03\xc0\xa2\x33";
+    $this->transport->script[] = ['status' => 200, 'body' => $bitcoin];
+    $this->scriptHeader(self::DISPLAY, self::HEADER, '840006', '{"in_best_chain":true}');
+    $complete = $manager->upgrade($id);
+    $this->assertSame('confirmed', $complete->status);
+    $this->assertNotSame($token, $complete->opaqueToken);
+    $decoded = OtsProof::decodeDetached((string) base64_decode($complete->opaqueToken, TRUE));
+    $this->assertSame(self::DIGEST, bin2hex($decoded['digest']));
+    $this->assertSame([[
+      'height' => 840000,
+      'message' => $raw,
+    ],
+    ], $decoded['proof']->bitcoinCandidates());
+
+    $this->scriptHeader(self::DISPLAY, self::HEADER, '840006', '{"in_best_chain":true}');
+    $valid = $manager->verify($id, self::DIGEST);
+    $this->assertTrue($valid->valid);
+    $this->assertSame('confirmed', $valid->reason);
+
+    $tampered = $manager->verify($id, str_repeat('ab', 32));
+    $this->assertFalse($tampered->valid);
+    $this->assertSame('checkpoint_digest_mismatch', $tampered->reason);
   }
 
   /**
@@ -740,80 +779,6 @@ final class WitnessBackendsTest extends KernelTestBase {
       ->orderBy('id')
       ->execute()
       ->fetchAll();
-  }
-
-}
-
-/**
- * HTTP double that returns scripted results and records calls.
- */
-final class ScriptedWitnessTransport implements WitnessTransportInterface {
-
-  /**
-   * Recorded requests.
-   *
-   * @var list<array{method: string, url: string, body: string, headers: array<string, string>}>
-   */
-  public array $calls = [];
-
-  /**
-   * Scripted results, exceptions, or closures.
-   *
-   * @var list<array{status: int, body: string}|\Throwable|\Closure>
-   */
-  public array $script = [];
-
-  /**
-   * {@inheritdoc}
-   */
-  public function request(string $method, string $url, string $body, array $headers, int $maxBytes = 10000): array {
-    $this->calls[] = [
-      'method' => $method,
-      'url' => $url,
-      'body' => $body,
-      'headers' => $headers,
-    ];
-    if ($this->script === []) {
-      throw new \RuntimeException('unexpected_witness_request');
-    }
-    $next = array_shift($this->script);
-    if ($next instanceof \Closure) {
-      $next = $next();
-    }
-    if ($next instanceof \Throwable) {
-      throw $next;
-    }
-    if (strlen($next['body']) > $maxBytes) {
-      throw new \RuntimeException('response_too_large');
-    }
-    return $next;
-  }
-
-}
-
-/**
- * DNS double keyed by hostname.
- */
-final class MapWitnessDns implements WitnessDnsResolverInterface {
-
-  /**
-   * Stores the hostname map.
-   *
-   * @param array<string, list<string>> $map
-   *   Hostnames to the addresses a lookup would return.
-   */
-  public function __construct(
-    private array $map,
-  ) {}
-
-  /**
-   * {@inheritdoc}
-   */
-  public function resolve(string $host): array {
-    if (!array_key_exists($host, $this->map)) {
-      throw new \RuntimeException('dns_unmapped');
-    }
-    return $this->map[$host];
   }
 
 }

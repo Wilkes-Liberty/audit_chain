@@ -88,6 +88,18 @@ final class ScheduledVerificationIntegrity {
       ];
     }
 
+    // The assurance profile stores keyed_verification_unavailable when no
+    // signing key resolves. Verification never ran, so this is not an
+    // unexplained integrity failure and must not reuse the generic failed
+    // card that interpolates the machine key.
+    if (!$ok && $reason === ScheduledVerifier::REASON_KEY_REQUIRED) {
+      return [
+        'status' => 'crit',
+        'reason' => ScheduledVerifier::REASON_KEY_REQUIRED,
+        'time' => $time,
+      ];
+    }
+
     if (!$ok) {
       return [
         'status' => 'crit',

@@ -189,6 +189,18 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
     $this->assertSame(REQUIREMENT_ERROR, $requirements['audit_chain_scheduled_verification']['severity'],
       'A failed scheduled verification must be a non-success health state.');
     $this->assertRequirementMatchesClassifier($requirements);
+    $this->assertStringContainsString(
+      'Keyed verification unavailable',
+      (string) $requirements['audit_chain_scheduled_verification']['value'],
+    );
+    $this->assertStringContainsString(
+      'assurance profile requires a signing key',
+      (string) $requirements['audit_chain_scheduled_verification']['description'],
+    );
+    $this->assertStringNotContainsString(
+      'keyed_verification_unavailable',
+      (string) $requirements['audit_chain_scheduled_verification']['description'],
+    );
   }
 
   /**
@@ -234,7 +246,14 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
       ),
       'Presentation must show a sane ISO-8601 timestamp.',
     );
-    $this->assertStringContainsString('keyed_verification_unavailable', $errors[0]['message']);
+    $this->assertStringContainsString(
+      'assurance profile requires a signing key',
+      $errors[0]['message'],
+    );
+    $this->assertStringNotContainsString(
+      'keyed_verification_unavailable',
+      $errors[0]['message'],
+    );
     $this->assertStringNotContainsString('unknown', $errors[0]['message']);
   }
 
@@ -368,6 +387,10 @@ final class AuditChainScheduledVerifierTest extends KernelTestBase {
       'A throwing subscriber must not skip or duplicate the watchdog error.',
     );
     $this->assertStringContainsString(
+      'assurance profile requires a signing key',
+      $errors[0]['message'],
+    );
+    $this->assertStringNotContainsString(
       'keyed_verification_unavailable',
       $errors[0]['message'],
     );

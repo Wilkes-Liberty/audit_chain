@@ -6,9 +6,12 @@
 # libssl. This script installs a prefix under $OPENSSL_FIPS_PREFIX
 # (default: $HOME/openssl-fips), runs `openssl fipsinstall`, and writes
 # OPENSSL_CONF / OPENSSL_MODULES / LD_LIBRARY_PATH so PHP's openssl
-# extension loads that prefix. The job that sources those variables must
-# still run tests/scripts/assert-openssl-fips.php; a skipped build must
-# not look green.
+# extension loads that prefix. PHP's OPENSSL_VERSION_TEXT still names
+# the libcrypto it was linked against; the guard proves the fips
+# provider is active by refusing MD5 through openssl_digest. The job
+# that sources those variables must still run
+# tests/scripts/assert-openssl-fips.php; a skipped build must not
+# look green.
 set -euo pipefail
 
 PREFIX="${OPENSSL_FIPS_PREFIX:-$HOME/openssl-fips}"

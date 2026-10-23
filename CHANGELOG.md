@@ -6,7 +6,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [1.13.1] - Unreleased
+## [1.13.1] - 2026-10-23
 
 ### Fixed
 - 1.13.0 stopped writing successful `audit_chain_event` rows to
@@ -661,3 +661,7 @@ First stable release.
   argument — the chain is global, entries from every consumer are interleaved
   in one sequence, and a per-channel walk could not tell a deletion from a gap.
   A break anywhere is a break.
+
+[Unreleased]: https://git.drupalcode.org/project/audit_chain/-/compare/1.13.1...1.x
+[1.13.1]: https://git.drupalcode.org/project/audit_chain/-/compare/1.13.0...1.13.1
+

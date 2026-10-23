@@ -250,6 +250,7 @@ final class Rfc3161FixtureFactory {
    * OpenSSL config used only to stamp certificate extensions.
    */
   private function opensslConfig(): string {
+    // cspell:ignore acpkicnf
     $path = tempnam(sys_get_temp_dir(), 'acpkicnf');
     if ($path === FALSE) {
       throw new \RuntimeException('fixture_pki_config');

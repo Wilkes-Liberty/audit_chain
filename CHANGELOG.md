@@ -33,6 +33,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   passing hash-chain run on a TSA site no longer surfaces as **Rewind
   check unavailable**. An unknown backend id still fails closed as
   unreachable.
+- Drupal.org pipeline 1012779 on 1.13.0 left cspell and previous-major
+  phpstan red (both allowed to fail). GitHub had no cspell job, and
+  phpstan ran only on ^11. The project dictionary now includes the
+  RFC 3161 / OpenSSL / witness words from those landings, and
+  previous-major phpstan ignores the `RequirementSeverity` return type
+  that 10.6 does not have. GitHub Actions now runs cspell from core's
+  yarn.lock and a phpstan pass against Drupal ~10.6.0 next to the
+  existing ^11 job.
+
+### Upgrade notes
+- Sites that moved to 1.13.0 and relied on the dblog-excluded sink
+  (`audit_chain.stream`) get `audit_chain_event` in Database Logging
+  again after 1.13.1 until they set `stream_exclude_dblog: true`.
+  The 1.12.2 channel is the default; no other config change is
+  required for sites that still listen on
+  `logger.channel.audit_chain`.
 
 ### Upgrade notes
 - Sites that moved to 1.13.0 and relied on the dblog-excluded sink

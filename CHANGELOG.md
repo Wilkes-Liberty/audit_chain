@@ -6,6 +6,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-10-23
+
 ### Added
 - OpenTimestamps upgrade-path unit tests, plus a kernel case that
   replaces a pending calendar receipt with a Bitcoin-attested proof
@@ -28,7 +30,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   credential, if the vendor needs one, is a Key entity id. Crypto uses
   the PHP openssl extension; phpseclib is used for ASN.1 structure
   only. GitHub Actions job `PHPUnit (OpenSSL 3 FIPS provider)`
-  (DEV-1010) builds OpenSSL 3.0 with `enable-fips`, activates the fips
+  builds OpenSSL 3.0 with `enable-fips`, activates the fips
   provider as the default (`default_properties = fips=yes`), and runs
   the RFC 3161 kernel tests plus the witness suite. A guard step fails
   the job if MD5 through PHP openssl still succeeds or the fips
@@ -43,7 +45,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (syslog, Monolog, or PHP syslog when those are absent). Errors and
   warnings still use `logger.channel.audit_chain` and remain visible in
   dblog. Existing `stream_enabled: true` config stays valid; no update
-  hook is required. DEV-776.
+  hook is required.
 - The status report reads the stored scheduled-verification run on every
   call. A verification saved earlier in the same request is no longer
   hidden by the dashboard metric cache, so a tampered signed row still
@@ -66,7 +68,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `hook_runtime_requirements()` (`AuditChainRequirements`) so Drupal 12 can
   drop the `REQUIREMENT_*` integers; Drupal 10.6 still runs the same copy
   through a `#[LegacyRequirementsHook]` bridge. The optional MCP submodule
-  stays on `^10.6 || ^11.3` because MCP Sentinel has not declared Drupal 12.
+  stays on `^10.6 || ^11.3` because Tool API declares `^10.5 || ^11`.
   Hash, mutex, and seal behavior is unchanged.
 - Scheduled verification classifies `keyed_verification_unavailable` as
   its own card. Status report, dashboard, and cron log the operator-facing

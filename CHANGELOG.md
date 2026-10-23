@@ -27,7 +27,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   signer is unexpired. Install defaults are empty (fail closed). A TSA
   credential, if the vendor needs one, is a Key entity id. Crypto uses
   the PHP openssl extension; phpseclib is used for ASN.1 structure
-  only.
+  only. GitHub Actions job `PHPUnit (OpenSSL 3 FIPS provider)`
+  (DEV-1010) builds OpenSSL 3.0 with `enable-fips`, activates the fips
+  provider as the default (`default_properties = fips=yes`), and runs
+  the RFC 3161 kernel tests plus the witness suite. A guard step fails
+  the job if MD5 through PHP openssl still succeeds or the fips
+  provider is not listed as active. The SHA-1 rejection fixture is a
+  pre-built certificate so the FIPS provider is never asked to mint a
+  non-approved signature.
 
 ### Fixed
 - Successful appends with `stream_enabled` no longer write

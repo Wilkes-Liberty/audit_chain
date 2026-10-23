@@ -205,9 +205,22 @@ An OpenTimestamps client, an XRPL receipt client, and an RFC 3161 TSA
 client can be selected explicitly. Neither runs while `witness_backend`
 is empty. The RFC 3161 backend is fail-closed with empty install
 defaults: it stores a confirmed token only after signature, policy,
-chain, timeStamping EKU, and OCSP checks, using PHP's openssl
-extension. The XRPL client does not hold a seed and does not submit a
-mainnet transaction. See [docs/WITNESS.md](docs/WITNESS.md).
+  chain, timeStamping EKU, and OCSP checks, using PHP's openssl
+  extension. The XRPL client does not hold a seed and does not submit a
+  mainnet transaction. See [docs/WITNESS.md](docs/WITNESS.md).
+
+### FIPS
+
+RFC 3161 signatures and certificate checks go through PHP's openssl
+extension so a host that loads the OpenSSL 3 FIPS provider keeps those
+operations on approved algorithms. GitHub Actions runs
+`PHPUnit (OpenSSL 3 FIPS provider)` against a prefix built with
+`enable-fips`: `OPENSSL_CONF` activates the fips provider and sets
+`default_properties = fips=yes`. A guard step fails the job if MD5
+through PHP openssl still succeeds or the fips provider is not listed
+as active. Fixture keys are RSA-2048 / SHA-256. The SHA-1 rejection
+test loads a pre-built certificate; it does not ask the FIPS provider
+to mint a non-approved signature.
 
 ### Rotating the signing key
 

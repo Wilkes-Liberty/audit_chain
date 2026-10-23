@@ -15,12 +15,13 @@ name: Tests
 # retests the ceiling. A floor leg pins its minor (~11.3.0); the ceiling floats.
 #
 # RFC 3161 (DEV-1010) uses PHP's openssl extension so a host that loads
-# the OpenSSL 3 FIPS provider gets validated crypto. A dedicated
-# FIPS-provider job is not added here: ubuntu-latest and setup-php ship
-# a non-FIPS OpenSSL, the validated FIPS module is a separate artifact,
-# and linking PHP against it needs a custom build or a RHEL FIPS image
-# that this workflow does not maintain. Algorithm-floor tests reject
-# SHA-1 independently of that provider.
+# the OpenSSL 3 FIPS provider gets validated crypto. The dedicated
+# `PHPUnit (OpenSSL 3 FIPS provider)` job builds OpenSSL 3.0 with
+# enable-fips, activates that provider as the default, and runs the
+# RFC 3161 kernel tests plus the witness suite. Its guard step must be
+# able to fail: MD5 through PHP openssl, or a missing fips provider,
+# fails the job. Algorithm-floor tests reject SHA-1 independently of
+# that provider.
 #
 # phpunit is pinned per leg because Drupal 10's core-dev hard-requires ^9.6,
 # which predates PHP 8 attributes — it ignores an attribute it cannot read
@@ -338,6 +339,126 @@ jobs:
           echo "Ran ${ran} audit_chain_mcp tests (floor ${MIN_MCP_TESTS})."
           if [ "${ran}" -lt "${MIN_MCP_TESTS}" ]; then
             echo "::error::Only ${ran} audit_chain_mcp tests ran, below the floor of ${MIN_MCP_TESTS}."
+            exit 1
+          fi
+
+  # DEV-1010: prove RFC 3161 and the witness suite against PHP openssl
+  # backed by the OpenSSL 3 FIPS provider. continue-on-error is
+  # intentionally absent. SQLite is enough: these tests do not need a
+  # server database.
+  phpunit-openssl-fips:
+    name: PHPUnit (OpenSSL 3 FIPS provider)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the module
+        uses: actions/checkout@v7
+        with:
+          path: module
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: gd, pdo_sqlite, sqlite3, openssl
+          coverage: none
+
+      - name: Cache the OpenSSL 3 FIPS prefix
+        uses: actions/cache@v4
+        with:
+          path: ~/openssl-fips
+          key: openssl-3.0.16-fips-${{ runner.os }}
+
+      - name: Build OpenSSL 3 with the FIPS provider
+        run: bash module/tests/scripts/setup-openssl-fips.sh
+
+      - name: Guard — FIPS provider must be the default
+        run: php module/tests/scripts/assert-openssl-fips.php
+
+      - name: Scaffold a Drupal site
+        env:
+          DRUPAL_CONSTRAINT: '~11.3.0'
+        run: |
+          retry() {
+            rc=0
+            for n in 1 2 3; do
+              "$@" && return 0
+              rc=$?
+              if [ "$n" -lt 3 ]; then
+                echo "::warning::attempt $n of 3 failed (exit $rc): $* - retrying"
+                sleep "$((15 * n))"
+              fi
+            done
+            return "$rc"
+          }
+          scaffold() {
+            rm -rf drupal
+            composer create-project "drupal/recommended-project:${DRUPAL_CONSTRAINT}" drupal \
+              --no-interaction --no-install --no-progress
+          }
+          retry scaffold
+          cd drupal
+          composer config --no-plugins allow-plugins.composer/installers true
+          composer config --no-plugins allow-plugins.drupal/core-composer-scaffold true
+          composer config --no-plugins allow-plugins.drupal/core-project-message true
+          composer config --no-plugins allow-plugins.dealerdirect/phpcodesniffer-composer-installer true
+          composer config repositories.audit_chain path ../module
+
+      - name: Install dependencies
+        working-directory: drupal
+        env:
+          DRUPAL_CONSTRAINT: '~11.3.0'
+          PHPUNIT_VERSION: '^11.5'
+        run: |
+          retry() {
+            rc=0
+            for n in 1 2 3; do
+              "$@" && return 0
+              rc=$?
+              if [ "$n" -lt 3 ]; then
+                echo "::warning::attempt $n of 3 failed (exit $rc): $* - retrying"
+                sleep "$((15 * n))"
+              fi
+            done
+            return "$rc"
+          }
+          retry composer require -W --no-interaction --no-progress "drupal/audit_chain:*@dev"
+          retry composer require -W --dev --no-interaction --no-progress \
+            "drupal/core-dev:${DRUPAL_CONSTRAINT}" \
+            "phpunit/phpunit:${PHPUNIT_VERSION}" \
+            "drush/drush:^13"
+
+      - name: Confirm the working copy is what is under test
+        working-directory: drupal
+        run: |
+          test -L web/modules/contrib/audit_chain \
+            || { echo "::error::audit_chain is not symlinked to the working copy — the path repo did not apply"; exit 1; }
+          readlink web/modules/contrib/audit_chain
+
+      - name: PHPUnit — RFC 3161 and witness suite (blocking)
+        working-directory: drupal
+        env:
+          SIMPLETEST_DB: 'sqlite://localhost/:memory:'
+          BROWSERTEST_OUTPUT_DIRECTORY: /tmp
+          SYMFONY_DEPRECATIONS_HELPER: weak
+          MIN_TESTS: '40'
+        run: |
+          set -euo pipefail
+          # Re-run the guard in this step so a later env leak cannot
+          # silently test against the distro OpenSSL.
+          php ../module/tests/scripts/assert-openssl-fips.php
+          config="${PWD}/web/core/phpunit.xml.dist"
+          module="${PWD}/web/modules/contrib/audit_chain"
+          vendor/bin/phpunit -c "${config}" \
+            --log-junit "${PWD}/junit-Fips.xml" \
+            "${module}/tests/src/Kernel/Rfc3161WitnessBackendTest.php" \
+            "${module}/tests/src/Kernel/WitnessBackendsTest.php" \
+            "${module}/tests/src/Kernel/WitnessDemoTest.php" \
+            "${module}/tests/src/Unit"
+
+          total="$(grep -ho '<testcase ' junit-Fips.xml | wc -l | tr -d ' ')"
+          echo "Collected ${total} tests (floor ${MIN_TESTS})."
+          if [ "${total}" -lt "${MIN_TESTS}" ]; then
+            echo "::error::Collected only ${total} tests, below the floor of ${MIN_TESTS}. The FIPS suite was dropped, not fixed."
             exit 1
           fi
 

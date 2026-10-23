@@ -6,6 +6,7 @@ namespace Drupal\Tests\audit_chain\Kernel;
 
 use Drupal\audit_chain\AuditChainLogger;
 use Drupal\audit_chain\AuditChainServiceProvider;
+use Drupal\audit_chain\Exception\AuditChainSigningUnavailableException;
 use Drupal\audit_chain\Logger\PhpSyslogStreamLogger;
 use Drupal\Core\DependencyInjection\ContainerBuilder;
 use Drupal\Core\Logger\LoggerChannel;
@@ -49,6 +50,89 @@ final class AuditChainStreamTest extends KernelTestBase {
     $this->installEntitySchema('user');
     $this->installAuditChainTables();
     $this->installConfig(['audit_chain']);
+  }
+
+  /**
+   * 1.12.2 stream_enabled writes audit_chain_event to logger.channel.audit_chain.
+   *
+   * That service is the SIEM sink mcp_sentinel's McpSiemStreamingTest — and
+   * sites that already excluded dblog from it — listen on. 1.13.0 moved the
+   * record onto audit_chain.stream, so a successful append vanished from the
+   * channel those collectors still consume.
+   */
+  public function testStreamEnabledWritesSuccessfulEventToAuditChainChannel(): void {
+    // 1.12.2 config: stream_enabled only. No dedicated-sink opt-in.
+    $this->config('audit_chain.settings')->set('stream_enabled', TRUE)->save();
+    $spy = $this->installAuditChainChannelSpy();
+
+    $this->container->get('audit_chain.logger')->log('personnel', 'field_read', [
+      'entity_type' => 'node',
+      'bundle' => 'person',
+      'id' => '9',
+    ]);
+
+    $this->assertCount(1, $this->chainRows(), 'The append still lands in {audit_chain_log}.');
+    $this->assertTrue($this->container->get('audit_chain.logger')->verify()['ok']);
+
+    $events = $this->channelEvents($spy, 'audit_chain_event');
+    $this->assertCount(1, $events, 'A successful append must emit audit_chain_event on logger.channel.audit_chain.');
+    $this->assertSame('info', (string) $events[0]['level']);
+    $ctx = $events[0]['context'];
+    foreach (['channel', 'operation', 'uid', 'entity_type', 'bundle', 'entity_id', 'timestamp', 'row_hash'] as $key) {
+      $this->assertArrayHasKey($key, $ctx, "Streamed context must carry '{$key}'.");
+    }
+    $this->assertSame('personnel', $ctx['channel']);
+    $this->assertSame('field_read', $ctx['operation']);
+    $this->assertSame('person', $ctx['bundle']);
+    $this->assertSame('9', $ctx['entity_id']);
+    $this->assertNotEmpty($ctx['row_hash']);
+  }
+
+  /**
+   * Deny appends and signing faults still reach logger.channel.audit_chain.
+   *
+   * A deny is still a successful chain write. Dropping it from the SIEM
+   * channel is fail-open for a collector that keys on that record. A
+   * signing-key fault is an operational error and must stay on the same
+   * channel. logKeyed() without a key still refuses and writes nothing.
+   */
+  public function testDenyAndFailureStillReachAuditChainChannel(): void {
+    $this->config('audit_chain.settings')->set('stream_enabled', TRUE)->save();
+    $spy = $this->installAuditChainChannelSpy();
+    $chain = $this->container->get('audit_chain.logger');
+
+    $chain->log('mcp_sentinel', 'access_denied', [
+      'entity_type' => 'user',
+      'id' => '4',
+    ]);
+
+    $denied = $this->channelEvents($spy, 'audit_chain_event');
+    $this->assertCount(1, $denied, 'A deny append must still stream audit_chain_event.');
+    $this->assertSame('access_denied', $denied[0]['context']['operation']);
+    $this->assertSame('mcp_sentinel', $denied[0]['context']['channel']);
+    $this->assertCount(1, $this->chainRows(), 'The deny is recorded; streaming must not drop it.');
+
+    $this->config('audit_chain.settings')->set('hash_key', 'no_such_key')->save();
+    $this->container->set('audit_chain.logger', NULL);
+    $this->container->get('audit_chain.logger')->log('personnel', 'field_read', [
+      'id' => '1',
+    ]);
+
+    $faults = array_values(array_filter(
+      $spy->records,
+      static fn (array $record): bool => str_contains($record['message'], 'cannot be resolved'),
+    ));
+    $this->assertNotEmpty($faults, 'An unresolvable signing key must still reach logger.channel.audit_chain.');
+    $this->assertCount(2, $this->chainRows(), 'The unsigned row is still recorded.');
+
+    try {
+      $this->container->get('audit_chain.logger')->logKeyed('mcp_sentinel', 'access_denied');
+      $this->fail('logKeyed() must refuse when the signing key cannot be resolved.');
+    }
+    catch (AuditChainSigningUnavailableException $exception) {
+      $this->assertStringContainsString('cannot be resolved', $exception->getMessage());
+    }
+    $this->assertCount(2, $this->chainRows(), 'A refused keyed write must not leave a row.');
   }
 
   /**
@@ -258,6 +342,57 @@ final class AuditChainStreamTest extends KernelTestBase {
   private function enableDblog(): void {
     $this->enableModules(['dblog']);
     $this->installSchema('dblog', ['watchdog']);
+  }
+
+  /**
+   * Replaces logger.channel.audit_chain and rebuilds the chain logger.
+   *
+   * @return object{records: array<int, array{level: mixed, message: string, context: array}>}
+   *   The spy. Public $records is a list of captured log calls.
+   */
+  private function installAuditChainChannelSpy(): object {
+    $spy = new class() extends AbstractLogger {
+
+      /**
+       * Captured channel records.
+       *
+       * @var array<int, array{level: mixed, message: string, context: array}>
+       */
+      public array $records = [];
+
+      /**
+       * {@inheritdoc}
+       */
+      public function log($level, string|\Stringable $message, array $context = []): void {
+        $this->records[] = [
+          'level' => $level,
+          'message' => (string) $message,
+          'context' => $context,
+        ];
+      }
+
+    };
+    $this->container->set('logger.channel.audit_chain', $spy);
+    $this->container->set('audit_chain.logger', NULL);
+    return $spy;
+  }
+
+  /**
+   * Channel records whose message template equals a needle.
+   *
+   * @param object{records: array<int, array{level: mixed, message: string, context: array}>} $spy
+   *   The spy installed by installAuditChainChannelSpy().
+   * @param string $message
+   *   Exact message template.
+   *
+   * @return list<array{level: mixed, message: string, context: array}>
+   *   Matching records in capture order.
+   */
+  private function channelEvents(object $spy, string $message): array {
+    return array_values(array_filter(
+      $spy->records,
+      static fn (array $record): bool => $record['message'] === $message,
+    ));
   }
 
   /**

@@ -30,6 +30,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   The 1.12.2 channel is the default; no other config change is
   required for sites that still listen on
   `logger.channel.audit_chain`.
+### Fixed
+- Scheduled rewind detection treats `rfc3161` as not configured, matching
+  empty/`null` and the documented rule that the check runs only for
+  OpenTimestamps or XRPL. RFC 3161 has no listable external head, so a
+  passing hash-chain run on a TSA site no longer surfaces as **Rewind
+  check unavailable**. An unknown backend id still fails closed as
+  unreachable.
 
 ## [1.13.0] - 2026-10-23
 

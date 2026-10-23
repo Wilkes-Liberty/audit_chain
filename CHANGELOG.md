@@ -18,7 +18,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   is opt-in via `stream_exclude_dblog` (default `false`). Update
   `audit_chain_update_10008` writes that key as `false` when missing;
   rolling the hook back is a no-op. Errors, warnings, and refused
-  keyed writes are unchanged (no fail-open).
+  keyed writes are unchanged (no fail-open). A throwing channel
+  backend no longer escapes `append()`: the sink is chosen once and
+  the write is wrapped so the chain row survives and the failure is
+  reported.
+
+### Upgrade notes
+- Sites that moved to 1.13.0 and relied on the dblog-excluded sink
+  (`audit_chain.stream`) get `audit_chain_event` in Database Logging
+  again after 1.13.1 until they set `stream_exclude_dblog: true`.
+  The 1.12.2 channel is the default; no other config change is
+  required for sites that still listen on
+  `logger.channel.audit_chain`.
 
 ## [1.13.0] - 2026-10-23
 

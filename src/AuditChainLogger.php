@@ -327,30 +327,28 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
           'uid' => $row['uid'],
           'entity_type' => $row['entity_type'],
           // Included because the implementation this was extracted from
-          // emitted it, and a SIEM rule keyed on bundle would silently stop
-          // matching
-          // otherwise. Dropping a field from a stream is a regression nobody
-          // gets an error for.
+          // emitted it, and a SIEM rule keyed on bundle would silently
+          // stop matching otherwise. Dropping a field from a stream is a
+          // regression nobody gets an error for.
           'bundle' => $row['bundle'],
           'entity_id' => $row['entity_id'],
           'timestamp' => $row['timestamp'],
           'row_hash' => $rowHash,
         ];
-        if ($config->get('stream_exclude_dblog')) {
-          try {
-            $this->stream->info('audit_chain_event', $event);
-          }
-          catch (\Throwable $exception) {
-            // The chain row is the evidence. A down dedicated sink must not
-            // roll that back — say so on the operational channel, which may
-            // land in dblog, and that is the right place for a rare failure.
-            $this->logger->error('Audit chain SIEM stream failed: @message', [
-              '@message' => $exception->getMessage(),
-            ]);
-          }
+        // One sink, one write. A throwing backend (syslog or Monolog
+        // down) must not escape append() and roll back the chain row.
+        $excludeDblog = (bool) $config->get('stream_exclude_dblog');
+        $sink = $excludeDblog ? $this->stream : $this->logger;
+        try {
+          $sink->info('audit_chain_event', $event);
         }
-        else {
-          $this->logger->info('audit_chain_event', $event);
+        catch (\Throwable $exception) {
+          // The chain row is the evidence. A down sink must not undo
+          // that — say so on the operational channel, which may land
+          // in dblog, and that is the right place for a rare failure.
+          $this->logger->error('Audit chain SIEM stream failed: @message', [
+            '@message' => $exception->getMessage(),
+          ]);
         }
       }
     }

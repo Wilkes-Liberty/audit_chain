@@ -20,6 +20,10 @@ old worker before resuming writes. Mixed old and new workers are not protected
 by the same mutex. Run whole-history verification after upgrading; previously
 damaged history remains a separate recovery task.
 
+Sites that upgraded to 1.13.0 and relied on the dblog-excluded SIEM sink
+get `audit_chain_event` in Database Logging again after 1.13.1 until they
+set `stream_exclude_dblog: true`. The 1.12.2 channel remains the default.
+
 For investigated historical failures, the explicit
 [successor-segment workflow](docs/SUCCESSOR_SEGMENTS.md) preserves the old
 verdict and creates a separately signed continuation. It requires operator

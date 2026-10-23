@@ -28,6 +28,8 @@ timestamper
 tsa
 ocsp
 eku
+fips
+fipsinstall
 recognisable
 rewalk
 sekret

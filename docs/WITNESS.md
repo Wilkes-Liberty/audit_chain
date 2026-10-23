@@ -72,6 +72,13 @@ entity id and is never exported as the secret. Free public TSAs are not
 an install default. Scheduled rewind detection still applies only when
 `witness_backend` is `opentimestamps` or `xrpl`.
 
+RFC 3161 crypto uses PHP's openssl extension. A host that loads the
+OpenSSL 3 FIPS provider, with `default_properties = fips=yes`, keeps
+those checks on approved algorithms. CI job
+`PHPUnit (OpenSSL 3 FIPS provider)` (DEV-1010) builds that prefix,
+fails if MD5 through PHP openssl still succeeds, and runs the RFC 3161
+kernel tests plus the witness suite.
+
 ## Operator gate
 
 `drush audit-chain:witness-submit` submits only when `--confirm-digest` is the

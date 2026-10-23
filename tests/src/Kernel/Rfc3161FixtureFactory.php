@@ -127,10 +127,18 @@ final class Rfc3161FixtureFactory {
    */
   private function build(): void {
     $cnf = $this->opensslConfig();
+    // SHA-1 certificates are loaded, not minted. An OpenSSL 3 FIPS
+    // provider refuses SHA-1, and the algorithm-floor test still needs
+    // a SHA-1 signer to reject.
+    if ($this->variant === 'sha1') {
+      $this->loadSha1Signer();
+      $this->buildSha256Companions($cnf);
+      unlink($cnf);
+      return;
+    }
     $rootKey = $this->newKey();
     $tsaKey = $this->newKey();
     $ocspKey = $this->newKey();
-    $digest = $this->variant === 'sha1' ? 'sha1' : 'sha256';
     $root = $this->signCert(
       ['CN' => 'Audit Chain Test Root'],
       $rootKey,
@@ -138,7 +146,7 @@ final class Rfc3161FixtureFactory {
       $rootKey,
       'v3_ca',
       $cnf,
-      $digest,
+      'sha256',
       1,
     );
     $tsaExt = match ($this->variant) {
@@ -152,7 +160,7 @@ final class Rfc3161FixtureFactory {
       $rootKey,
       $tsaExt,
       $cnf,
-      $digest,
+      'sha256',
       2,
     );
     $ocsp = $this->signCert(
@@ -184,6 +192,58 @@ final class Rfc3161FixtureFactory {
     );
     $this->otherRootPem = $other['pem'];
     unlink($cnf);
+  }
+
+  /**
+   * Loads the committed SHA-1 TSA pair.
+   */
+  private function loadSha1Signer(): void {
+    $dir = dirname(__DIR__, 2) . '/fixtures/rfc3161_sha1';
+    $root = file_get_contents($dir . '/root.pem');
+    $tsa = file_get_contents($dir . '/tsa.pem');
+    $key = file_get_contents($dir . '/tsa.key');
+    if ($root === FALSE || $tsa === FALSE || $key === FALSE) {
+      throw new \RuntimeException('fixture_pki_sha1');
+    }
+    $this->rootPem = $root;
+    $this->tsaPem = $tsa;
+    $this->tsaKeyPem = $key;
+  }
+
+  /**
+   * Builds the OCSP responder and untrusted root with SHA-256.
+   *
+   * The SHA-1 rejection test fails in inspectToken before OCSP is
+   * fetched. These companions stay approved so a FIPS provider can
+   * still construct the factory.
+   */
+  private function buildSha256Companions(string $cnf): void {
+    $ocspKey = $this->newKey();
+    $ocsp = $this->signCert(
+      ['CN' => 'Audit Chain Test OCSP'],
+      $ocspKey,
+      NULL,
+      $ocspKey,
+      'ocsp_cert',
+      $cnf,
+      'sha256',
+      3,
+    );
+    $this->ocspPem = $ocsp['pem'];
+    $this->ocspKeyPem = $this->exportKey($ocspKey);
+
+    $otherKey = $this->newKey();
+    $other = $this->signCert(
+      ['CN' => 'Audit Chain Other Root'],
+      $otherKey,
+      NULL,
+      $otherKey,
+      'v3_ca',
+      $cnf,
+      'sha256',
+      1,
+    );
+    $this->otherRootPem = $other['pem'];
   }
 
   /**
@@ -228,11 +288,15 @@ CNF);
 
   /**
    * RSA 2048 key through the openssl extension.
+   *
+   * 2048-bit RSA and SHA-256 are approved under the OpenSSL 3 FIPS
+   * provider. SHA-1 signers are not generated here.
    */
   private function newKey(): \OpenSSLAsymmetricKey {
     $key = openssl_pkey_new([
       'private_key_type' => OPENSSL_KEYTYPE_RSA,
       'private_key_bits' => 2048,
+      'digest_alg' => 'sha256',
     ]);
     if ($key === FALSE) {
       throw new \RuntimeException('fixture_pki_key');

@@ -92,6 +92,7 @@ $builder = new class('appendWorker') extends TestCase {
       ['hash_key', $recovery ? 'recovery_key' : 'serialization_test'],
       ['encryption_profile', NULL],
       ['stream_enabled', FALSE],
+      ['stream_exclude_dblog', FALSE],
     ]);
     $factory = $this->createMock(ConfigFactoryInterface::class);
     $factory->method('get')->willReturn($config);

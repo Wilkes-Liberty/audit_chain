@@ -64,21 +64,23 @@ final class AuditChainSettingsFormTest extends KernelTestBase {
   }
 
   /**
-   * Stream copy names the SIEM sink and says dblog is not the destination.
+   * Stream copy names the 1.12.2 channel; dblog exclusion is the opt-in.
    *
    * @covers ::buildForm
    */
-  public function testStreamCopySaysDblogIsNotTheDestination(): void {
+  public function testStreamCopyNamesTheChannelAndOptionalDblogExclusion(): void {
     $form_object = AuditChainSettingsForm::create($this->container);
     $form_state = new FormState();
     $form = $form_object->buildForm([], $form_state);
-    $description = (string) $form['stream_enabled']['#description'];
+    $enabled = (string) $form['stream_enabled']['#description'];
+    $this->assertStringContainsString('audit_chain', $enabled);
+    $this->assertStringContainsString('audit_chain_event', $enabled);
+    $this->assertStringNotContainsString('no update hook', $enabled);
 
-    $this->assertStringContainsString('Database Logging', $description);
-    $this->assertStringContainsString('Reports → Audit Chain', $description);
-    $this->assertStringContainsString('audit_chain_event', $description);
-    $this->assertStringContainsString('no update hook', $description);
-    $this->assertStringContainsString(Url::fromRoute('audit_chain.dashboard')->toString(), $description);
+    $exclude = (string) $form['stream_exclude_dblog']['#description'];
+    $this->assertStringContainsString('Database Logging', $exclude);
+    $this->assertStringContainsString('Reports → Audit Chain', $exclude);
+    $this->assertStringContainsString(Url::fromRoute('audit_chain.dashboard')->toString(), $exclude);
   }
 
   /**

@@ -1078,7 +1078,10 @@ final class AuditChainLoggerTest extends KernelTestBase {
    * regress.
    */
   public function testStreamedRecordCarriesEveryField(): void {
-    $this->config('audit_chain.settings')->set('stream_enabled', TRUE)->save();
+    $this->config('audit_chain.settings')
+      ->set('stream_enabled', TRUE)
+      ->set('stream_exclude_dblog', TRUE)
+      ->save();
 
     $spy = new class() extends AbstractLogger {
       /**

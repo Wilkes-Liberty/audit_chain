@@ -22,8 +22,9 @@ function audit_chain_help(string $route_name, RouteMatchInterface $route_match):
       ]) . '</p>';
 
     case 'audit_chain.dashboard':
-      // Forensic home is this page, not dblog. Streamed appends are SIEM-only.
-      return '<p>' . t('Integrity and the keyed-vs-unkeyed split only — not a volume or channel dashboard. Metadata, IP addresses, user agents and entity labels are never shown. The integrity card reads the last scheduled verification; it does not re-walk the chain. A recorded gap lists its fork and lost range. Other metadata is not shown. This page is the forensic viewer; Recent log messages (dblog) is not, and streamed append events do not appear there.') . '</p>';
+      // Forensic home is this page, not dblog. stream_enabled uses the
+      // audit_chain channel; excluding dblog from that stream is opt-in.
+      return '<p>' . t('Integrity and the keyed-vs-unkeyed split only — not a volume or channel dashboard. Metadata, IP addresses, user agents and entity labels are never shown. The integrity card reads the last scheduled verification; it does not re-walk the chain. A recorded gap lists its fork and lost range. Other metadata is not shown. This page is the forensic viewer; Recent log messages (dblog) is not. Streamed appends use the <code>audit_chain</code> logger channel unless the operator excludes Database Logging.') . '</p>';
   }
   return '';
 }

@@ -37,7 +37,10 @@ if [[ ! -f "$fips_so" ]]; then
     # cache key does not have to guess lib vs lib64.
     ./Configure enable-fips --prefix="$PREFIX" --libdir=lib
     make -j"$(nproc)"
-    make install_sw install_ssldirs
+    # install_sw copies libcrypto and legacy.so but not the FIPS
+    # module. install_fips is the extra target that puts fips.so in
+    # lib/ossl-modules.
+    make install_sw install_ssldirs install_fips
   )
   trap - EXIT
   rm -rf "$work"

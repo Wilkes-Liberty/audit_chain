@@ -22,6 +22,25 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   backend no longer escapes `append()`: the sink is chosen once and
   the write is wrapped so the chain row survives and the failure is
   reported.
+- `Drupal12CompatibilityTest` read the expanded drupal.org checkout
+  `composer.json` (no `require.drupal/core`) and could walk the built
+  `web/` tree. 1.13.0's d.o pipeline failed with a null core
+  constraint. The test now skips a built Drupal `web/` and reads the
+  module `composer.json` from the gitlab_templates custom mount.
+- Scheduled rewind detection treats `rfc3161` as not configured, matching
+  empty/`null` and the documented rule that the check runs only for
+  OpenTimestamps or XRPL. RFC 3161 has no listable external head, so a
+  passing hash-chain run on a TSA site no longer surfaces as **Rewind
+  check unavailable**. An unknown backend id still fails closed as
+  unreachable.
+- Drupal.org pipeline 1012779 on 1.13.0 left cspell and previous-major
+  phpstan red (both allowed to fail). GitHub had no cspell job, and
+  phpstan ran only on ^11. The project dictionary now includes the
+  RFC 3161 / OpenSSL / witness words from those landings, and
+  previous-major phpstan ignores the `RequirementSeverity` return type
+  that 10.6 does not have. GitHub Actions now runs cspell from core's
+  yarn.lock and a phpstan pass against Drupal ~10.6.0 next to the
+  existing ^11 job.
 
 ### Upgrade notes
 - Sites that moved to 1.13.0 and relied on the dblog-excluded sink
@@ -30,18 +49,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   The 1.12.2 channel is the default; no other config change is
   required for sites that still listen on
   `logger.channel.audit_chain`.
-- `Drupal12CompatibilityTest` read the expanded drupal.org checkout
-  `composer.json` (no `require.drupal/core`) and could walk the built
-  `web/` tree. 1.13.0's d.o pipeline failed with a null core
-  constraint. The test now skips a built Drupal `web/` and reads the
-  module `composer.json` from the gitlab_templates custom mount.
-### Fixed
-- Scheduled rewind detection treats `rfc3161` as not configured, matching
-  empty/`null` and the documented rule that the check runs only for
-  OpenTimestamps or XRPL. RFC 3161 has no listable external head, so a
-  passing hash-chain run on a TSA site no longer surfaces as **Rewind
-  check unavailable**. An unknown backend id still fails closed as
-  unreachable.
 
 ## [1.13.0] - 2026-10-23
 

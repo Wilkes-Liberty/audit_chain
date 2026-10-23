@@ -493,6 +493,87 @@ jobs:
           # question rather than a similar one.
           ~/.composer/vendor/bin/phpcs --standard=phpcs.xml.dist -p
 
+  # d.o cspell is allow_failure and GitHub had no cspell job, so the
+  # unknown words from #94/#95/#98/#99 shipped in 1.13.0. This job uses
+  # gitlab_templates' prepare-cspell.php and the cspell binary plus
+  # dictionaries from Drupal core's yarn.lock, the same way d.o does.
+  cspell:
+    name: CSpell
+    runs-on: ubuntu-latest
+    env:
+      # Bump GITLAB_TEMPLATES_SHA when prepare-cspell.php or
+      # assets/.cspell.json changes. Bump DRUPAL_CORE_REF when the
+      # current-major tag d.o installs ships a new cspell or dictionary.
+      GITLAB_TEMPLATES_SHA: '6cc044b819ba1bea9da3d1fa1e7575fcb0368888'
+      DRUPAL_CORE_REF: '11.4.11'
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+
+      - name: Fetch pinned gitlab_templates cspell prep and Drupal core
+        run: |
+          set -euo pipefail
+          mkdir -p web/core/misc/cspell
+          templates="https://git.drupalcode.org/project/gitlab_templates/-/raw/${GITLAB_TEMPLATES_SHA}"
+          core="https://git.drupalcode.org/project/drupal/-/raw/${DRUPAL_CORE_REF}/core"
+          curl -fsSL "${templates}/assets/.cspell.json" -o .cspell.json
+          curl -fsSL "${templates}/scripts/prepare-cspell.php" -o prepare-cspell.php
+          curl -fsSL "${core}/package.json" -o web/core/package.json
+          curl -fsSL "${core}/yarn.lock" -o web/core/yarn.lock
+          curl -fsSL "${core}/.yarnrc.yml" -o web/core/.yarnrc.yml
+          curl -fsSL "${core}/misc/cspell/dictionary.txt" \
+            -o web/core/misc/cspell/dictionary.txt
+          curl -fsSL "${core}/misc/cspell/drupal-dictionary.txt" \
+            -o web/core/misc/cspell/drupal-dictionary.txt
+          test -s .cspell.json
+          test -s prepare-cspell.php
+          test -s web/core/package.json
+          test -s web/core/yarn.lock
+          test -s web/core/.yarnrc.yml
+          test -s web/core/misc/cspell/dictionary.txt
+          test -s web/core/misc/cspell/drupal-dictionary.txt
+
+      - name: Cache core node_modules
+        uses: actions/cache@v4
+        with:
+          path: web/core/node_modules
+          key: cspell-core-${{ env.DRUPAL_CORE_REF }}-${{ runner.os }}
+
+      - name: Install cspell from core's yarn.lock
+        working-directory: web/core
+        run: |
+          set -euo pipefail
+          corepack enable
+          yarn --version
+          yarn install --immutable
+
+      - name: cspell
+        env:
+          _WEB_ROOT: web
+          _CSPELL_DICTIONARY: .cspell-project-words.txt
+          _CSPELL_IGNORE_STANDARD_FILES: '1'
+          CI_PROJECT_NAME: audit_chain
+        run: |
+          set -euo pipefail
+          cspell=web/core/node_modules/.bin/cspell
+          echo "cspell $($cspell --version)"
+          echo "@cspell/dict-software-terms $(node -p "require('./web/core/node_modules/@cspell/dict-software-terms/package.json').version")"
+          echo "@cspell/cspell-bundled-dicts $(node -p "require('./web/core/node_modules/@cspell/cspell-bundled-dicts/package.json').version")"
+          php prepare-cspell.php
+          # Same as d.o include.drupalci.main.yml: do not spell-check the
+          # fetched helper.
+          rm -f prepare-cspell.php
+          "$cspell" -c .cspell.json --show-suggestions --show-context --no-progress .
+
   # GitHub analyzes the optional MCP tools. Drupal.org prefers phpstan.neon,
   # which excludes modules/audit_chain_mcp because that composer install does
   # not have drupal/tool or drupal/mcp_sentinel. This job installs both and
@@ -596,6 +677,107 @@ jobs:
           # Must stay on phpstan.neon.dist. See the job comment above.
           vendor/bin/phpstan analyze web/modules/contrib/audit_chain \
             -c web/modules/contrib/audit_chain/phpstan.neon.dist \
+            --autoload-file=vendor/autoload.php \
+            --no-progress \
+            --memory-limit=2G
+
+  # d.o previous-major phpstan is allow_failure and GitHub only ran ^11, so
+  # the RequirementSeverity return-type miss on 10.6 shipped in 1.13.0. This
+  # uses phpstan.neon (the file d.o prefers) and the phpstan 1.x that
+  # core-dev ~10.6.0 ships. MCP tools stay out: d.o does not install them
+  # and phpstan.neon excludes that subtree.
+  phpstan-previous-major:
+    name: PHPStan (Drupal 10.6)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the module
+        uses: actions/checkout@v7
+        with:
+          path: module
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          # d.o previous-major uses CORE_PREVIOUS_PHP_MIN (8.1 on 10.6).
+          php-version: '8.1'
+          extensions: gd, pdo_sqlite, sqlite3
+          coverage: none
+
+      - name: Scaffold a Drupal site
+        run: |
+          retry() {
+            rc=0
+            for n in 1 2 3; do
+              "$@" && return 0
+              rc=$?
+              if [ "$n" -lt 3 ]; then
+                echo "::warning::attempt $n of 3 failed (exit $rc): $* - retrying"
+                sleep "$((15 * n))"
+              fi
+            done
+            return "$rc"
+          }
+          scaffold() {
+            rm -rf drupal
+            composer create-project "drupal/recommended-project:~10.6.0" drupal \
+              --no-interaction --no-install --no-progress
+          }
+          retry scaffold
+          cd drupal
+          composer config --no-plugins allow-plugins.composer/installers true
+          composer config --no-plugins allow-plugins.drupal/core-composer-scaffold true
+          composer config --no-plugins allow-plugins.drupal/core-project-message true
+          composer config --no-plugins allow-plugins.phpstan/extension-installer true
+          composer config --no-plugins allow-plugins.dealerdirect/phpcodesniffer-composer-installer true
+          composer config repositories.audit_chain path ../module
+
+      - name: Install dependencies
+        working-directory: drupal
+        run: |
+          retry() {
+            rc=0
+            for n in 1 2 3; do
+              "$@" && return 0
+              rc=$?
+              if [ "$n" -lt 3 ]; then
+                echo "::warning::attempt $n of 3 failed (exit $rc): $* - retrying"
+                sleep "$((15 * n))"
+              fi
+            done
+            return "$rc"
+          }
+          retry composer require -W --no-interaction --no-progress \
+            'drupal/audit_chain:*@dev'
+          # core-dev ~10.6.0 brings phpstan ^1.12 and phpstan-drupal ^1.2,
+          # which is what d.o previous-major analyses with. Drush is
+          # unconstrained, as gitlab_templates require-drush does; on
+          # PHP 8.1 that resolves to 12.x (13.x needs 8.3).
+          retry composer require -W --dev --no-interaction --no-progress \
+            "drupal/core-dev:~10.6.0" \
+            "drush/drush"
+
+      - name: Confirm the working copy is what is under test
+        working-directory: drupal
+        run: |
+          test -L web/modules/contrib/audit_chain \
+            || { echo "::error::audit_chain is not symlinked to the working copy — the path repo did not apply"; exit 1; }
+          readlink web/modules/contrib/audit_chain
+          core="$(php -r 'require "vendor/autoload.php"; echo \Composer\InstalledVersions::getPrettyVersion("drupal/core");')"
+          echo "Drupal core: ${core}"
+          case "${core}" in
+            10.6.*) ;;
+            *) echo "::error::Previous-major phpstan claims Drupal 10.6 but resolved ${core}."; exit 1 ;;
+          esac
+
+      - name: phpstan
+        working-directory: drupal
+        run: |
+          set -euo pipefail
+          vendor/bin/phpstan --version
+          # phpstan.neon, not phpstan.neon.dist: d.o prefers this file and
+          # it excludes audit_chain_mcp, which this job does not install.
+          vendor/bin/phpstan analyze web/modules/contrib/audit_chain \
+            -c web/modules/contrib/audit_chain/phpstan.neon \
             --autoload-file=vendor/autoload.php \
             --no-progress \
             --memory-limit=2G

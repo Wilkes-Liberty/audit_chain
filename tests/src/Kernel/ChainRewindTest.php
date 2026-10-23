@@ -306,6 +306,60 @@ final class ChainRewindTest extends KernelTestBase {
   }
 
   /**
+   * RFC 3161 has no listable head, so rewind stays off a passing TSA site.
+   */
+  public function testRfc3161WitnessDoesNotRunRewindCheck(): void {
+    $this->config('audit_chain.settings')
+      ->set('witness_backend', 'rfc3161')
+      ->save();
+    $this->container->get('audit_chain.logger')->logKeyed('personnel', 'tsa_site');
+    $verdict = $this->container->get('audit_chain.logger')->verify();
+    $this->assertTrue($verdict['ok']);
+    $this->assertNull($verdict['reason']);
+
+    $run = $this->container->get('audit_chain.scheduled_verifier')->runNow();
+    $this->assertTrue($run['ok']);
+    $this->assertNull($run['reason']);
+    $this->assertTrue($run['verdict']['ok']);
+    $this->assertSame(RewindDetector::STATUS_NOT_CONFIGURED, $run['rewind']['status']);
+    $this->assertSame('witness_not_configured', $run['rewind']['reason']);
+    $this->assertSame([], $this->transport->calls);
+    $this->assertSame([], $this->captured);
+
+    $requirements = $this->runtimeRequirements();
+    $requirement = $requirements['audit_chain_scheduled_verification'];
+    $this->assertSame($this->requirementSeverity('ok'), $requirement['severity']);
+    $this->assertStringNotContainsString('Rewind check unavailable', (string) $requirement['value']);
+
+    $controller = AuditChainDashboardController::create($this->container);
+    $build = $controller->dashboard(Request::create('/admin/reports/audit-chain'));
+    $rendered = (string) $this->container->get('renderer')->renderRoot($build);
+    $this->assertSame('ok', $build['#chain']['state']);
+    $this->assertStringNotContainsString('Rewind check unavailable', $rendered);
+  }
+
+  /**
+   * An unknown backend id stays unreachable rather than skipping the check.
+   */
+  public function testUnknownWitnessBackendStaysUnchecked(): void {
+    $this->config('audit_chain.settings')
+      ->set('witness_backend', 'not-a-backend')
+      ->save();
+    $this->container->get('audit_chain.logger')->logKeyed('personnel', 'unknown_backend');
+
+    $run = $this->container->get('audit_chain.scheduled_verifier')->runNow();
+    $this->assertTrue($run['ok']);
+    $this->assertSame(RewindDetector::STATUS_UNCHECKED, $run['rewind']['status']);
+    $this->assertSame(RewindDetector::REASON_UNREACHABLE, $run['rewind']['reason']);
+    $this->assertSame([], $this->transport->calls);
+
+    $requirements = $this->runtimeRequirements();
+    $requirement = $requirements['audit_chain_scheduled_verification'];
+    $this->assertSame($this->requirementSeverity('warn'), $requirement['severity']);
+    $this->assertStringContainsString('Rewind check unavailable', (string) $requirement['value']);
+  }
+
+  /**
    * Inserts one confirmed OpenTimestamps receipt.
    *
    * @param string $id

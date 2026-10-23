@@ -154,7 +154,7 @@ final class ScheduledVerificationIntegrityTest extends KernelTestBase {
           'reason' => ScheduledVerifier::REASON_KEY_REQUIRED,
         ],
         3600,
-        'failed',
+        ScheduledVerifier::REASON_KEY_REQUIRED,
         'crit',
       ],
       [
@@ -405,6 +405,14 @@ final class ScheduledVerificationIntegrityTest extends KernelTestBase {
         $this->assertStringContainsString('drush audit-chain:verify', $description);
         $this->assertStringContainsString('recovery-verify', $description);
       }
+      if ($classified['reason'] === ScheduledVerifier::REASON_KEY_REQUIRED) {
+        $value = (string) $requirements['audit_chain_scheduled_verification']['value'];
+        $description = (string) $requirements['audit_chain_scheduled_verification']['description'];
+        $this->assertStringContainsString('Keyed verification unavailable', $value);
+        $this->assertStringContainsString('assurance profile requires a signing key', $description);
+        $this->assertStringNotContainsString('keyed_verification_unavailable', $description);
+        $this->assertStringNotContainsString('Failed', $value);
+      }
     }
   }
 
@@ -462,6 +470,40 @@ final class ScheduledVerificationIntegrityTest extends KernelTestBase {
   }
 
   /**
+   * The assurance-profile key miss is its own card, not the failed leak.
+   *
+   * @covers \Drupal\audit_chain\ScheduledVerificationPresentation::forReason
+   */
+  public function testKeyedVerificationUnavailableIsNotTheFailedCard(): void {
+    $when = '2026-10-22T00:00:00+00:00';
+    $presented = ScheduledVerificationPresentation::forReason(
+      ScheduledVerifier::REASON_KEY_REQUIRED,
+      ['when' => $when],
+    );
+    $this->assertSame('crit', $presented['severity']);
+    $this->assertTrue($presented['dispatch']);
+    $this->assertSame('error', $presented['log_level']);
+    $this->assertSame('Keyed verification unavailable', (string) $presented['label']);
+    $detail = (string) $presented['detail'];
+    $this->assertStringContainsString('assurance profile requires a signing key', $detail);
+    $this->assertStringContainsString($when, $detail);
+    $this->assertStringNotContainsString('keyed_verification_unavailable', $detail);
+    $this->assertNotSame('Failed', (string) $presented['label']);
+
+    // The leftover failed card still interpolates a stored machine key. This
+    // reason must not take that path now that it has its own classified card.
+    $failed = ScheduledVerificationPresentation::forReason('failed', [
+      'when' => $when,
+      'run_reason' => ScheduledVerifier::REASON_KEY_REQUIRED,
+    ]);
+    $this->assertSame('Failed', (string) $failed['label']);
+    $this->assertStringContainsString(
+      'keyed_verification_unavailable',
+      (string) $failed['detail'],
+    );
+  }
+
+  /**
    * An unknown reason is not pending and does not throw on the status report.
    *
    * @covers \Drupal\audit_chain\ScheduledVerificationPresentation::forReason
@@ -510,6 +552,7 @@ final class ScheduledVerificationIntegrityTest extends KernelTestBase {
       'seal_foreign',
       'unsigned_prefix',
       'historical_exception',
+      ScheduledVerifier::REASON_KEY_REQUIRED,
       'failed',
       'chain_rewound',
       'witness_unreachable',

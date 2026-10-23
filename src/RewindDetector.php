@@ -72,13 +72,32 @@ final class RewindDetector {
   /**
    * Compares the live chain with the latest confirmed witness.
    *
+   * An empty witness_backend setting does not run the check. Pass a backend
+   * id to assessBackend() when a demo or operator command names one without
+   * changing that setting.
+   *
    * @return array{status: string, reason: string, digest: string|null, through_id: int|null}
    *   status is one of the STATUS_* constants. digest and through_id are
    *   set when a confirmed checkpoint was identified.
    */
   public function assess(): array {
     $backend = $this->configFactory->get('audit_chain.settings')->get('witness_backend');
-    $backend = is_string($backend) ? $backend : '';
+    return $this->assessBackend(is_string($backend) ? $backend : '');
+  }
+
+  /**
+   * Compares the live chain with one named witness backend.
+   *
+   * Scheduled verification still uses assess(). This method is the same
+   * check, pointed at a backend the caller already named.
+   *
+   * @param string $backend
+   *   Backend id. Empty or null keeps the check off.
+   *
+   * @return array{status: string, reason: string, digest: string|null, through_id: int|null}
+   *   The same shape as assess().
+   */
+  public function assessBackend(string $backend): array {
     if ($backend === '' || $backend === 'null') {
       return $this->result(self::STATUS_NOT_CONFIGURED, 'witness_not_configured');
     }

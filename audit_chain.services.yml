@@ -167,6 +167,17 @@ services:
     arguments:
       - '@audit_chain.witness_manager'
 
+  audit_chain.witness_demo:
+    class: Drupal\audit_chain\WitnessDemo
+    arguments:
+      - '@settings'
+      - '@config.factory'
+      - '@state'
+      - '@audit_chain.archive_bundle_exporter'
+      - '@audit_chain.witness_manager'
+      - '@audit_chain.rewind_detector'
+      - '@database'
+
   audit_chain.witness_manager:
     class: Drupal\audit_chain\WitnessManager
     arguments:

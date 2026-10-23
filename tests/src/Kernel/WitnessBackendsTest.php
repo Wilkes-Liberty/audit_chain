@@ -316,6 +316,47 @@ final class WitnessBackendsTest extends KernelTestBase {
   }
 
   /**
+   * A calendar Bitcoin attestation replaces the pending proof.
+   */
+  public function testUpgradeReplacesPendingReceiptWithBitcoinAttestation(): void {
+    $this->configureOpenTimestamps();
+    $this->checkpoint(self::DIGEST);
+    $manager = $this->container->get('audit_chain.witness_manager');
+    $raw = (string) hex2bin(self::DIGEST);
+    $pending = $this->pendingBody($raw, 'https://alice.example');
+    $token = base64_encode(OtsProof::detachedFromCalendar($raw, $pending));
+    $id = $this->insertReceipt($token, 'pending');
+
+    $this->transport->script[] = ['status' => 404, 'body' => ''];
+    $still = $manager->upgrade($id);
+    $this->assertSame('pending', $still->status);
+    $this->assertSame($token, $still->opaqueToken);
+
+    $bitcoin = "\x00" . hex2bin('0588960d73d71901') . "\x03\xc0\xa2\x33";
+    $this->transport->script[] = ['status' => 200, 'body' => $bitcoin];
+    $this->scriptHeader(self::DISPLAY, self::HEADER, '840006', '{"in_best_chain":true}');
+    $complete = $manager->upgrade($id);
+    $this->assertSame('confirmed', $complete->status);
+    $this->assertNotSame($token, $complete->opaqueToken);
+    $decoded = OtsProof::decodeDetached((string) base64_decode($complete->opaqueToken, TRUE));
+    $this->assertSame(self::DIGEST, bin2hex($decoded['digest']));
+    $this->assertSame([[
+      'height' => 840000,
+      'message' => $raw,
+    ],
+    ], $decoded['proof']->bitcoinCandidates());
+
+    $this->scriptHeader(self::DISPLAY, self::HEADER, '840006', '{"in_best_chain":true}');
+    $valid = $manager->verify($id, self::DIGEST);
+    $this->assertTrue($valid->valid);
+    $this->assertSame('confirmed', $valid->reason);
+
+    $tampered = $manager->verify($id, str_repeat('ab', 32));
+    $this->assertFalse($tampered->valid);
+    $this->assertSame('checkpoint_digest_mismatch', $tampered->reason);
+  }
+
+  /**
    * Upgrade keeps a useful branch and does not let a stale write win.
    */
   public function testUpgradeRecoveryAndConflicts(): void {

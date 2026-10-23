@@ -11,13 +11,13 @@ use Symfony\Component\DependencyInjection\Reference;
 /**
  * Wires the opt-in SIEM stream to every logger backend except dblog.
  *
- * stream_enabled writes audit_chain_event to logger.channel.audit_chain
- * (the 1.12.2 sink). stream_exclude_dblog is the opt-in that uses this
- * dedicated LoggerChannel instead, so a site whose audit_chain channel
- * still includes logger.dblog can keep SIEM streaming without
- * flooding admin/reports/dblog. Errors and warnings stay on
- * logger.channel.audit_chain so they remain visible in Recent log
- * messages.
+ * The stream_enabled setting writes audit_chain_event to
+ * logger.channel.audit_chain (the 1.12.2 sink). stream_exclude_dblog is
+ * the opt-in that uses this dedicated LoggerChannel instead, so a site
+ * whose audit_chain channel still includes logger.dblog can keep SIEM
+ * streaming without flooding admin/reports/dblog. Errors and warnings
+ * stay on logger.channel.audit_chain so they remain visible in Recent
+ * log messages.
  */
 final class AuditChainServiceProvider extends ServiceProviderBase {
 

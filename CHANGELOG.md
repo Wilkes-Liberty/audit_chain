@@ -6,6 +6,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- Drupal.org pipeline 1012779 on 1.13.0 left cspell and previous-major
+  phpstan red (both allowed to fail, and GitHub had no matching jobs).
+  The project dictionary now includes the RFC 3161 / OpenSSL / witness
+  words from those landings, and previous-major phpstan ignores the
+  `RequirementSeverity` return type that 10.6 does not have. GitHub
+  Actions now runs cspell with the gitlab_templates dictionaries and a
+  phpstan pass against Drupal ~10.6.0 next to the existing ^11 job.
+
 ## [1.13.1] - Unreleased
 
 ### Fixed

@@ -36,6 +36,16 @@ parameters:
     # at runtime. Reassess when the floor rises above Drupal 10.
     - "#Attribute class Drupal\\\\Core\\\\Hook\\\\Attribute\\\\.* does not exist#"
     - "#Class Drupal\\\\Core\\\\Extension\\\\Requirement\\\\RequirementSeverity not found#"
+    # The @return on severity() names the 11.2+ enum. Previous-major phpstan
+    # reports that as an invalid return type, not "Class ... not found", so
+    # the ignore above does not match. The method and doc comment stay; the
+    # enum is the correct type on 11.2+/12. reportUnmatched is off here
+    # because current-major resolves the enum and would otherwise fail this
+    # ignore when reportUnmatchedIgnoredErrors is on.
+    -
+      message: "#Method Drupal\\\\audit_chain\\\\Hook\\\\AuditChainRequirements::severity\\(\\) has invalid return type Drupal\\\\Core\\\\Extension\\\\Requirement\\\\RequirementSeverity\\.#"
+      path: src/Hook/AuditChainRequirements.php
+      reportUnmatched: false
     # Drupal calls hook implementations with a fixed argument list. PHP 8
     # rejects extra arguments, so an unused hook parameter stays.
     -

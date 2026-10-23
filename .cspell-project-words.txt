@@ -1,6 +1,8 @@
 # Project-specific words allowed by the cspell CI job.
 # One word per line; blank lines and lines starting with # are ignored.
 # https://project.pages.drupalcode.org/gitlab_templates/jobs/cspell/
+acpkicnf
+algs
 altnet
 autowirable
 behaviour
@@ -16,20 +18,36 @@ decryptable
 dedup
 desync
 devnet
+econtent
+encap
 esplora
 exfiltration
+extn
+headerlength
 highcharts
+keyid
+keytype
+libcrypto
 litecoin
 merkle
+millis
+moneta
+noattr
+noverify
+odelay
 opentimestamps
+ossl
+pems
 phpseclib
 rfc3161
 timestamper
+timestamping
 tsa
 ocsp
 eku
 fips
 fipsinstall
+fipsmodule
 recognisable
 rewalk
 sekret
@@ -37,6 +55,7 @@ serialised
 serialises
 serialising
 siem
+ssldirs
 synthesised
 testkey
 uncheckpointed
@@ -46,6 +65,7 @@ unkeyed
 unparseable
 unpromoted
 unreviewed
+unvalidated
 unwritable
 varbytes
 varuint

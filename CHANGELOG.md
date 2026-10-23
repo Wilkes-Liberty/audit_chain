@@ -6,6 +6,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.13.1] - Unreleased
+
+### Fixed
+- `Drupal12CompatibilityTest` read the expanded drupal.org checkout
+  `composer.json` (no `require.drupal/core`) and could walk the built
+  `web/` tree. 1.13.0's d.o pipeline failed with a null core
+  constraint. The test now skips a built Drupal `web/` and reads the
+  module `composer.json` from the gitlab_templates custom mount.
 ### Fixed
 - Scheduled rewind detection treats `rfc3161` as not configured, matching
   empty/`null` and the documented rule that the check runs only for

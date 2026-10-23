@@ -14,8 +14,9 @@ use Drupal\Core\Database\Connection;
  * chain. This check reads the witness. XRPL uses the read service's account
  * transaction list. OpenTimestamps can only fresh-verify a proof that is
  * still stored; Bitcoin does not list proofs, so a proof lost with the
- * database cannot be rediscovered. An empty witness setting does not run
- * the check.
+ * database cannot be rediscovered. RFC 3161 has no listable head, so the
+ * check does not run for that backend. An empty witness setting also
+ * leaves the check off.
  */
 final class RewindDetector {
 
@@ -72,7 +73,8 @@ final class RewindDetector {
   /**
    * Compares the live chain with the latest confirmed witness.
    *
-   * An empty witness_backend setting does not run the check. Pass a backend
+   * An empty witness_backend setting does not run the check. RFC 3161 is
+   * treated the same way: it has no listable external head. Pass a backend
    * id to assessBackend() when a demo or operator command names one without
    * changing that setting.
    *
@@ -92,7 +94,7 @@ final class RewindDetector {
    * check, pointed at a backend the caller already named.
    *
    * @param string $backend
-   *   Backend id. Empty or null keeps the check off.
+   *   Backend id. Empty, null, or rfc3161 keeps the check off.
    *
    * @return array{status: string, reason: string, digest: string|null, through_id: int|null}
    *   The same shape as assess().
@@ -101,10 +103,15 @@ final class RewindDetector {
     if ($backend === '' || $backend === 'null') {
       return $this->result(self::STATUS_NOT_CONFIGURED, 'witness_not_configured');
     }
+    // RFC 3161 has no listable head; the rewind check does not run.
+    if ($backend === 'rfc3161') {
+      return $this->result(self::STATUS_NOT_CONFIGURED, 'witness_not_configured');
+    }
     try {
       $digest = match ($backend) {
         'xrpl' => $this->xrplDigest(),
         'opentimestamps' => $this->openTimestampsDigest(),
+        // Unknown id: fail closed as unread, not as a skipped check.
         default => FALSE,
       };
     }

@@ -56,7 +56,7 @@ MCP Sentinel remains its first consumer.
 
 ## Requirements
 
-- Drupal 10.6+ or 11.3+
+- Drupal 10.6, 11.3 or later, including Drupal 12
 - [Key](https://www.drupal.org/project/key) — holds the HMAC signing key outside
   exported configuration
 - [Encrypt](https://www.drupal.org/project/encrypt) — provides the Encryption

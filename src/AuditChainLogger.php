@@ -255,7 +255,8 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
     // A configured key that will not resolve is not a reason to fall through to
     // an unkeyed hash quietly. The row is still written — dropping an audit
     // entry is its own failure, and worse than an unsigned one — but every such
-    // write says so, and hook_requirements() reports it on the status report.
+    // write says so, and hook_runtime_requirements() reports it on the
+    // status report (hook_requirements() on Drupal 10.6).
     if ($key['unresolvable']) {
       $this->logger->error(
         "Audit chain signing key '@key' is configured but cannot be resolved; this entry was written with unkeyed SHA-256 and the chain is not signed. Fix the Key entity — entries written meanwhile cannot be signed retrospectively.",

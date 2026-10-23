@@ -36,6 +36,7 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 final class AuditChainLoggerTest extends KernelTestBase {
 
   use AuditChainSchemaTrait;
+  use RuntimeRequirementsTrait;
 
   /**
    * {@inheritdoc}
@@ -761,16 +762,14 @@ final class AuditChainLoggerTest extends KernelTestBase {
    * the moment an audit trail is supposed to work.
    */
   public function testRotatedEncryptionProfileIsReportedOnTheStatusReport(): void {
-    $this->container->get('module_handler')->loadInclude('audit_chain', 'install');
-
     // Nothing written yet: no finding.
-    $requirements = audit_chain_requirements('runtime');
+    $requirements = $this->runtimeRequirements();
     $this->assertArrayNotHasKey('audit_chain_encryption_rotated', $requirements);
 
     // A row written under no profile is plaintext, not a rotation.
     $this->chain->log('personnel', 'field_read', ['id' => '1', 'note' => 'plain']);
     $this->assertSame('', (string) $this->rows()[0]->encryption_profile);
-    $requirements = audit_chain_requirements('runtime');
+    $requirements = $this->runtimeRequirements();
     $this->assertArrayNotHasKey(
       'audit_chain_encryption_rotated',
       $requirements,
@@ -786,10 +785,10 @@ final class AuditChainLoggerTest extends KernelTestBase {
       ->condition('id', 1)
       ->execute();
 
-    $requirements = audit_chain_requirements('runtime');
+    $requirements = $this->runtimeRequirements();
     $this->assertArrayHasKey('audit_chain_encryption_rotated', $requirements);
     $this->assertSame(
-      REQUIREMENT_WARNING,
+      $this->requirementSeverity('warn'),
       $requirements['audit_chain_encryption_rotated']['severity'],
       'The entries are intact and the chain still verifies, so this is not an error.',
     );
@@ -922,10 +921,9 @@ final class AuditChainLoggerTest extends KernelTestBase {
     $this->assertGreaterThan(2, $after['verified_from']);
     $this->assertSame(0, $after['unkeyed_rows']);
 
-    $this->container->get('module_handler')->loadInclude('audit_chain', 'install');
-    $requirements = audit_chain_requirements('runtime');
+    $requirements = $this->runtimeRequirements();
     $this->assertArrayHasKey('audit_chain_prefix_seal', $requirements);
-    $this->assertSame(REQUIREMENT_WARNING, $requirements['audit_chain_prefix_seal']['severity']);
+    $this->assertSame($this->requirementSeverity('warn'), $requirements['audit_chain_prefix_seal']['severity']);
   }
 
   /**
@@ -1270,9 +1268,7 @@ final class AuditChainLoggerTest extends KernelTestBase {
    * A configured-but-missing key is an ERROR; empty hash_key is not.
    */
   public function testConfiguredMissingKeyIsRequirementsError(): void {
-    $this->container->get('module_handler')->loadInclude('audit_chain', 'install');
-
-    $requirements = audit_chain_requirements('runtime');
+    $requirements = $this->runtimeRequirements();
     $this->assertArrayNotHasKey(
       'audit_chain_hash_key',
       $requirements,
@@ -1280,10 +1276,10 @@ final class AuditChainLoggerTest extends KernelTestBase {
     );
 
     $this->config('audit_chain.settings')->set('hash_key', 'missing_key')->save();
-    $requirements = audit_chain_requirements('runtime');
+    $requirements = $this->runtimeRequirements();
     $this->assertArrayHasKey('audit_chain_hash_key', $requirements);
     $this->assertSame(
-      REQUIREMENT_ERROR,
+      $this->requirementSeverity('crit'),
       $requirements['audit_chain_hash_key']['severity'],
     );
     $this->assertStringContainsString(

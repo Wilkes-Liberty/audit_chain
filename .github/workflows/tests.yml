@@ -7,6 +7,8 @@ name: Tests
 # and a support claim CI does not exercise is not a claim. Per endoflife.date on
 # 2026-07-28 the live core branches are 10.6 and 11.3 (both EOL 2026-12-16) and
 # 11.4 (EOL 2027-07-07), so the floors are 10.6 and 11.3, plus the ceiling.
+# Drupal 12 is declared on the base module but is not a matrix leg: Key and
+# Encrypt have not declared ^12, so that install cannot resolve.
 #
 # `constraint` is spelled out per leg rather than derived from `drupal`: ^11.3
 # means ">=11.3 <12" and resolves to 11.4, so a leg built that way silently

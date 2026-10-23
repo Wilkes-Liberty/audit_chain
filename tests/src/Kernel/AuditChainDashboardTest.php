@@ -26,6 +26,7 @@ use Symfony\Component\HttpFoundation\Request;
 final class AuditChainDashboardTest extends KernelTestBase {
 
   use AuditChainSchemaTrait;
+  use RuntimeRequirementsTrait;
   use UserCreationTrait;
 
   /**
@@ -61,8 +62,7 @@ final class AuditChainDashboardTest extends KernelTestBase {
     $request = Request::create('/admin/reports/audit-chain');
     $controller = AuditChainDashboardController::create($this->container);
     $build = $controller->dashboard($request);
-    \Drupal::moduleHandler()->loadInclude('audit_chain', 'install');
-    $requirements = audit_chain_requirements('runtime');
+    $requirements = $this->runtimeRequirements();
     $snapshot = $this->container->get('audit_chain.metrics')->snapshot(
       fn (int $time): string => $this->container->get('date.formatter')
         ->format($time),
@@ -282,8 +282,7 @@ final class AuditChainDashboardTest extends KernelTestBase {
     $request = Request::create('/admin/reports/audit-chain');
     $controller = AuditChainDashboardController::create($this->container);
     $build = $controller->dashboard($request);
-    \Drupal::moduleHandler()->loadInclude('audit_chain', 'install');
-    $requirements = audit_chain_requirements('runtime');
+    $requirements = $this->runtimeRequirements();
 
     $this->assertSame('crit', $build['#chain']['state']);
     $this->assertSame('Keyed verification unavailable', $build['#chain']['label']);
@@ -298,7 +297,7 @@ final class AuditChainDashboardTest extends KernelTestBase {
     $this->assertStringNotContainsString('Failed', $build['#chain']['label']);
     $this->assertArrayHasKey('audit_chain_scheduled_verification', $requirements);
     $this->assertSame(
-      REQUIREMENT_ERROR,
+      $this->requirementSeverity('crit'),
       $requirements['audit_chain_scheduled_verification']['severity'],
     );
     $this->assertStringContainsString(
@@ -325,8 +324,7 @@ final class AuditChainDashboardTest extends KernelTestBase {
     $request = Request::create('/admin/reports/audit-chain');
     $controller = AuditChainDashboardController::create($this->container);
     $build = $controller->dashboard($request);
-    \Drupal::moduleHandler()->loadInclude('audit_chain', 'install');
-    $requirements = audit_chain_requirements('runtime');
+    $requirements = $this->runtimeRequirements();
 
     $this->assertSame('warn', $build['#chain']['state']);
     $this->assertSame(

@@ -10,11 +10,11 @@ use Psr\Log\LoggerTrait;
 /**
  * Writes structured append events through PHP syslog.
  *
- * Used only when no non-dblog logger backend is available, so stream_enabled
- * still emits a parseable line on a site that has Database Logging and
- * nothing else. Not tagged as a Drupal logger: that would put this sink on
- * every channel, including the operational audit_chain channel we kept for
- * errors.
+ * Used only when stream_exclude_dblog is on and no non-dblog logger
+ * backend is available, so that opt-in still emits a parseable line on a
+ * site that has Database Logging and nothing else. Not tagged as a Drupal
+ * logger: that would put this sink on every channel, including the
+ * audit_chain channel stream_enabled uses by default.
  *
  * The JSON object keeps the same context keys the previous
  * logger.channel.audit_chain info() call emitted, so a collector that keyed

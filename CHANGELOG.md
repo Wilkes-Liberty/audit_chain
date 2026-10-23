@@ -6,6 +6,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.13.1] - Unreleased
+
+### Fixed
+- 1.13.0 stopped writing successful `audit_chain_event` rows to
+  `logger.channel.audit_chain`. DEV-776 moved every `stream_enabled`
+  append onto `audit_chain.stream`, so collectors still listening on
+  the channel (including mcp_sentinel's `McpSiemStreamingTest`)
+  dropped successful and deny appends. `stream_enabled` writes to
+  `logger.channel.audit_chain` again (1.12.2). The dblog-excluded sink
+  is opt-in via `stream_exclude_dblog` (default `false`). Update
+  `audit_chain_update_10008` writes that key as `false` when missing;
+  rolling the hook back is a no-op. Errors, warnings, and refused
+  keyed writes are unchanged (no fail-open).
+
 ## [1.13.0] - 2026-10-23
 
 ### Added

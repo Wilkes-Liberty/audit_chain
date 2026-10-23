@@ -130,7 +130,9 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
    * @param \Drupal\key\KeyRepositoryInterface $keyRepository
    *   The Key repository, resolving the HMAC signing key.
    * @param \Psr\Log\LoggerInterface $logger
-   *   The audit_chain logger channel (errors and warnings only).
+   *   The audit_chain logger channel. Successful stream_enabled appends
+   *   write audit_chain_event here unless stream_exclude_dblog is set.
+   *   Errors and warnings always use this channel.
    * @param \Drupal\encrypt\EncryptServiceInterface $encryptService
    *   The Encrypt service, for at-rest metadata encryption.
    * @param \Drupal\Core\Entity\EntityTypeManagerInterface $entityTypeManager
@@ -138,8 +140,9 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
    * @param \Drupal\Core\State\StateInterface $state
    *   State storage for the site-local prefix seal.
    * @param \Psr\Log\LoggerInterface $stream
-   *   SIEM stream sink. Same audit_chain_event record as before, but not
-   *   registered with Database Logging — see AuditChainServiceProvider.
+   *   Dedicated SIEM sink used only when stream_exclude_dblog is set.
+   *   Same audit_chain_event record, but not registered with Database
+   *   Logging — see AuditChainServiceProvider.
    */
   public function __construct(
     private readonly Connection $database,
@@ -313,34 +316,41 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
 
       // A stable message template with the variable data in context, so log
       // aggregators can group by template and a SIEM can consume the fields.
-      // Goes to audit_chain.stream, not logger.channel.audit_chain: the
-      // channel fans out to dblog and was flooding admin/reports/dblog.
-      // Streamed before the caller commits: it is not proof the row lasted.
+      // 1.12.2 wrote this to logger.channel.audit_chain. The dedicated sink
+      // that excludes dblog is opt-in: existing collectors on the channel
+      // keep matching. Streamed before the caller commits: it is not proof
+      // the row lasted.
       if ($config->get('stream_enabled')) {
-        try {
-          $this->stream->info('audit_chain_event', [
-            'channel' => $row['channel'],
-            'operation' => $row['operation'],
-            'uid' => $row['uid'],
-            'entity_type' => $row['entity_type'],
-            // Included because the implementation this was extracted from
-            // emitted it, and a SIEM rule keyed on bundle would silently stop
-            // matching
-            // otherwise. Dropping a field from a stream is a regression nobody
-            // gets an error for.
-            'bundle' => $row['bundle'],
-            'entity_id' => $row['entity_id'],
-            'timestamp' => $row['timestamp'],
-            'row_hash' => $rowHash,
-          ]);
+        $event = [
+          'channel' => $row['channel'],
+          'operation' => $row['operation'],
+          'uid' => $row['uid'],
+          'entity_type' => $row['entity_type'],
+          // Included because the implementation this was extracted from
+          // emitted it, and a SIEM rule keyed on bundle would silently stop
+          // matching
+          // otherwise. Dropping a field from a stream is a regression nobody
+          // gets an error for.
+          'bundle' => $row['bundle'],
+          'entity_id' => $row['entity_id'],
+          'timestamp' => $row['timestamp'],
+          'row_hash' => $rowHash,
+        ];
+        if ($config->get('stream_exclude_dblog')) {
+          try {
+            $this->stream->info('audit_chain_event', $event);
+          }
+          catch (\Throwable $exception) {
+            // The chain row is the evidence. A down dedicated sink must not
+            // roll that back — say so on the operational channel, which may
+            // land in dblog, and that is the right place for a rare failure.
+            $this->logger->error('Audit chain SIEM stream failed: @message', [
+              '@message' => $exception->getMessage(),
+            ]);
+          }
         }
-        catch (\Throwable $exception) {
-          // The chain row is the evidence. A down SIEM sink must not roll
-          // that back — say so on the operational channel, which may land
-          // in dblog, and that is the right place for a rare failure.
-          $this->logger->error('Audit chain SIEM stream failed: @message', [
-            '@message' => $exception->getMessage(),
-          ]);
+        else {
+          $this->logger->info('audit_chain_event', $event);
         }
       }
     }

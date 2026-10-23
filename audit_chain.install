@@ -268,6 +268,22 @@ function audit_chain_update_10007(): string {
 }
 
 /**
+ * Default stream_exclude_dblog off so stream_enabled keeps the 1.12.2 sink.
+ *
+ * Rollback is a no-op: this only writes FALSE when the key is missing.
+ * Reverting the schema version leaves the key in config, which 1.13.0
+ * ignores. Deleting the key after a code rollback is unnecessary.
+ */
+function audit_chain_update_10008(): string {
+  $config = \Drupal::configFactory()->getEditable('audit_chain.settings');
+  if ($config->get('stream_exclude_dblog') === NULL) {
+    $config->set('stream_exclude_dblog', FALSE);
+    $config->save();
+  }
+  return 'Set stream_exclude_dblog to FALSE when missing. Successful appends keep using logger.channel.audit_chain. Rolling this update back is a no-op.';
+}
+
+/**
  * Implements hook_install().
  */
 function audit_chain_install(): void {

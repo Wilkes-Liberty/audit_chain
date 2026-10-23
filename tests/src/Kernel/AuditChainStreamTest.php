@@ -18,7 +18,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
 
 /**
- * Streamed appends must not flood Database Logging.
+ * SIEM stream routing for successful appends.
  *
  * @coversDefaultClass \Drupal\audit_chain\AuditChainLogger
  * @covers \Drupal\audit_chain\AuditChainServiceProvider
@@ -53,12 +53,13 @@ final class AuditChainStreamTest extends KernelTestBase {
   }
 
   /**
-   * 1.12.2 stream_enabled writes audit_chain_event to logger.channel.audit_chain.
+   * Successful stream_enabled appends reach logger.channel.audit_chain.
    *
-   * That service is the SIEM sink mcp_sentinel's McpSiemStreamingTest — and
-   * sites that already excluded dblog from it — listen on. 1.13.0 moved the
-   * record onto audit_chain.stream, so a successful append vanished from the
-   * channel those collectors still consume.
+   * 1.12.2 wrote that record there. That service is the SIEM sink
+   * mcp_sentinel's McpSiemStreamingTest — and sites that already excluded
+   * dblog from it — listen on. 1.13.0 moved the record onto
+   * audit_chain.stream, so a successful append vanished from the channel
+   * those collectors still consume.
    */
   public function testStreamEnabledWritesSuccessfulEventToAuditChainChannel(): void {
     // 1.12.2 config: stream_enabled only. No dedicated-sink opt-in.
@@ -143,7 +144,10 @@ final class AuditChainStreamTest extends KernelTestBase {
    */
   public function testStreamedAppendDoesNotWriteWatchdogRows(): void {
     $this->enableDblog();
-    $this->config('audit_chain.settings')->set('stream_enabled', TRUE)->save();
+    $this->config('audit_chain.settings')
+      ->set('stream_enabled', TRUE)
+      ->set('stream_exclude_dblog', TRUE)
+      ->save();
 
     $ops = $this->installOpsChannelSpy();
     $chain = $this->container->get('audit_chain.logger');
@@ -184,6 +188,7 @@ final class AuditChainStreamTest extends KernelTestBase {
     $this->enableDblog();
     $this->config('audit_chain.settings')
       ->set('stream_enabled', TRUE)
+      ->set('stream_exclude_dblog', TRUE)
       ->set('hash_key', 'no_such_key')
       ->save();
 
@@ -207,7 +212,10 @@ final class AuditChainStreamTest extends KernelTestBase {
    * A down SIEM sink must not roll back the evidence row.
    */
   public function testStreamFailureDoesNotRollBackAppend(): void {
-    $this->config('audit_chain.settings')->set('stream_enabled', TRUE)->save();
+    $this->config('audit_chain.settings')
+      ->set('stream_enabled', TRUE)
+      ->set('stream_exclude_dblog', TRUE)
+      ->save();
     $throwing = new class() extends AbstractLogger {
 
       /**
@@ -226,6 +234,31 @@ final class AuditChainStreamTest extends KernelTestBase {
     ]);
     $this->assertCount(1, $this->chainRows());
     $this->assertTrue($this->container->get('audit_chain.logger')->verify()['ok']);
+  }
+
+  /**
+   * Update 10008 writes stream_exclude_dblog FALSE and does not overwrite TRUE.
+   */
+  public function testUpdate10008DefaultsExcludeDblogOffAndIsIdempotent(): void {
+    $this->container->get('module_handler')->loadInclude('audit_chain', 'install');
+    $this->config('audit_chain.settings')
+      ->clear('stream_exclude_dblog')
+      ->set('stream_enabled', TRUE)
+      ->save();
+    $before = $this->chainRows();
+
+    audit_chain_update_10008();
+    audit_chain_update_10008();
+    $this->assertFalse($this->config('audit_chain.settings')->get('stream_exclude_dblog'));
+    $this->assertTrue($this->config('audit_chain.settings')->get('stream_enabled'));
+    $this->assertEquals($before, $this->chainRows());
+
+    $this->config('audit_chain.settings')->set('stream_exclude_dblog', TRUE)->save();
+    audit_chain_update_10008();
+    $this->assertTrue(
+      $this->config('audit_chain.settings')->get('stream_exclude_dblog'),
+      'An operator-set TRUE is not overwritten.',
+    );
   }
 
   /**

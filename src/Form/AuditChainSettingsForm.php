@@ -96,13 +96,25 @@ final class AuditChainSettingsForm extends ConfigFormBase {
 
     $form['stream_enabled'] = [
       '#type' => 'checkbox',
-      '#title' => $this->t('Stream entries to SIEM / syslog'),
+      '#title' => $this->t('Stream entries to the logger channel'),
       '#default_value' => (bool) $config->get('stream_enabled'),
-      // stream_enabled must not imply dblog. The forensic viewer is Reports
-      // → Audit Chain; Recent log messages stays for operational errors.
-      '#description' => $this->t('Emits each successful append as a structured <code>audit_chain_event</code> record to syslog or any other logger backend except Database Logging, so a SIEM can consume the stream without polling. Recent log messages is not the destination — browse the chain at <a href=":reports">Reports → Audit Chain</a>. Errors and warnings still use the <code>audit_chain</code> channel and remain visible in dblog. Existing <code>stream_enabled: true</code> config keeps working; no update hook is required.', [
+      '#description' => $this->t('Emits each successful append as a structured <code>audit_chain_event</code> record on the <code>audit_chain</code> logger channel, so syslog or Monolog can forward it to a SIEM without polling the table. Errors and warnings use the same channel.'),
+    ];
+
+    $form['stream_exclude_dblog'] = [
+      '#type' => 'checkbox',
+      '#title' => $this->t('Keep streamed appends out of Database Logging'),
+      '#default_value' => (bool) $config->get('stream_exclude_dblog'),
+      // The forensic viewer is Reports → Audit Chain; Recent log messages
+      // stays for operational errors when this opt-in is on.
+      '#description' => $this->t('Sends successful <code>audit_chain_event</code> records to a dedicated sink that forwards to every tagged logger except Database Logging (syslog, Monolog, or PHP syslog when those are absent). Use this when dblog is still attached to the <code>audit_chain</code> channel and would flood Recent log messages. Sites that already excluded dblog from that channel should leave this off — that is the 1.12.2 default. Errors and warnings stay on the <code>audit_chain</code> channel. Browse the chain at <a href=":reports">Reports → Audit Chain</a>.', [
         ':reports' => Url::fromRoute('audit_chain.dashboard')->toString(),
       ]),
+      '#states' => [
+        'visible' => [
+          ':input[name="stream_enabled"]' => ['checked' => TRUE],
+        ],
+      ],
     ];
 
     $form['verify_interval'] = [
@@ -188,6 +200,7 @@ final class AuditChainSettingsForm extends ConfigFormBase {
       ->set('previous_hash_keys', array_values(array_filter((array) $form_state->getValue('previous_hash_keys'))))
       ->set('encryption_profile', (string) $form_state->getValue('encryption_profile'))
       ->set('stream_enabled', (bool) $form_state->getValue('stream_enabled'))
+      ->set('stream_exclude_dblog', (bool) $form_state->getValue('stream_exclude_dblog'))
       ->set('verify_interval', (int) $form_state->getValue('verify_interval'))
       ->set('verify_require_keyed', (bool) $form_state->getValue('verify_require_keyed'))
       ->set('export_enabled', (bool) $form_state->getValue('export_enabled'))

@@ -125,6 +125,17 @@ final class ScheduledVerificationPresentation {
         'omit' => FALSE,
         'uses_time' => TRUE,
       ],
+      // The assurance profile never ran verification: say that in operator
+      // copy instead of interpolating the stored machine key through failed.
+      ScheduledVerifier::REASON_KEY_REQUIRED => [
+        'label' => new TranslatableMarkup('Keyed verification unavailable'),
+        'detail' => new TranslatableMarkup('The assurance profile requires a signing key, but none resolved at @when. Verification did not fall back to unkeyed SHA-256: an unkeyed pass would claim integrity that anyone with database access could forge. Configure a hash key under settings, or turn off verify_require_keyed only if unkeyed operation is acceptable. The chain was not modified by the check.', $placeholders),
+        'severity' => 'crit',
+        'log_level' => 'error',
+        'dispatch' => TRUE,
+        'omit' => FALSE,
+        'uses_time' => TRUE,
+      ],
       'failed' => [
         'label' => new TranslatableMarkup('Failed'),
         'detail' => new TranslatableMarkup('Last scheduled verification failed at @when (@reason). The chain was not modified by the check; investigate the reported reason with drush audit-chain:verify before trusting new entries.', $placeholders),

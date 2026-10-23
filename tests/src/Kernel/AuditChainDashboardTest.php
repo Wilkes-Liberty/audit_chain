@@ -260,6 +260,58 @@ final class AuditChainDashboardTest extends KernelTestBase {
   }
 
   /**
+   * A missing signing key under the assurance profile has its own card.
+   *
+   * The generic failed card interpolates the stored machine key. This
+   * reason is a first-class classified state, so the dashboard and status
+   * report must show operator copy instead.
+   *
+   * @covers ::dashboard
+   */
+  public function testKeyedVerificationUnavailableHasItsOwnCard(): void {
+    $this->config('audit_chain.settings')
+      ->set('verify_interval', 3600)
+      ->set('verify_require_keyed', TRUE)
+      ->save();
+    $this->container->get('state')->set(ScheduledVerifier::STATE_KEY, [
+      'time' => \Drupal::time()->getRequestTime(),
+      'ok' => FALSE,
+      'reason' => ScheduledVerifier::REASON_KEY_REQUIRED,
+    ]);
+
+    $request = Request::create('/admin/reports/audit-chain');
+    $controller = AuditChainDashboardController::create($this->container);
+    $build = $controller->dashboard($request);
+    \Drupal::moduleHandler()->loadInclude('audit_chain', 'install');
+    $requirements = audit_chain_requirements('runtime');
+
+    $this->assertSame('crit', $build['#chain']['state']);
+    $this->assertSame('Keyed verification unavailable', $build['#chain']['label']);
+    $this->assertStringContainsString(
+      'assurance profile requires a signing key',
+      $build['#chain']['detail'],
+    );
+    $this->assertStringNotContainsString(
+      'keyed_verification_unavailable',
+      $build['#chain']['detail'],
+    );
+    $this->assertStringNotContainsString('Failed', $build['#chain']['label']);
+    $this->assertArrayHasKey('audit_chain_scheduled_verification', $requirements);
+    $this->assertSame(
+      REQUIREMENT_ERROR,
+      $requirements['audit_chain_scheduled_verification']['severity'],
+    );
+    $this->assertStringContainsString(
+      'Keyed verification unavailable',
+      (string) $requirements['audit_chain_scheduled_verification']['value'],
+    );
+    $this->assertSame(
+      $build['#chain']['detail'],
+      (string) $requirements['audit_chain_scheduled_verification']['description'],
+    );
+  }
+
+  /**
    * The keyed-assurance card with no interval matches the status report.
    *
    * @covers ::dashboard

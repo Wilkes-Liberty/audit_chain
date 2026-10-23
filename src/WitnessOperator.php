@@ -127,6 +127,8 @@ final class WitnessOperator {
     if ($require === '') {
       return new WitnessOperation(0, $lines);
     }
+    // --require=all stays OpenTimestamps plus XRPL. RFC 3161 is named
+    // on its own; it is not bundled into the public-anchor check.
     $needed = $require === 'all' ? ['opentimestamps', 'xrpl'] : [$require];
     foreach ($needed as $backendId) {
       if (empty($fresh[$backendId])) {
@@ -153,6 +155,16 @@ final class WitnessOperator {
     }
     if ($receipt->backendId === 'xrpl') {
       return new WitnessOperation(0, [$receipt->id . '.json'], $receipt->opaqueToken);
+    }
+    if ($receipt->backendId === 'rfc3161') {
+      // The opaque token is base64 of the versioned DER envelope. Export
+      // writes the raw bytes so an operator can archive the TimeStampToken
+      // and the OCSP evidence captured at submit.
+      $bytes = base64_decode($receipt->opaqueToken, TRUE);
+      if ($bytes === FALSE) {
+        return new WitnessOperation(1, ['receipt_malformed']);
+      }
+      return new WitnessOperation(0, [$receipt->id . '.rfc3161'], $bytes);
     }
     return new WitnessOperation(1, ['receipt_not_exportable']);
   }

@@ -6,6 +6,7 @@ namespace Drupal\audit_chain\Form;
 
 use Drupal\Core\Form\ConfigFormBase;
 use Drupal\Core\Form\FormStateInterface;
+use Drupal\Core\Url;
 use Drupal\encrypt\EncryptionProfileManagerInterface;
 use Drupal\key\KeyRepositoryInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
@@ -95,9 +96,13 @@ final class AuditChainSettingsForm extends ConfigFormBase {
 
     $form['stream_enabled'] = [
       '#type' => 'checkbox',
-      '#title' => $this->t('Stream entries to the logger channel'),
+      '#title' => $this->t('Stream entries to SIEM / syslog'),
       '#default_value' => (bool) $config->get('stream_enabled'),
-      '#description' => $this->t('Emits each entry to the <code>audit_chain</code> channel as a structured record, so syslog or Monolog can forward it to a SIEM without polling the table.'),
+      // stream_enabled must not imply dblog. The forensic viewer is Reports
+      // → Audit Chain; Recent log messages stays for operational errors.
+      '#description' => $this->t('Emits each successful append as a structured <code>audit_chain_event</code> record to syslog or any other logger backend except Database Logging, so a SIEM can consume the stream without polling. Recent log messages is not the destination — browse the chain at <a href=":reports">Reports → Audit Chain</a>. Errors and warnings still use the <code>audit_chain</code> channel and remain visible in dblog. Existing <code>stream_enabled: true</code> config keeps working; no update hook is required.', [
+        ':reports' => Url::fromRoute('audit_chain.dashboard')->toString(),
+      ]),
     ];
 
     $form['verify_interval'] = [

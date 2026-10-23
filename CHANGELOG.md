@@ -19,8 +19,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   receipt UUIDs sort the other way. The runbook's live-demo lead-time
   section says to submit OpenTimestamps 12-24 hours ahead and to fund
   XRPL testnet the same day. See docs/WITNESS_DEMO.md.
+- RFC 3161 witness backend (`rfc3161`) for persisted checkpoint
+  digests. Submit stores a confirmed TimeStampToken plus the OCSP
+  evidence captured at submit. Upgrade is a no-op. Verify checks
+  imprint, policy, CMS signature, trust chain, critical timeStamping
+  EKU, algorithm floor, and revocation, and re-checks OCSP while the
+  signer is unexpired. Install defaults are empty (fail closed). A TSA
+  credential, if the vendor needs one, is a Key entity id. Crypto uses
+  the PHP openssl extension; phpseclib is used for ASN.1 structure
+  only.
 
 ### Fixed
+- Successful appends with `stream_enabled` no longer write
+  `audit_chain_event` rows to Database Logging. The SIEM stream uses a
+  dedicated sink that forwards to every tagged logger except dblog
+  (syslog, Monolog, or PHP syslog when those are absent). Errors and
+  warnings still use `logger.channel.audit_chain` and remain visible in
+  dblog. Existing `stream_enabled: true` config stays valid; no update
+  hook is required. DEV-776.
 - The status report reads the stored scheduled-verification run on every
   call. A verification saved earlier in the same request is no longer
   hidden by the dashboard metric cache, so a tampered signed row still
@@ -38,6 +54,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that case. Hash, mutex, and seal behavior is unchanged.
 
 ### Changed
+- Scheduled verification classifies `keyed_verification_unavailable` as
+  its own card. Status report, dashboard, and cron log the operator-facing
+  copy instead of interpolating the machine key through the generic
+  `failed` card. The dead `runNow()` belt that re-checked `unkeyed_rows`
+  after `verify()` is removed: `verify()` already returns `ok` only when
+  that count is zero. Hash, mutex, and seal behavior is unchanged.
+  `classify()` is still the only classifier.
 - Status report, dashboard integrity card, and scheduled-verifier logging
   share one scheduled-verification snapshot (classified state, live row
   count, stored run, and formatted last-run time) and call `forReason()`

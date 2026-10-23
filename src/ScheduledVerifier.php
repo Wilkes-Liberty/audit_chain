@@ -107,19 +107,13 @@ final class ScheduledVerifier {
       ];
     }
     else {
+      // verify() already returns ok only when unkeyed_rows is 0, so the
+      // assurance profile does not need a second unkeyed check here.
       $verdict = $this->chain->verify();
-      $ok = (bool) $verdict['ok'];
-      $reason = $verdict['reason'];
-      if ($ok && $requireKeyed && (int) $verdict['unkeyed_rows'] > 0) {
-        // Belt over verify()'s own unkeyed reporting: under the assurance
-        // profile, unkeyed history can never amount to a pass.
-        $ok = FALSE;
-        $reason = AuditChainLogger::REASON_WRITTEN_UNKEYED;
-      }
       $run = [
         'time' => $this->time->getRequestTime(),
-        'ok' => $ok,
-        'reason' => $reason,
+        'ok' => (bool) $verdict['ok'],
+        'reason' => $verdict['reason'],
         'keyed' => $keyConfigured,
         'verdict' => $verdict,
       ];

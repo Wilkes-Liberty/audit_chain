@@ -71,6 +71,8 @@ final class AuditChainHelpTest extends KernelTestBase {
 
     $this->assertIsString($output);
     $this->assertStringContainsString('Integrity and the keyed-vs-unkeyed split', $output);
+    $this->assertStringContainsString('forensic viewer', $output);
+    $this->assertStringContainsString('dblog', $output);
   }
 
 }

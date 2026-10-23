@@ -27,10 +27,10 @@ them.
 receipt and verification returns `backend_not_configured`. It makes no network
 request.
 
-`opentimestamps` and `xrpl` are independent. Each digest can have one receipt
-per backend. A failure of one does not remove the other. Status lists every
-receipt and does not add their results together. `XRPL confirmed` beside
-`Bitcoin pending` is one confirmation and one pending receipt.
+`opentimestamps`, `xrpl`, and `rfc3161` are independent. Each digest can have
+one receipt per backend. A failure of one does not remove the other. Status
+lists every receipt and does not add their results together. `XRPL confirmed`
+beside `Bitcoin pending` is one confirmation and one pending receipt.
 
 OpenTimestamps submission sends the 32 raw digest bytes. The stored token is
 a detached proof. Confirmation requires a Bitcoin attestation whose evaluated
@@ -53,6 +53,24 @@ read URLs are refused. A receipt is confirmed only when a separate read shows
 the transaction validated, `tesSUCCESS`, and the same template. A timeout
 keeps the request id and does not by itself prove that nothing was submitted.
 This module does not measure how long confirmation takes.
+
+RFC 3161 submit posts a TimeStampReq whose SHA-256 imprint is the raw
+32-byte checkpoint digest, with a random nonce, `certReq`, and the
+configured policy OID. The TSA receives that digest only. A receipt is
+written only when the response is granted, the nonce and imprint match,
+the policy matches, the CMS signature verifies, the signer chains to a
+configured trust anchor with a critical `id-kp-timeStamping` EKU,
+algorithms meet the RSA-2048 / ECDSA-P-256 / SHA-256 floor, and OCSP
+returns good. The stored token is a versioned DER envelope
+(`audit_chain.rfc3161.v1`) holding the TimeStampToken and the OCSP
+response captured at submit. Upgrade makes no network call. Verify
+re-checks that evidence and, while the signer certificate is unexpired,
+re-checks OCSP live. Install defaults are empty, so the backend cannot
+be selected until an operator sets a HTTPS TSA URL, policy OID, and
+trust-anchor PEM bundle. A vendor credential, if required, is a Key
+entity id and is never exported as the secret. Free public TSAs are not
+an install default. Scheduled rewind detection still applies only when
+`witness_backend` is `opentimestamps` or `xrpl`.
 
 ## Operator gate
 

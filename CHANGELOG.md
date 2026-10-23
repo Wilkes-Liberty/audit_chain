@@ -7,6 +7,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- OpenTimestamps upgrade-path unit tests, plus a kernel case that
+  replaces a pending calendar receipt with a Bitcoin-attested proof
+  when the calendar returns one. A still-pending calendar, a transport
+  error, and a mismatched or malformed attestation stay fail-closed.
+- Optional `$settings['audit_chain_witness_demo']` switch and
+  `drush audit-chain:witness-demo` for a controlled site. Shipped
+  `witness_backend` stays empty. XRPL remains optional, disabled by
+  default, and testnet-only: the demo points at an external relay and
+  does not sign. Demo steps walk OpenTimestamps then XRPL even when
+  receipt UUIDs sort the other way. The runbook's live-demo lead-time
+  section says to submit OpenTimestamps 12-24 hours ahead and to fund
+  XRPL testnet the same day. See docs/WITNESS_DEMO.md.
 - RFC 3161 witness backend (`rfc3161`) for persisted checkpoint
   digests. Submit stores a confirmed TimeStampToken plus the OCSP
   evidence captured at submit. Upgrade is a no-op. Verify checks

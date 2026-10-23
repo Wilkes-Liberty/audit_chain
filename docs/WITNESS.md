@@ -138,3 +138,10 @@ No wallet, fee payer, or settlement authority is included. Choosing a witness
 does not prune, retain, or delete audit rows. Receipts are not a second
 ledger. A witness does not detect a restore on a site that never submits one,
 and it does not cover rows appended after the latest confirmed checkpoint.
+
+## Controlled demo
+
+A demo site can walk submit, upgrade, verify, and the rewind check
+without changing the shipped empty `witness_backend` default. See
+[WITNESS_DEMO.md](WITNESS_DEMO.md). XRPL stays optional, testnet-only,
+and relay-signed. This module does not hold a seed.

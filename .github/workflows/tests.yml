@@ -211,6 +211,27 @@ jobs:
             || { echo "::error::audit_chain is not symlinked to the working copy — the path repo did not apply"; exit 1; }
           readlink web/modules/contrib/audit_chain
 
+      - name: PHPUnit — Unit (blocking)
+        working-directory: drupal
+        env:
+          SIMPLETEST_DB: ${{ matrix.connection }}
+          BROWSERTEST_OUTPUT_DIRECTORY: /tmp
+          SYMFONY_DEPRECATIONS_HELPER: weak
+          MIN_UNIT_TESTS: '16'
+        run: |
+          set -euo pipefail
+          config="${PWD}/web/core/phpunit.xml.dist"
+          vendor/bin/phpunit -c "${config}" \
+            --log-junit "${PWD}/junit-Unit.xml" \
+            "${PWD}/web/modules/contrib/audit_chain/tests/src/Unit"
+
+          total="$(grep -ho '<testcase ' junit-Unit.xml | wc -l | tr -d ' ')"
+          echo "Collected ${total} unit tests (floor ${MIN_UNIT_TESTS})."
+          if [ "${total}" -lt "${MIN_UNIT_TESTS}" ]; then
+            echo "::error::Collected only ${total} unit tests, below the floor of ${MIN_UNIT_TESTS}."
+            exit 1
+          fi
+
       - name: PHPUnit — Kernel (blocking)
         working-directory: drupal
         env:
@@ -219,10 +240,9 @@ jobs:
           SIMPLETEST_DB: ${{ matrix.connection }}
           BROWSERTEST_OUTPUT_DIRECTORY: /tmp
           SYMFONY_DEPRECATIONS_HELPER: weak
-          # 150 is the method count collected on 1.x (run 37720510292), not
-          # the class count of 16 this floor used to encode. A runner that
-          # collects nothing still exits 0.
-          MIN_TESTS: '150'
+          # 157 is the method count after the witness-demo / upgrade-path
+          # tests. A runner that collects nothing still exits 0.
+          MIN_TESTS: '157'
         run: |
           set -euo pipefail
           # Absolute -c path: AuditChainLoggerTest and RecoverySegmentsTest

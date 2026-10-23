@@ -11,6 +11,13 @@ use PHPUnit\Framework\Attributes\Group;
 /**
  * Pins the Drupal 12 compatibility claim so a revert fails CI.
  *
+ * On GitHub's path-repo job the checkout is only this module. On
+ * drupal.org, Drupal is built into that same checkout (web/, vendor/),
+ * and gitlab_templates moves the module composer.json onto the custom
+ * mount. A walk of dirname(__DIR__, 3) therefore has to skip the
+ * built Drupal tree and read composer.json from that mount, or the
+ * suite starts scoring core and the expanded project file.
+ *
  * @group audit_chain
  */
 #[Group('audit_chain')]
@@ -33,13 +40,15 @@ final class Drupal12CompatibilityTest extends KernelTestBase {
    * The base module and composer.json advertise Drupal 12.
    */
   public function testBaseModuleDeclaresDrupal12(): void {
-    $root = dirname(__DIR__, 3);
+    $root = $this->checkoutRoot();
     $info = Yaml::decode((string) file_get_contents($root . '/audit_chain.info.yml'));
     $this->assertIsArray($info);
     $this->assertArrayHasKey('core_version_requirement', $info);
     $this->assertSame('^10.6 || ^11.3 || ^12', $info['core_version_requirement']);
 
-    $composer = json_decode((string) file_get_contents($root . '/composer.json'), TRUE);
+    $path = $this->composerJsonPath($root);
+    $this->assertSame([], $this->composerConstraintMisses($path), $path);
+    $composer = json_decode((string) file_get_contents($path), TRUE);
     $this->assertIsArray($composer);
     $this->assertSame('^10.6 || ^11.3 || ^12', $composer['require']['drupal/core']);
   }
@@ -48,7 +57,7 @@ final class Drupal12CompatibilityTest extends KernelTestBase {
    * The MCP submodule stays inside MCP Sentinel's declared range.
    */
   public function testMcpSubmoduleDoesNotClaimDrupal12(): void {
-    $root = dirname(__DIR__, 3);
+    $root = $this->checkoutRoot();
     $info = Yaml::decode((string) file_get_contents($root . '/modules/audit_chain_mcp/audit_chain_mcp.info.yml'));
     $this->assertIsArray($info);
     $this->assertSame('^10.6 || ^11.3', $info['core_version_requirement']);
@@ -80,10 +89,11 @@ final class Drupal12CompatibilityTest extends KernelTestBase {
   /**
    * On d.o the module composer.json lives on the custom mount.
    *
-   * expand_composer_json.php overwrites the checkout composer.json and
-   * strips require.drupal/core. gitlab_templates moves the backup onto
-   * web/modules/custom/audit_chain. Reading the checkout file is how
-   * 1.13.0 failed with a null drupal/core key.
+   * The expand_composer_json.php script overwrites the checkout
+   * composer.json and strips require.drupal/core. gitlab_templates
+   * moves the backup onto web/modules/custom/audit_chain. Reading
+   * the checkout file is how 1.13.0 failed with a null drupal/core
+   * key.
    */
   public function testModuleComposerJsonIsReadFromTheProjectMount(): void {
     $checkout = $this->scratchDir();
@@ -259,10 +269,7 @@ final class Drupal12CompatibilityTest extends KernelTestBase {
   }
 
   /**
-   * Files under $root.
-   *
-   * Naive walk: this is the 1.13.0 behaviour. The follow-up commit
-   * skips a built Drupal web/ tree.
+   * Files under $root, skipping vendor and a built Drupal web/ tree.
    *
    * @param string $root
    *   Directory to walk.
@@ -272,7 +279,15 @@ final class Drupal12CompatibilityTest extends KernelTestBase {
    */
   private function projectFiles(string $root): \Traversable {
     $iterator = new \RecursiveIteratorIterator(
-      new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS),
+      new \RecursiveCallbackFilterIterator(
+        new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS),
+        function (\SplFileInfo $current) use ($root): bool {
+          if (!$current->isDir()) {
+            return TRUE;
+          }
+          return !$this->shouldSkipDirectory($current->getPathname(), $root);
+        },
+      ),
     );
     foreach ($iterator as $file) {
       yield $file;
@@ -280,10 +295,50 @@ final class Drupal12CompatibilityTest extends KernelTestBase {
   }
 
   /**
-   * Path to this module's composer.json.
+   * Whether this directory is outside the module's own tree.
    *
-   * Naive: the checkout file. On d.o that is the expanded project
-   * file with no require.drupal/core.
+   * @param string $path
+   *   Absolute directory path.
+   * @param string $root
+   *   Walk root.
+   *
+   * @return bool
+   *   TRUE to skip.
+   */
+  private function shouldSkipDirectory(string $path, string $root): bool {
+    $name = basename($path);
+    if (in_array($name, ['vendor', 'node_modules', '.git'], TRUE)) {
+      return TRUE;
+    }
+    // d.o builds Drupal into the project checkout. That web/ directory
+    // is core and contrib, not audit_chain, even though it sits next
+    // to audit_chain.info.yml.
+    if ($name === 'web' && dirname($path) === $root && $this->isBuiltDrupalWebRoot($path)) {
+      return TRUE;
+    }
+    return FALSE;
+  }
+
+  /**
+   * Whether $web_dir is a built Drupal tree (has core's Drupal.php).
+   *
+   * @param string $web_dir
+   *   Candidate web/ path.
+   *
+   * @return bool
+   *   TRUE when this is the built Drupal tree.
+   */
+  private function isBuiltDrupalWebRoot(string $web_dir): bool {
+    return is_file($web_dir . '/core/lib/Drupal.php');
+  }
+
+  /**
+   * Path to this module's composer.json, not the expanded d.o file.
+   *
+   * The expand_composer_json.php script overwrites the checkout
+   * composer.json and strips require.drupal/core. gitlab_templates
+   * then moves the backup onto the custom mount. That mount file is
+   * the module.
    *
    * @param string $checkout
    *   Git checkout (three levels up from tests/src/Kernel).
@@ -292,7 +347,37 @@ final class Drupal12CompatibilityTest extends KernelTestBase {
    *   Absolute path.
    */
   private function composerJsonPath(string $checkout): string {
+    $mount = $this->projectMount($checkout);
+    if ($mount !== NULL && is_readable($mount . '/composer.json')) {
+      return $mount . '/composer.json';
+    }
     return $checkout . '/composer.json';
+  }
+
+  /**
+   * The gitlab_templates mount of this project, when the d.o layout is in use.
+   *
+   * @param string $checkout
+   *   Git checkout.
+   *
+   * @return string|null
+   *   Absolute mount path, or NULL when this checkout is module-only.
+   */
+  private function projectMount(string $checkout): ?string {
+    $pattern = $checkout . '/web/modules/*/*';
+    foreach (glob($pattern) ?: [] as $candidate) {
+      if (is_file($candidate . '/audit_chain.info.yml')) {
+        return $candidate;
+      }
+    }
+    return NULL;
+  }
+
+  /**
+   * Git checkout. On d.o this also contains the built Drupal tree.
+   */
+  private function checkoutRoot(): string {
+    return dirname(__DIR__, 3);
   }
 
   /**

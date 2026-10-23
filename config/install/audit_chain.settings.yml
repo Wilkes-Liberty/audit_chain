@@ -2,6 +2,7 @@ hash_key: ''
 previous_hash_keys: {  }
 encryption_profile: ''
 stream_enabled: false
+stream_exclude_dblog: false
 verify_interval: 0
 verify_require_keyed: false
 export_enabled: false

@@ -9,6 +9,27 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [1.13.1] - Unreleased
 
 ### Fixed
+- 1.13.0 stopped writing successful `audit_chain_event` rows to
+  `logger.channel.audit_chain`. DEV-776 moved every `stream_enabled`
+  append onto `audit_chain.stream`, so collectors still listening on
+  the channel (including mcp_sentinel's `McpSiemStreamingTest`)
+  dropped successful and deny appends. `stream_enabled` writes to
+  `logger.channel.audit_chain` again (1.12.2). The dblog-excluded sink
+  is opt-in via `stream_exclude_dblog` (default `false`). Update
+  `audit_chain_update_10008` writes that key as `false` when missing;
+  rolling the hook back is a no-op. Errors, warnings, and refused
+  keyed writes are unchanged (no fail-open). A throwing channel
+  backend no longer escapes `append()`: the sink is chosen once and
+  the write is wrapped so the chain row survives and the failure is
+  reported.
+
+### Upgrade notes
+- Sites that moved to 1.13.0 and relied on the dblog-excluded sink
+  (`audit_chain.stream`) get `audit_chain_event` in Database Logging
+  again after 1.13.1 until they set `stream_exclude_dblog: true`.
+  The 1.12.2 channel is the default; no other config change is
+  required for sites that still listen on
+  `logger.channel.audit_chain`.
 - `Drupal12CompatibilityTest` read the expanded drupal.org checkout
   `composer.json` (no `require.drupal/core`) and could walk the built
   `web/` tree. 1.13.0's d.o pipeline failed with a null core

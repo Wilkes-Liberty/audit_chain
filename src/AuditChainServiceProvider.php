@@ -9,15 +9,15 @@ use Drupal\Core\DependencyInjection\ServiceProviderBase;
 use Symfony\Component\DependencyInjection\Reference;
 
 /**
- * Wires the SIEM stream to every logger backend except Database Logging.
+ * Wires the opt-in SIEM stream to every logger backend except dblog.
  *
- * The stream_enabled setting used to call logger.channel.audit_chain, which
- * Drupal fans out to every service tagged `logger` — including
- * logger.dblog. That is why admin/reports/dblog filled with
- * audit_chain_event rows. The stream service is a narrow channel: same
- * message template and context a SIEM already keys on, but never the
- * dblog backend. Errors and warnings stay on logger.channel.audit_chain
- * so they remain visible in Recent log messages.
+ * The stream_enabled setting writes audit_chain_event to
+ * logger.channel.audit_chain (the 1.12.2 sink). stream_exclude_dblog is
+ * the opt-in that uses this dedicated LoggerChannel instead, so a site
+ * whose audit_chain channel still includes logger.dblog can keep SIEM
+ * streaming without flooding admin/reports/dblog. Errors and warnings
+ * stay on logger.channel.audit_chain so they remain visible in Recent
+ * log messages.
  */
 final class AuditChainServiceProvider extends ServiceProviderBase {
 

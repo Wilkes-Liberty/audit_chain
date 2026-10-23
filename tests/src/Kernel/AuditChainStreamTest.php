@@ -209,6 +209,55 @@ final class AuditChainStreamTest extends KernelTestBase {
   }
 
   /**
+   * A down default channel must not roll back the evidence row.
+   *
+   * The 1.12.2 sink is logger.channel.audit_chain. A throwing backend
+   * (syslog or Monolog down) must not escape append() and undo the
+   * caller's write. The row stays; the failure is reported.
+   */
+  public function testDefaultChannelStreamFailureDoesNotRollBackAppend(): void {
+    $this->config('audit_chain.settings')->set('stream_enabled', TRUE)->save();
+    $spy = new class() extends AbstractLogger {
+
+      /**
+       * Captured operational records (errors and warnings only).
+       *
+       * @var array<int, array{level: mixed, message: string, context: array}>
+       */
+      public array $records = [];
+
+      /**
+       * {@inheritdoc}
+       */
+      public function log($level, string|\Stringable $message, array $context = []): void {
+        if ((string) $message === 'audit_chain_event') {
+          throw new \RuntimeException('channel down');
+        }
+        $this->records[] = [
+          'level' => $level,
+          'message' => (string) $message,
+          'context' => $context,
+        ];
+      }
+
+    };
+    $this->container->set('logger.channel.audit_chain', $spy);
+    $this->container->set('audit_chain.logger', NULL);
+
+    $this->container->get('audit_chain.logger')->log('personnel', 'field_read', [
+      'id' => '1',
+    ]);
+    $this->assertCount(1, $this->chainRows(), 'A down channel must not roll back the chain row.');
+    $this->assertTrue($this->container->get('audit_chain.logger')->verify()['ok']);
+    $faults = array_values(array_filter(
+      $spy->records,
+      static fn (array $record): bool => str_contains($record['message'], 'SIEM stream failed'),
+    ));
+    $this->assertNotEmpty($faults, 'A down default channel must be reported on the operational logger.');
+    $this->assertStringContainsString('channel down', $faults[0]['context']['@message'] ?? '');
+  }
+
+  /**
    * A down SIEM sink must not roll back the evidence row.
    */
   public function testStreamFailureDoesNotRollBackAppend(): void {

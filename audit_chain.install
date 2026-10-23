@@ -250,6 +250,24 @@ function audit_chain_update_10006(): string {
 }
 
 /**
+ * Adds empty RFC 3161 witness settings without contacting a TSA.
+ */
+function audit_chain_update_10007(): string {
+  $config = \Drupal::configFactory()->getEditable('audit_chain.settings');
+  if ($config->get('witness_rfc3161') === NULL) {
+    $config->set('witness_rfc3161', [
+      'tsa_url' => '',
+      'policy_oid' => '',
+      'trust_anchors' => '',
+      'ocsp_override' => '',
+      'credential_key' => '',
+    ]);
+    $config->save();
+  }
+  return 'Added empty RFC 3161 witness settings. No TSA was contacted and no audit row changed.';
+}
+
+/**
  * Implements hook_install().
  */
 function audit_chain_install(): void {

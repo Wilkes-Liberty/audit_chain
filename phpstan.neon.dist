@@ -56,6 +56,11 @@ parameters:
     -
       identifier: notIdentical.alwaysFalse
       path: src/Form/AuditChainSettingsForm.php
+    # Phpseclib encodeDER is documented as string but returns false
+    # on a mapping miss. The is_string() guards stay.
+    -
+      identifier: function.alreadyNarrowedType
+      path: src/Witness/Rfc3161Asn1.php
     # Binary OTS parser. Do not change witness/OTS to silence analysis.
     -
       identifier: booleanOr.alwaysTrue

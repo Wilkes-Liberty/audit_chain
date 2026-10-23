@@ -16,7 +16,7 @@ audit_chain.settings:
       label: 'Encryption profile for metadata at rest — Encryption Profile entity ID'
     stream_enabled:
       type: boolean
-      label: 'Emit each entry to the audit_chain logger channel (SIEM streaming)'
+      label: 'Emit each entry to the SIEM stream (syslog/Monolog, not dblog)'
     verify_interval:
       type: integer
       label: 'Scheduled verification interval in seconds (0 = disabled)'
@@ -76,3 +76,22 @@ audit_chain.settings:
         witness_account:
           type: string
           label: 'Dedicated witness account'
+    witness_rfc3161:
+      type: mapping
+      label: 'RFC 3161 witness'
+      mapping:
+        tsa_url:
+          type: string
+          label: 'Time Stamping Authority URL (HTTPS)'
+        policy_oid:
+          type: string
+          label: 'Required TSA policy OID'
+        trust_anchors:
+          type: string
+          label: 'Trust-anchor PEM bundle'
+        ocsp_override:
+          type: string
+          label: 'Optional OCSP responder URL (HTTPS)'
+        credential_key:
+          type: string
+          label: 'Optional TSA credential — Key entity ID'

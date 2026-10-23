@@ -21,6 +21,12 @@ highcharts
 litecoin
 merkle
 opentimestamps
+phpseclib
+rfc3161
+timestamper
+tsa
+ocsp
+eku
 recognisable
 rewalk
 sekret

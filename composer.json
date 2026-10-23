@@ -23,9 +23,11 @@
   },
   "require": {
     "php": ">=8.1",
+    "ext-openssl": "*",
     "drupal/core": "^10.6 || ^11.3 || ^12",
     "drupal/key": "^1.20",
-    "drupal/encrypt": "^3.2"
+    "drupal/encrypt": "^3.2",
+    "phpseclib/phpseclib": "^3.0"
   },
   "suggest": {
     "drupal/mcp_sentinel": "Required only by the Audit Chain MCP submodule (audit_chain_mcp): ^2.22. Not a dev requirement: MCP Sentinel requires this module, and a pipeline that installed it would fetch a second copy. It does not declare Drupal 12, so requiring it would make a next-major pipeline unresolvable.",

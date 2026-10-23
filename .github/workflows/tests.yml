@@ -14,6 +14,14 @@ name: Tests
 # means ">=11.3 <12" and resolves to 11.4, so a leg built that way silently
 # retests the ceiling. A floor leg pins its minor (~11.3.0); the ceiling floats.
 #
+# RFC 3161 (DEV-1010) uses PHP's openssl extension so a host that loads
+# the OpenSSL 3 FIPS provider gets validated crypto. A dedicated
+# FIPS-provider job is not added here: ubuntu-latest and setup-php ship
+# a non-FIPS OpenSSL, the validated FIPS module is a separate artifact,
+# and linking PHP against it needs a custom build or a RHEL FIPS image
+# that this workflow does not maintain. Algorithm-floor tests reject
+# SHA-1 independently of that provider.
+#
 # phpunit is pinned per leg because Drupal 10's core-dev hard-requires ^9.6,
 # which predates PHP 8 attributes — it ignores an attribute it cannot read
 # rather than erroring. That is why the suite carries annotations alongside its

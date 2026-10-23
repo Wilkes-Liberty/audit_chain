@@ -6,16 +6,25 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Changed
-- Core requirement is now `^10.6 || ^11.3 || ^12` on the base module and in
-  `composer.json`. Status-report findings move to
-  `hook_runtime_requirements()` (`AuditChainRequirements`) so Drupal 12 can
-  drop the `REQUIREMENT_*` integers; Drupal 10.6 still runs the same copy
-  through a `#[LegacyRequirementsHook]` bridge. The optional MCP submodule
-  stays on `^10.6 || ^11.3` because MCP Sentinel has not declared Drupal 12.
-  Hash, mutex, and seal behavior is unchanged.
+### Added
+- RFC 3161 witness backend (`rfc3161`) for persisted checkpoint
+  digests. Submit stores a confirmed TimeStampToken plus the OCSP
+  evidence captured at submit. Upgrade is a no-op. Verify checks
+  imprint, policy, CMS signature, trust chain, critical timeStamping
+  EKU, algorithm floor, and revocation, and re-checks OCSP while the
+  signer is unexpired. Install defaults are empty (fail closed). A TSA
+  credential, if the vendor needs one, is a Key entity id. Crypto uses
+  the PHP openssl extension; phpseclib is used for ASN.1 structure
+  only.
 
 ### Fixed
+- Successful appends with `stream_enabled` no longer write
+  `audit_chain_event` rows to Database Logging. The SIEM stream uses a
+  dedicated sink that forwards to every tagged logger except dblog
+  (syslog, Monolog, or PHP syslog when those are absent). Errors and
+  warnings still use `logger.channel.audit_chain` and remain visible in
+  dblog. Existing `stream_enabled: true` config stays valid; no update
+  hook is required. DEV-776.
 - The status report reads the stored scheduled-verification run on every
   call. A verification saved earlier in the same request is no longer
   hidden by the dashboard metric cache, so a tampered signed row still
@@ -33,6 +42,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that case. Hash, mutex, and seal behavior is unchanged.
 
 ### Changed
+- Core requirement is now `^10.6 || ^11.3 || ^12` on the base module and in
+  `composer.json`. Status-report findings move to
+  `hook_runtime_requirements()` (`AuditChainRequirements`) so Drupal 12 can
+  drop the `REQUIREMENT_*` integers; Drupal 10.6 still runs the same copy
+  through a `#[LegacyRequirementsHook]` bridge. The optional MCP submodule
+  stays on `^10.6 || ^11.3` because MCP Sentinel has not declared Drupal 12.
+  Hash, mutex, and seal behavior is unchanged.
+- Scheduled verification classifies `keyed_verification_unavailable` as
+  its own card. Status report, dashboard, and cron log the operator-facing
+  copy instead of interpolating the machine key through the generic
+  `failed` card. The dead `runNow()` belt that re-checked `unkeyed_rows`
+  after `verify()` is removed: `verify()` already returns `ok` only when
+  that count is zero. Hash, mutex, and seal behavior is unchanged.
+  `classify()` is still the only classifier.
 - Status report, dashboard integrity card, and scheduled-verifier logging
   share one scheduled-verification snapshot (classified state, live row
   count, stored run, and formatted last-run time) and call `forReason()`

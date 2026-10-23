@@ -422,6 +422,7 @@ final class AuditChainLoggerTest extends KernelTestBase {
       $this->container->get('encryption'),
       $this->container->get('entity_type.manager'),
       $this->container->get('state'),
+      $this->container->get('audit_chain.stream'),
     );
   }
 
@@ -1095,7 +1096,9 @@ final class AuditChainLoggerTest extends KernelTestBase {
       }
 
     };
-    $this->container->set('logger.channel.audit_chain', $spy);
+    // The SIEM record left logger.channel.audit_chain so dblog would stop
+    // seeing every append. Spy the dedicated stream, not the ops channel.
+    $this->container->set('audit_chain.stream', $spy);
     $this->container->set('audit_chain.logger', NULL);
 
     $this->container->get('audit_chain.logger')->log('personnel', 'field_read', [

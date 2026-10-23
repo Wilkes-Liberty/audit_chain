@@ -201,10 +201,13 @@ performs no network request, leaves receipts pending, and always fails
 verification with `backend_not_configured`. Witness operations never add rows
 to the audit chain. No timestamp authority or wallet ships in this module.
 
-An OpenTimestamps client and an XRPL receipt client can be selected explicitly.
-Neither runs while `witness_backend` is empty. The XRPL client does not hold a
-seed and does not submit a mainnet transaction. See
-[docs/WITNESS.md](docs/WITNESS.md).
+An OpenTimestamps client, an XRPL receipt client, and an RFC 3161 TSA
+client can be selected explicitly. Neither runs while `witness_backend`
+is empty. The RFC 3161 backend is fail-closed with empty install
+defaults: it stores a confirmed token only after signature, policy,
+chain, timeStamping EKU, and OCSP checks, using PHP's openssl
+extension. The XRPL client does not hold a seed and does not submit a
+mainnet transaction. See [docs/WITNESS.md](docs/WITNESS.md).
 
 ### Rotating the signing key
 
@@ -262,16 +265,18 @@ restrict-access permission *View Audit Chain reports*.
 The page is integrity, not an operational log. It shows the last
 scheduled-verification verdict and the keyed-vs-unkeyed split over a `24h` /
 `7d` / `30d` window. It does not chart volume, channel mix, or operations —
-those belong in dblog or a consumer dashboard, not on the evidence chain.
-Counts use indexed `timestamp` and `key_id` only. Metadata, IP addresses,
-user agents and entity labels are never queried. The integrity card does
-**not** re-walk the chain on page load.
+those belong in a consumer dashboard or SIEM, not on the evidence chain
+and not in Database Logging. Counts use indexed `timestamp` and `key_id`
+only. Metadata, IP addresses, user agents and entity labels are never
+queried. The integrity card does **not** re-walk the chain on page load.
 
 The keyed split is inline SVG by default. Installing
 [Charts](https://www.drupal.org/project/charts) together with a library
 submodule (for example `charts_chartjs`) upgrades it to an interactive chart
 with no code change. Enabling `charts` without a library plugin keeps the SVG
 fallback — the page will not print "No charting library found".
+
+This page is the forensic viewer. `admin/reports/dblog` is not.
 
 ## Optional MCP tools
 
@@ -343,7 +348,7 @@ Not available as tools, by design:
 | Signing key | A Key entity. Empty means plain SHA-256 — enough to detect accidental corruption and careless edits, not enough to stop someone with database access recomputing the chain. Store the key outside the database (File or Environment provider). A key that is set but will not resolve is reported as an error on the status report, and every entry written meanwhile is unsigned. |
 | Retired signing keys | Keys this chain was signed with previously. Verification accepts a row signed by any of them, so rotating does not make earlier rows look tampered with. Removing one makes the rows it signed unverifiable. |
 | Encryption profile | Encrypts `metadata` at rest. See the rotation caveat above. |
-| Stream entries | Emits each entry to the `audit_chain` logger channel as a structured record, so syslog or Monolog can forward to a SIEM without polling. |
+| Stream entries | Emits each successful append as a structured `audit_chain_event` record to syslog or any other logger backend except Database Logging, so a SIEM can consume the stream without polling. Does **not** write `{watchdog}` rows. Existing `stream_enabled: true` config stays valid; no update hook is required. Errors and warnings still use the `audit_chain` channel and remain visible in dblog. Browse the chain at **Reports → Audit Chain**. |
 | Scheduled verification interval | Runs a full chain verification on cron at most this often (`0` disables). An integrity failure is an error on the status report, an alert on the `audit_chain` channel, and an `AuditChainVerificationFailedEvent` — the chain itself is never modified by the check. A leading unsigned prefix with a signed successor is a documented warning, not that alert. A disclosed historical fork whose successor segment verifies is also a documented warning: whole-history verification stays unsuccessful, and a missing successor or `segment_ok=false` stays an error. A foreign seal is a fail-closed warning; see below. |
 | Require keyed verification | The enterprise assurance profile: scheduled verification fails — instead of falling back to unkeyed SHA-256 — when no signing key resolves or when rows were written unkeyed. |
 | Export evidence off-system on cron | Pushes new chain rows to the export destination after each cron run. See *Exporting evidence off-system* for the delivery contract. |
@@ -451,7 +456,11 @@ rows.
 - **It does not order events across servers.** The chain is a single sequence
   in one database.
 - **It is not a replacement for `dblog` or syslog.** Those are operational
-  logs. This is an evidentiary one, and it is deliberately narrower.
+  logs. This is an evidentiary one, and it is deliberately narrower. Browse
+  the chain at **Reports → Audit Chain**. Streamed appends never write
+  `{watchdog}` rows: `stream_enabled` forwards `audit_chain_event` to syslog
+  and other non-dblog logger backends only. Errors and warnings on the
+  `audit_chain` channel still appear in dblog.
 
 ## Maintainers
 

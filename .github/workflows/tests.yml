@@ -243,9 +243,9 @@ jobs:
           SIMPLETEST_DB: ${{ matrix.connection }}
           BROWSERTEST_OUTPUT_DIRECTORY: /tmp
           SYMFONY_DEPRECATIONS_HELPER: weak
-          # 157 is the method count after the witness-demo / upgrade-path
-          # tests. A runner that collects nothing still exits 0.
-          MIN_TESTS: '157'
+          # Floor is the last counted collection; a runner that drops
+          # tests must fail.
+          MIN_TESTS: '210'
         run: |
           set -euo pipefail
           # Absolute -c path: AuditChainLoggerTest and RecoverySegmentsTest
@@ -440,7 +440,9 @@ jobs:
           SIMPLETEST_DB: 'sqlite://localhost/:memory:'
           BROWSERTEST_OUTPUT_DIRECTORY: /tmp
           SYMFONY_DEPRECATIONS_HELPER: weak
-          MIN_TESTS: '40'
+          # Floor is the last counted collection; a runner that drops
+          # tests must fail.
+          MIN_TESTS: '45'
         run: |
           set -euo pipefail
           # Re-run the guard in this step so a later env leak cannot

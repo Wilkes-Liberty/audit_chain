@@ -348,7 +348,8 @@ jobs:
   # server database.
   phpunit-openssl-fips:
     name: PHPUnit (OpenSSL 3 FIPS provider)
-    runs-on: ubuntu-latest
+    # Keep system libcurl compatible with the isolated OpenSSL 3.0 prefix.
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout the module
         uses: actions/checkout@v7
@@ -366,7 +367,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/openssl-fips
-          key: openssl-3.0.16-fips-${{ runner.os }}
+          key: openssl-3.0.16-fips-ubuntu-24.04-${{ runner.arch }}
 
       - name: Build OpenSSL 3 with the FIPS provider
         run: bash module/tests/scripts/setup-openssl-fips.sh

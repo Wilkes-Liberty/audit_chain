@@ -345,10 +345,13 @@ jobs:
   # DEV-1010: prove RFC 3161 and the witness suite against PHP openssl
   # backed by the OpenSSL 3 FIPS provider. continue-on-error is
   # intentionally absent. SQLite is enough: these tests do not need a
-  # server database.
+  # server database. Composer install runs before the FIPS prefix is
+  # placed on LD_LIBRARY_PATH so PHP curl still loads against the
+  # runner's libcurl; the provider guard and PHPUnit then use that path.
   phpunit-openssl-fips:
     name: PHPUnit (OpenSSL 3 FIPS provider)
-    # Keep system libcurl compatible with the isolated OpenSSL 3.0 prefix.
+    # Keep system libcurl compatible with the isolated OpenSSL 3.0 prefix
+    # during the PHPUnit run. Composer still uses the runner libraries.
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout the module
@@ -363,18 +366,12 @@ jobs:
           extensions: gd, pdo_sqlite, sqlite3, openssl
           coverage: none
 
-      - name: Cache the OpenSSL 3 FIPS prefix
-        uses: actions/cache@v4
-        with:
-          path: ~/openssl-fips
-          key: openssl-3.0.16-fips-ubuntu-24.04-${{ runner.arch }}
-
-      - name: Build OpenSSL 3 with the FIPS provider
-        run: bash module/tests/scripts/setup-openssl-fips.sh
-
-      - name: Guard — FIPS provider must be the default
-        run: php module/tests/scripts/assert-openssl-fips.php
-
+      # Composer talks to Packagist through PHP curl. The FIPS setup
+      # puts OpenSSL 3.0.16 first on LD_LIBRARY_PATH, and that prefix
+      # has no OPENSSL_3.2.0 symbols the runner's libcurl needs — so
+      # curl.so fails and `composer require drupal/core-dev` dies.
+      # Install against the system libraries first; only the provider
+      # guard and PHPUnit load the FIPS prefix.
       - name: Scaffold a Drupal site
         env:
           DRUPAL_CONSTRAINT: '~11.3.0'
@@ -435,6 +432,18 @@ jobs:
             || { echo "::error::audit_chain is not symlinked to the working copy — the path repo did not apply"; exit 1; }
           readlink web/modules/contrib/audit_chain
 
+      - name: Cache the OpenSSL 3 FIPS prefix
+        uses: actions/cache@v4
+        with:
+          path: ~/openssl-fips
+          key: openssl-3.0.16-fips-ubuntu-24.04-${{ runner.arch }}
+
+      - name: Build OpenSSL 3 with the FIPS provider
+        run: bash module/tests/scripts/setup-openssl-fips.sh
+
+      - name: Guard — FIPS provider must be the default
+        run: php module/tests/scripts/assert-openssl-fips.php
+
       - name: PHPUnit — RFC 3161 and witness suite (blocking)
         working-directory: drupal
         env:
@@ -446,8 +455,9 @@ jobs:
           MIN_TESTS: '45'
         run: |
           set -euo pipefail
-          # Re-run the guard in this step so a later env leak cannot
-          # silently test against the distro OpenSSL.
+          # LD_LIBRARY_PATH now points at the FIPS prefix (GITHUB_ENV
+          # from setup-openssl-fips.sh). Re-run the guard so a later
+          # env leak cannot silently test against the distro OpenSSL.
           php ../module/tests/scripts/assert-openssl-fips.php
           config="${PWD}/web/core/phpunit.xml.dist"
           module="${PWD}/web/modules/contrib/audit_chain"

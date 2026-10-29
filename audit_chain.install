@@ -13,6 +13,7 @@ use Drupal\audit_chain\AuditChainLogger;
 use Drupal\audit_chain\EvidenceExporter;
 use Drupal\audit_chain\Hook\AuditChainRequirements;
 use Drupal\audit_chain\ScheduledVerifier;
+use Drupal\audit_chain\WitnessDemo;
 use Drupal\Core\Hook\Attribute\LegacyRequirementsHook;
 
 /**
@@ -298,12 +299,16 @@ function audit_chain_install(): void {
  *
  * Schema tables drop automatically. Module-owned state does not. A leftover
  * prefix seal makes the next install's empty-chain verify() return
- * seal_broken.
+ * seal_broken. A leftover demo digest lets digest() revive a stale
+ * checkpoint against empty tables after reinstall.
  */
 function audit_chain_uninstall(): void {
   $keys = [
     AuditChainLogger::STATE_SEAL,
     ScheduledVerifier::STATE_KEY,
+    // Same key WitnessDemo writes. Leaving it lets a later install resolve
+    // a digest that no longer has tables behind it.
+    WitnessDemo::STATE_KEY,
     'audit_chain.retention_refused',
   ];
   foreach (array_keys(\Drupal::keyValue('state')->getAll()) as $name) {

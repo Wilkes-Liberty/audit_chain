@@ -7,6 +7,7 @@ namespace Drupal\Tests\audit_chain\Kernel;
 use Drupal\audit_chain\AuditChainLogger;
 use Drupal\audit_chain\EvidenceExporter;
 use Drupal\audit_chain\ScheduledVerifier;
+use Drupal\audit_chain\WitnessDemo;
 use Drupal\KernelTests\KernelTestBase;
 use PHPUnit\Framework\Attributes\Group;
 
@@ -14,7 +15,8 @@ use PHPUnit\Framework\Attributes\Group;
  * Kernel tests for uninstall clearing module-owned state.
  *
  * Schema tables drop on uninstall; state does not. A leftover prefix seal
- * makes the next install's empty-chain verify() return seal_broken.
+ * makes the next install's empty-chain verify() return seal_broken. A
+ * leftover demo digest can resolve against empty tables after reinstall.
  *
  * @group audit_chain
  */
@@ -51,6 +53,7 @@ final class AuditChainUninstallTest extends KernelTestBase {
   public function testUninstallClearsModuleOwnedState(): void {
     $sealKey = AuditChainLogger::STATE_SEAL;
     $verificationKey = ScheduledVerifier::STATE_KEY;
+    $demoKey = WitnessDemo::STATE_KEY;
     $retentionKey = 'audit_chain.retention_refused';
     $checkpointKey = EvidenceExporter::CHECKPOINT_PREFIX . sha1('file:///tmp/audit-chain-uninstall-test.ndjson');
 
@@ -70,6 +73,12 @@ final class AuditChainUninstallTest extends KernelTestBase {
       'time' => 1,
       'reason' => NULL,
     ]);
+    // Old sessions stored unused receipt_ids. Uninstall must drop the
+    // whole key, not only the digest field.
+    $state->set($demoKey, [
+      'digest' => str_repeat('c', 64),
+      'receipt_ids' => ['leftover-receipt'],
+    ]);
     $state->set($retentionKey, TRUE);
     $state->set($checkpointKey, ['last_id' => 12]);
 
@@ -78,6 +87,7 @@ final class AuditChainUninstallTest extends KernelTestBase {
     $state = $this->container->get('state');
     $this->assertNull($state->get($sealKey));
     $this->assertNull($state->get($verificationKey));
+    $this->assertNull($state->get($demoKey));
     $this->assertNull($state->get($retentionKey));
     $this->assertNull($state->get($checkpointKey));
 

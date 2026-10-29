@@ -24,9 +24,12 @@ final class WitnessDemo {
   public const BACKENDS = ['opentimestamps', 'xrpl'];
 
   /**
-   * State key for the last demo digest and receipt ids.
+   * State key for the last demo digest.
+   *
+   * Public so hook_uninstall() deletes the same key without a string
+   * literal that can drift from this class.
    */
-  private const STATE_KEY = 'audit_chain.witness_demo';
+  public const STATE_KEY = 'audit_chain.witness_demo';
 
   public function __construct(
     private readonly Settings $settings,
@@ -156,7 +159,7 @@ final class WitnessDemo {
       return new WitnessOperation(1, [$exception->getMessage()]);
     }
     $digest = (string) $bundle['manifest']['digest'];
-    $this->storeSession($digest, []);
+    $this->storeSession($digest);
     return new WitnessOperation(0, [
       'digest=' . $digest,
       'from_id=' . (int) $bundle['manifest']['window']['from_id'],
@@ -176,12 +179,10 @@ final class WitnessDemo {
     }
     $results = $this->witnesses->submitTo($resolved, self::BACKENDS);
     $lines = ['digest=' . $resolved];
-    $ids = [];
     $failed = FALSE;
     foreach ($results as $result) {
       $receipt = $result['receipt'];
       if ($receipt instanceof WitnessReceipt) {
-        $ids[] = $receipt->id;
         $lines[] = $receipt->id . ' ' . $receipt->backendId . ' ' . $receipt->status;
       }
       else {
@@ -189,7 +190,8 @@ final class WitnessDemo {
         $lines[] = $result['backend_id'] . ' ' . (string) $result['error'];
       }
     }
-    $this->storeSession($resolved, $ids);
+    // Refresh the stored digest only. Receipts are already in the table.
+    $this->storeSession($resolved);
     return new WitnessOperation($failed ? 1 : 0, $lines);
   }
 
@@ -380,42 +382,33 @@ final class WitnessDemo {
   }
 
   /**
-   * Remembers the digest the demo is walking.
+   * Remembers the digest later demo steps reuse when none is passed.
    *
-   * @param string $digest
-   *   Checkpoint digest.
-   * @param list<string> $receiptIds
-   *   Receipt ids from the last submit, when known.
+   * Receipts live in audit_chain_witness_receipt. The demo never reads a
+   * stored id list; status, upgrade, and verify load from the table.
    */
-  private function storeSession(string $digest, array $receiptIds): void {
+  private function storeSession(string $digest): void {
     $this->state->set(self::STATE_KEY, [
       'digest' => $digest,
-      'receipt_ids' => $receiptIds,
     ]);
   }
 
   /**
-   * Loads the last demo session.
+   * Loads the last demo digest.
    *
-   * @return array{digest: string, receipt_ids: list<string>}
-   *   Empty strings when the demo has not stored a digest.
+   * Older sessions may still hold unused receipt_ids. Those are ignored so
+   * a site that stored the previous shape keeps resolving the digest.
+   *
+   * @return array{digest: string}
+   *   Empty string when the demo has not stored a digest.
    */
   private function session(): array {
     $value = $this->state->get(self::STATE_KEY);
     if (!is_array($value) || !isset($value['digest']) || !is_string($value['digest'])) {
-      return ['digest' => '', 'receipt_ids' => []];
-    }
-    $ids = [];
-    if (isset($value['receipt_ids']) && is_array($value['receipt_ids'])) {
-      foreach ($value['receipt_ids'] as $id) {
-        if (is_string($id) && $id !== '') {
-          $ids[] = $id;
-        }
-      }
+      return ['digest' => ''];
     }
     return [
       'digest' => $value['digest'],
-      'receipt_ids' => $ids,
     ];
   }
 

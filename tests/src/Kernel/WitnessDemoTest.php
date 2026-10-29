@@ -139,6 +139,12 @@ final class WitnessDemoTest extends KernelTestBase {
     }
     $this->assertIsString($digest);
     $this->assertMatchesRegularExpression('/^[a-f0-9]{64}$/', $digest);
+    // Persist the digest only. Later steps must resolve it from state
+    // when the operator omits --digest.
+    $this->assertSame(
+      ['digest' => $digest],
+      $this->container->get('state')->get(WitnessDemo::STATE_KEY),
+    );
 
     $this->transport->script[] = [
       'status' => 200,
@@ -150,12 +156,18 @@ final class WitnessDemoTest extends KernelTestBase {
       'body' => json_encode(['outcome' => 'pending', 'tx_hash' => self::HASH], JSON_THROW_ON_ERROR),
       'match' => 'relay.example',
     ];
-    $submitted = $demo->step('submit', $digest);
+    // Omit --digest: submit and status must reuse the stored checkpoint.
+    $submitted = $demo->step('submit');
     $this->assertSame(0, $submitted->exitCode, implode("\n", $submitted->lines));
     $this->assertStringContainsString('opentimestamps pending', implode("\n", $submitted->lines));
     $this->assertStringContainsString('xrpl pending', implode("\n", $submitted->lines));
+    // Submit used to write unused receipt_ids; the key stays digest-only.
+    $this->assertSame(
+      ['digest' => $digest],
+      $this->container->get('state')->get(WitnessDemo::STATE_KEY),
+    );
 
-    $status = $demo->step('status', $digest);
+    $status = $demo->step('status');
     $this->assertSame(0, $status->exitCode);
     $this->assertCount(2, $this->receipts($digest));
 
@@ -202,6 +214,7 @@ final class WitnessDemoTest extends KernelTestBase {
     $reset = $demo->step('reset');
     $this->assertSame(0, $reset->exitCode);
     $this->assertSame([], $this->receipts($digest));
+    $this->assertNull($this->container->get('state')->get(WitnessDemo::STATE_KEY));
     $this->assertSame('', $this->config('audit_chain.settings')->get('witness_xrpl.relay_url'));
     $this->assertSame('', $this->config('audit_chain.settings')->get('witness_backend'));
   }

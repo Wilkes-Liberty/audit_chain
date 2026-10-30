@@ -49,10 +49,53 @@ final class Rfc3161FixtureFactory {
    */
   public string $otherRootPem = '';
 
+  /**
+   * Root CA private key PEM, for responses the issuer signs itself.
+   */
+  public string $rootKeyPem = '';
+
+  /**
+   * Responder issued by the root but without id-kp-OCSPSigning.
+   */
+  public string $ocspNoEkuPem = '';
+
+  /**
+   * Private key for $ocspNoEkuPem.
+   */
+  public string $ocspNoEkuKeyPem = '';
+
+  /**
+   * Responder with id-kp-OCSPSigning, but issued by the other root.
+   */
+  public string $ocspOtherRootPem = '';
+
+  /**
+   * Private key for $ocspOtherRootPem.
+   */
+  public string $ocspOtherRootKeyPem = '';
+
+  /**
+   * Unix time stamped into tokens and OCSP responses.
+   */
+  public readonly int $now;
+
+  /**
+   * Builds the PKI.
+   *
+   * @param string $variant
+   *   Good, no_eku, or sha1.
+   * @param int|null $now
+   *   Clock for genTime and OCSP times. Defaults to the time right after
+   *   the certificates are minted: openssl stamps notBefore with the real
+   *   current time, so an earlier clock would fall outside their validity.
+   *   Tests that mock the Drupal clock should read $now back from here.
+   */
   public function __construct(
     private readonly string $variant = 'good',
+    ?int $now = NULL,
   ) {
     $this->build();
+    $this->now = $now ?? time();
   }
 
   /**
@@ -89,7 +132,7 @@ final class Rfc3161FixtureFactory {
       $imprint,
       $policy,
       $nonce,
-      gmdate('Y-m-d H:i:s') . ' GMT',
+      self::generalizedTime($this->now),
     );
     return Rfc3161Crypto::signCms($tst, $this->tsaPem, $this->tsaKeyPem);
   }
@@ -97,29 +140,75 @@ final class Rfc3161FixtureFactory {
   /**
    * OCSP response for the TSA signer.
    *
+   * Defaults describe a correct answer from the delegated responder:
+   * byName responderID, responder certificate embedded, CertID for the TSA
+   * signer, thisUpdate = producedAt = the factory clock, no nextUpdate.
+   *
    * @param string $status
    *   Good, revoked, or unknown.
+   * @param array<string, mixed> $options
+   *   Fixture knobs used by the rejection tests:
+   *   - signer: delegated (default), issuer, no_eku, other_root, or tsa.
+   *   - responder_id: name (default) or key.
+   *   - certs: list of PEMs to embed instead of the signer's certificate.
+   *   - serial_hex, name_hash, key_hash: CertID overrides.
+   *   - produced_at, this_update, next_update: Unix times.
+   *   - nonce: raw nonce bytes to echo in responseExtensions.
+   *   - extra_responses: SingleResponses placed before the real one.
    */
-  public function ocsp(string $status = 'good'): string {
+  public function ocsp(string $status = 'good', array $options = []): string {
     $hashes = Rfc3161Asn1::ocspIssuerHashes(
       Rfc3161Crypto::pemToDer($this->tsaPem),
       Rfc3161Crypto::pemToDer($this->rootPem),
     );
-    $produced = gmdate('Y-m-d H:i:s') . ' GMT';
+    [$signerPem, $signerKeyPem] = match ($options['signer'] ?? 'delegated') {
+      'issuer' => [$this->rootPem, $this->rootKeyPem],
+      'no_eku' => [$this->ocspNoEkuPem, $this->ocspNoEkuKeyPem],
+      'other_root' => [$this->ocspOtherRootPem, $this->ocspOtherRootKeyPem],
+      'tsa' => [$this->tsaPem, $this->tsaKeyPem],
+      default => [$this->ocspPem, $this->ocspKeyPem],
+    };
+    $signerDer = Rfc3161Crypto::pemToDer($signerPem);
+    $produced = (int) ($options['produced_at'] ?? $this->now);
+    $tbsOptions = [
+      'this_update' => self::generalizedTime((int) ($options['this_update'] ?? $produced)),
+    ];
+    if (isset($options['next_update'])) {
+      $tbsOptions['next_update'] = self::generalizedTime((int) $options['next_update']);
+    }
+    if (($options['responder_id'] ?? 'name') === 'key') {
+      $tbsOptions['responder_key_hash'] = Rfc3161Asn1::publicKeyHash($signerDer);
+    }
+    if (isset($options['nonce'])) {
+      $tbsOptions['nonce'] = $options['nonce'];
+    }
+    if (isset($options['extra_responses'])) {
+      $tbsOptions['extra_responses'] = $options['extra_responses'];
+    }
     $tbs = Rfc3161Asn1::encodeOcspTbs(
-      Rfc3161Asn1::subjectNameDer(Rfc3161Crypto::pemToDer($this->ocspPem)),
-      $hashes['name_hash'],
-      $hashes['key_hash'],
-      $hashes['serial_hex'],
+      Rfc3161Asn1::subjectNameDer($signerDer),
+      $options['name_hash'] ?? $hashes['name_hash'],
+      $options['key_hash'] ?? $hashes['key_hash'],
+      $options['serial_hex'] ?? $hashes['serial_hex'],
       $status,
-      $produced,
+      self::generalizedTime($produced),
+      $tbsOptions,
     );
-    $signature = Rfc3161Crypto::sign($tbs, $this->ocspKeyPem);
+    $signature = Rfc3161Crypto::sign($tbs, $signerKeyPem);
+    // An issuer-signed answer normally carries no certificates.
+    $certs = $options['certs'] ?? (($options['signer'] ?? 'delegated') === 'issuer' ? [] : [$signerPem]);
     return Rfc3161Asn1::encodeOcspResponse(
       $tbs,
       $signature,
-      Rfc3161Crypto::pemToDer($this->ocspPem),
+      array_map([Rfc3161Crypto::class, 'pemToDer'], $certs),
     );
+  }
+
+  /**
+   * GeneralizedTime source string for phpseclib.
+   */
+  public static function generalizedTime(int $stamp): string {
+    return gmdate('Y-m-d H:i:s', $stamp) . ' GMT';
   }
 
   /**
@@ -174,6 +263,7 @@ final class Rfc3161FixtureFactory {
       3,
     );
     $this->rootPem = $root['pem'];
+    $this->rootKeyPem = $this->exportKey($rootKey);
     $this->tsaPem = $tsa['pem'];
     $this->tsaKeyPem = $this->exportKey($tsaKey);
     $this->ocspPem = $ocsp['pem'];
@@ -191,6 +281,35 @@ final class Rfc3161FixtureFactory {
       1,
     );
     $this->otherRootPem = $other['pem'];
+
+    // Responders that must be refused: right issuer but no OCSPSigning
+    // EKU, and right EKU but issued by a CA that did not issue the TSA.
+    $noEkuKey = $this->newKey();
+    $noEku = $this->signCert(
+      ['CN' => 'Audit Chain Test OCSP No EKU'],
+      $noEkuKey,
+      $root['cert'],
+      $rootKey,
+      'ocsp_no_eku',
+      $cnf,
+      'sha256',
+      4,
+    );
+    $this->ocspNoEkuPem = $noEku['pem'];
+    $this->ocspNoEkuKeyPem = $this->exportKey($noEkuKey);
+    $strayKey = $this->newKey();
+    $stray = $this->signCert(
+      ['CN' => 'Audit Chain Other OCSP'],
+      $strayKey,
+      $other['cert'],
+      $otherKey,
+      'ocsp_cert',
+      $cnf,
+      'sha256',
+      5,
+    );
+    $this->ocspOtherRootPem = $stray['pem'];
+    $this->ocspOtherRootKeyPem = $this->exportKey($strayKey);
     unlink($cnf);
   }
 
@@ -281,6 +400,11 @@ authorityInfoAccess = OCSP;URI:https://ocsp.example/ocsp
 basicConstraints = critical,CA:FALSE
 keyUsage = critical,digitalSignature
 extendedKeyUsage = critical,OCSPSigning
+subjectKeyIdentifier = hash
+authorityKeyIdentifier = keyid,issuer
+[ ocsp_no_eku ]
+basicConstraints = critical,CA:FALSE
+keyUsage = critical,digitalSignature
 subjectKeyIdentifier = hash
 authorityKeyIdentifier = keyid,issuer
 CNF);

@@ -156,6 +156,29 @@ final class AuditChainRecoverySupport {
   }
 
   /**
+   * Whether a recovery segment row exists.
+   *
+   * Plain SELECT: callers that do not hold the append mutex must not
+   * request FOR UPDATE. Existence is enough to refuse whole-history
+   * export. Mutex-held writers keep their own locked current read.
+   *
+   * @return bool
+   *   TRUE when the recovery table exists and has at least one row.
+   */
+  public function hasRecoveryRecord(): bool {
+    // Older installs may run before the recovery update lands. A missing
+    // table is "no checkpoint", not a hard failure of the export gate.
+    if (!$this->database->schema()->tableExists('audit_chain_recovery')) {
+      return FALSE;
+    }
+    return $this->database->select('audit_chain_recovery', 'r')
+      ->fields('r', ['segment_id'])
+      ->range(0, 1)
+      ->execute()
+      ->fetchField() !== FALSE;
+  }
+
+  /**
    * Requires a deployment identity kept outside exported configuration.
    *
    * @param string $message

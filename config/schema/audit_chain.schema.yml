@@ -98,3 +98,6 @@ audit_chain.settings:
         credential_key:
           type: string
           label: 'Optional TSA credential — Key entity ID'
+        ocsp_nonce:
+          type: boolean
+          label: 'Send an OCSP nonce and require the responder to echo it'

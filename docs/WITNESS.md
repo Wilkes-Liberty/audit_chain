@@ -65,7 +65,32 @@ returns good. The stored token is a versioned DER envelope
 (`audit_chain.rfc3161.v1`) holding the TimeStampToken and the OCSP
 response captured at submit. Upgrade makes no network call. Verify
 re-checks that evidence and, while the signer certificate is unexpired,
-re-checks OCSP live. Install defaults are empty, so the backend cannot
+re-checks OCSP live.
+
+An OCSP answer counts only when all of these hold; otherwise submit
+writes nothing and verify returns the reason in brackets:
+
+- A SingleResponse's CertID names the TSA signer: same serial, same
+  issuer Name hash, same issuer key hash (`certificate_invalid`). Other
+  responses in the same reply are ignored.
+- It is signed by the CA that issued the TSA certificate, or by a
+  delegated responder that this same CA issued directly with
+  `id-kp-OCSPSigning`, embedded in the reply, and named by the
+  responderID (byName or byKey). Chaining to some other configured anchor
+  is not enough (`untrusted_tsa`, or `signature_invalid` when the
+  signature does not verify).
+- It is current: `thisUpdate` and `producedAt` are not more than five
+  minutes in the future and `nextUpdate` has not passed (five minutes of
+  skew). With no `nextUpdate`, `thisUpdate` must be under an hour old
+  (`certificate_invalid`). The live check uses the current time; the
+  stored answer is judged against the token genTime.
+- With `witness_rfc3161.ocsp_nonce` set to `true`, the request carries a
+  random RFC 8954 nonce and the answer must echo it (`certificate_invalid`).
+  It is off by default because many CDN-fronted responders ignore nonces.
+- The status is good. Revoked is `certificate_revoked`; unknown is
+  `certificate_invalid`.
+
+Install defaults are empty, so the backend cannot
 be selected until an operator sets a HTTPS TSA URL, policy OID, and
 trust-anchor PEM bundle. A vendor credential, if required, is a Key
 entity id and is never exported as the secret. Free public TSAs are not

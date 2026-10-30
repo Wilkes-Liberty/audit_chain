@@ -14,6 +14,9 @@ use phpseclib3\Math\BigInteger;
  * Phpseclib's ASN.1 module encodes and decodes DER. Hashing, CMS
  * signatures, and certificate checks stay in Rfc3161Crypto so a FIPS
  * OpenSSL provider still performs every cryptographic operation.
+ *
+ * @phpstan-type OcspSingleResponse array{hash_alg: string, name_hash: string, key_hash: string, serial_hex: string, status: string, this_update: int, next_update: int|null}
+ * @phpstan-type OcspBasicResponse array{produced_at: int, responder_id: array{type: string, value: string}, responses: list<OcspSingleResponse>, nonce: string|null, tbs: string, signature: string, certs: list<string>, hash_alg: string}
  */
 final class Rfc3161Asn1 {
 
@@ -50,6 +53,16 @@ final class Rfc3161Asn1 {
   public const OID_EKU = '2.5.29.37';
 
   public const OID_OCSP_BASIC = '1.3.6.1.5.5.7.48.1.1';
+
+  /**
+   * OCSP nonce extension (RFC 8954).
+   */
+  public const OID_OCSP_NONCE = '1.3.6.1.5.5.7.48.1.2';
+
+  /**
+   * Id-kp-OCSPSigning, required on a delegated OCSP responder certificate.
+   */
+  public const OID_OCSP_SIGNING = '1.3.6.1.5.5.7.3.9';
 
   /**
    * Weak hash and signature OIDs rejected as weak_algorithm.
@@ -234,16 +247,28 @@ final class Rfc3161Asn1 {
 
   /**
    * Builds an OCSP request for the TSA signer.
+   *
+   * @param string $issuerNameHash
+   *   SHA-1 of the signer's issuer Name.
+   * @param string $issuerKeyHash
+   *   SHA-1 of the issuer public-key bits.
+   * @param string $serialHex
+   *   Signer serial as hex.
+   * @param string|null $nonce
+   *   Raw nonce bytes for an OCSP nonce request extension (RFC 8954), or NULL
+   *   to send no nonce. A responder that answers must then echo it.
    */
-  public static function encodeOcspRequest(string $issuerNameHash, string $issuerKeyHash, string $serialHex): string {
-    $der = ASN1::encodeDER([
-      'tbsRequest' => [
-        'requestList' => [[
-          'reqCert' => self::certId($issuerNameHash, $issuerKeyHash, $serialHex),
-        ],
-        ],
+  public static function encodeOcspRequest(string $issuerNameHash, string $issuerKeyHash, string $serialHex, ?string $nonce = NULL): string {
+    $tbs = [
+      'requestList' => [[
+        'reqCert' => self::certId($issuerNameHash, $issuerKeyHash, $serialHex),
       ],
-    ], self::ocspRequestMap());
+      ],
+    ];
+    if ($nonce !== NULL) {
+      $tbs['requestExtensions'] = [self::nonceExtension($nonce)];
+    }
+    $der = ASN1::encodeDER(['tbsRequest' => $tbs], self::ocspRequestMap());
     if (!is_string($der) || $der === '') {
       throw new \RuntimeException('revocation_unreachable');
     }
@@ -251,12 +276,33 @@ final class Rfc3161Asn1 {
   }
 
   /**
-   * Builds a fixture OCSP response. Status is good, revoked, or unknown.
+   * Reads the nonce from an OCSP request, or NULL when none was sent.
+   *
+   * Fixtures use this to echo the nonce the backend generated.
+   */
+  public static function decodeOcspRequestNonce(string $der): ?string {
+    $mapped = self::map($der, self::ocspRequestMap());
+    $extensions = $mapped['tbsRequest']['requestExtensions'] ?? NULL;
+    return is_array($extensions) ? self::nonceFromExtensions($extensions) : NULL;
+  }
+
+  /**
+   * Builds a fixture OCSP response around signed ResponseData.
+   *
+   * @param string $tbs
+   *   Encoded ResponseData that $signature covers.
+   * @param string $signature
+   *   Raw signature bytes.
+   * @param list<string>|string $certificates
+   *   Certificates to embed (DER). An empty list embeds none, which is how
+   *   a response signed directly by the issuing CA usually arrives.
+   * @param string $responseStatus
+   *   OCSPResponseStatus name.
    */
   public static function encodeOcspResponse(
     string $tbs,
     string $signature,
-    string $responderCertDer,
+    array|string $certificates,
     string $responseStatus = 'successful',
   ): string {
     $status = match ($responseStatus) {
@@ -266,15 +312,19 @@ final class Rfc3161Asn1 {
       'try_later' => 3,
       default => 0,
     };
-    $basic = ASN1::encodeDER([
+    $certs = array_values(array_filter(is_array($certificates) ? $certificates : [$certificates], static fn (string $der): bool => $der !== ''));
+    $source = [
       'tbsResponseData' => new Element($tbs),
       'signatureAlgorithm' => [
         'algorithm' => self::OID_SHA256_RSA,
         'parameters' => NULL,
       ],
       'signature' => "\x00" . $signature,
-      'certs' => [new Element($responderCertDer)],
-    ], self::basicOcspMap());
+    ];
+    if ($certs !== []) {
+      $source['certs'] = array_map(static fn (string $der): Element => new Element($der), $certs);
+    }
+    $basic = ASN1::encodeDER($source, self::basicOcspMap());
     if (!is_string($basic) || $basic === '') {
       throw new \RuntimeException('receipt_malformed');
     }
@@ -295,7 +345,7 @@ final class Rfc3161Asn1 {
    * Encodes ResponseData for a fixture OCSP signature.
    *
    * @param string $responderNameDer
-   *   Responder subject Name DER.
+   *   Responder subject Name DER, used for a byName responderID.
    * @param string $issuerNameHash
    *   SHA-1 of the issuer Name.
    * @param string $issuerKeyHash
@@ -306,6 +356,10 @@ final class Rfc3161Asn1 {
    *   Good, revoked, or unknown.
    * @param string $producedAt
    *   GeneralizedTime source string.
+   * @param array{this_update?: string, next_update?: string, responder_key_hash?: string, nonce?: string, extra_responses?: list<array{name_hash: string, key_hash: string, serial_hex: string, status: string}>} $options
+   *   Fixture-only knobs: thisUpdate (defaults to producedAt), nextUpdate
+   *   (omitted by default), a byKey responderID instead of byName, a nonce
+   *   extension, and additional SingleResponses placed before this one.
    */
   public static function encodeOcspTbs(
     string $responderNameDer,
@@ -314,7 +368,51 @@ final class Rfc3161Asn1 {
     string $serialHex,
     string $certStatus,
     string $producedAt,
+    array $options = [],
   ): string {
+    $responses = [];
+    foreach ($options['extra_responses'] ?? [] as $extra) {
+      $responses[] = self::singleResponse($extra['name_hash'], $extra['key_hash'], $extra['serial_hex'], $extra['status'], $producedAt, $options);
+    }
+    $responses[] = self::singleResponse($issuerNameHash, $issuerKeyHash, $serialHex, $certStatus, $producedAt, $options);
+    $responderId = isset($options['responder_key_hash'])
+      ? self::explicitTag(2, self::octetString($options['responder_key_hash']))
+      : self::explicitTag(1, $responderNameDer);
+    $source = [
+      'responderID' => new Element($responderId),
+      'producedAt' => $producedAt,
+      'responses' => $responses,
+    ];
+    if (isset($options['nonce'])) {
+      $source['responseExtensions'] = [self::nonceExtension($options['nonce'])];
+    }
+    $der = ASN1::encodeDER($source, self::ocspTbsEncodeMap());
+    if (!is_string($der) || $der === '') {
+      throw new \RuntimeException('receipt_malformed');
+    }
+    return $der;
+  }
+
+  /**
+   * One fixture SingleResponse.
+   *
+   * @param string $nameHash
+   *   CertID issuerNameHash.
+   * @param string $keyHash
+   *   CertID issuerKeyHash.
+   * @param string $serialHex
+   *   CertID serial as hex.
+   * @param string $certStatus
+   *   Good, revoked, or unknown.
+   * @param string $producedAt
+   *   Fallback for thisUpdate and the revocation time.
+   * @param array<string, mixed> $options
+   *   The encodeOcspTbs() options.
+   *
+   * @return array<string, mixed>
+   *   Mapping source for encodeDER.
+   */
+  private static function singleResponse(string $nameHash, string $keyHash, string $serialHex, string $certStatus, string $producedAt, array $options): array {
     $revokedTime = ASN1::encodeDER($producedAt, [
       'type' => ASN1::TYPE_GENERALIZED_TIME,
     ]);
@@ -324,26 +422,26 @@ final class Rfc3161Asn1 {
       default => "\x80\x00",
     };
     $single = [
-      'certID' => self::certId($issuerNameHash, $issuerKeyHash, $serialHex),
+      'certID' => self::certId($nameHash, $keyHash, $serialHex),
       'certStatus' => new Element($statusDer),
-      'thisUpdate' => $producedAt,
+      'thisUpdate' => $options['this_update'] ?? $producedAt,
     ];
-    $der = ASN1::encodeDER([
-      'responderID' => new Element(self::explicitTag(1, $responderNameDer)),
-      'producedAt' => $producedAt,
-      'responses' => [$single],
-    ], self::ocspTbsEncodeMap());
-    if (!is_string($der) || $der === '') {
-      throw new \RuntimeException('receipt_malformed');
+    if (isset($options['next_update'])) {
+      $single['nextUpdate'] = $options['next_update'];
     }
-    return $der;
+    return $single;
   }
 
   /**
    * Reads an OCSP response and the exact TBS bytes that were signed.
    *
-   * @return array{status: string, produced_at: int, tbs: string, signature: string, responder_cert: string, hash_alg: string}
-   *   Cert status, producedAt, signed TBS, signature, responder cert, alg.
+   * Nothing here decides whether the response is acceptable; that is
+   * OcspResponseValidator's job. Every SingleResponse is returned so the
+   * validator can pick the one whose CertID names the TSA signer, instead
+   * of trusting whichever response happens to come first.
+   *
+   * @return OcspBasicResponse
+   *   Parsed basic response.
    */
   public static function decodeOcspResponse(string $der): array {
     $mapped = self::map($der, self::ocspResponseMap());
@@ -493,9 +591,31 @@ final class Rfc3161Asn1 {
    * Whether the certificate has a critical id-kp-timeStamping EKU.
    */
   public static function hasCriticalTimeStamping(string $certDer): bool {
+    $eku = self::extendedKeyUsage($certDer);
+    return $eku !== NULL && $eku['critical'] && in_array(self::OID_TIME_STAMPING, $eku['purposes'], TRUE);
+  }
+
+  /**
+   * Whether the certificate's EKU lists one purpose (critical or not).
+   *
+   * RFC 6960 4.2.2.2 only requires id-kp-OCSPSigning to be present on a
+   * delegated responder; it does not require the extension to be critical.
+   */
+  public static function hasExtendedKeyUsage(string $certDer, string $purposeOid): bool {
+    $eku = self::extendedKeyUsage($certDer);
+    return $eku !== NULL && in_array($purposeOid, $eku['purposes'], TRUE);
+  }
+
+  /**
+   * Reads the extendedKeyUsage extension, or NULL when it is absent.
+   *
+   * @return array{critical: bool, purposes: list<string>}|null
+   *   Criticality and the listed purpose OIDs.
+   */
+  private static function extendedKeyUsage(string $certDer): ?array {
     $decoded = ASN1::decodeBER($certDer);
     if (!is_array($decoded) || !isset($decoded[0]['content'][0]['content']) || !is_array($decoded[0]['content'][0]['content'])) {
-      return FALSE;
+      return NULL;
     }
     $tbs = $decoded[0]['content'][0]['content'];
     $extNode = NULL;
@@ -506,40 +626,20 @@ final class Rfc3161Asn1 {
       }
     }
     if ($extNode === NULL) {
-      return FALSE;
+      return NULL;
     }
     $sequence = $extNode['content'][0] ?? $extNode;
-    $extMap = [
-      'type' => ASN1::TYPE_SEQUENCE,
-      'min' => 1,
-      'max' => -1,
-      'children' => [
-        'type' => ASN1::TYPE_SEQUENCE,
-        'children' => [
-          'extnId' => ['type' => ASN1::TYPE_OBJECT_IDENTIFIER],
-          'critical' => [
-            'type' => ASN1::TYPE_BOOLEAN,
-            'optional' => TRUE,
-            'default' => FALSE,
-          ],
-          'extnValue' => ['type' => ASN1::TYPE_OCTET_STRING],
-        ],
-      ],
-    ];
-    $mapped = ASN1::asn1map($sequence, $extMap);
+    $mapped = ASN1::asn1map($sequence, self::extensionsMap());
     if (!is_array($mapped)) {
-      return FALSE;
+      return NULL;
     }
     foreach ($mapped as $ext) {
       if (($ext['extnId'] ?? '') !== self::OID_EKU) {
         continue;
       }
-      if (empty($ext['critical'])) {
-        return FALSE;
-      }
       $value = $ext['extnValue'] ?? '';
       if (!is_string($value) || $value === '') {
-        return FALSE;
+        return NULL;
       }
       $purposes = ASN1::asn1map(ASN1::decodeBER($value)[0] ?? [], [
         'type' => ASN1::TYPE_SEQUENCE,
@@ -547,9 +647,22 @@ final class Rfc3161Asn1 {
         'max' => -1,
         'children' => ['type' => ASN1::TYPE_OBJECT_IDENTIFIER],
       ]);
-      return is_array($purposes) && in_array(self::OID_TIME_STAMPING, $purposes, TRUE);
+      if (!is_array($purposes)) {
+        return NULL;
+      }
+      return [
+        'critical' => !empty($ext['critical']),
+        'purposes' => array_values(array_filter($purposes, 'is_string')),
+      ];
     }
-    return FALSE;
+    return NULL;
+  }
+
+  /**
+   * SHA-1 of a certificate's subjectPublicKey bits (RFC 6960 byKey).
+   */
+  public static function publicKeyHash(string $certDer): string {
+    return hash('sha1', self::certIdMaterial($certDer)['key'], TRUE);
   }
 
   /**
@@ -799,7 +912,7 @@ final class Rfc3161Asn1 {
   /**
    * Reads BasicOCSPResponse including the original signed TBS.
    *
-   * @return array{status: string, produced_at: int, tbs: string, signature: string, responder_cert: string, hash_alg: string}
+   * @return OcspBasicResponse
    *   Parsed basic response.
    */
   private static function decodeBasicOcsp(string $basic): array {
@@ -818,23 +931,60 @@ final class Rfc3161Asn1 {
     $tbs = $mapped['tbsResponseData'] ?? NULL;
     $tbsDer = $tbs instanceof Element ? $tbs->element : self::tlv($basic, $tbsNode);
     $tbsMapped = self::map($tbsDer, self::ocspTbsMap());
-    $produced = $tbsMapped['producedAt'] ?? '';
-    $stamp = is_string($produced) ? strtotime($produced) : FALSE;
-    if ($stamp === FALSE) {
+    $stamp = self::timeValue($tbsMapped['producedAt'] ?? NULL);
+    if ($stamp === NULL) {
       throw new \RuntimeException('receipt_malformed');
     }
-    $responses = $tbsMapped['responses'] ?? [];
-    $first = is_array($responses) ? ($responses[0] ?? []) : [];
-    $choice = $first['certStatus'] ?? [];
-    $status = 'unknown';
-    if (is_array($choice)) {
-      if (array_key_exists('good', $choice)) {
+
+    $responderId = $tbsMapped['responderID'] ?? NULL;
+    if (is_array($responderId) && isset($responderId['byName'])) {
+      $name = $responderId['byName'];
+      $responder = ['type' => 'name', 'value' => $name instanceof Element ? $name->element : ''];
+    }
+    elseif (is_array($responderId) && isset($responderId['byKey']) && is_string($responderId['byKey'])) {
+      $responder = ['type' => 'key', 'value' => $responderId['byKey']];
+    }
+    else {
+      throw new \RuntimeException('receipt_malformed');
+    }
+    if ($responder['value'] === '') {
+      throw new \RuntimeException('receipt_malformed');
+    }
+
+    $responses = [];
+    foreach (is_array($tbsMapped['responses'] ?? NULL) ? $tbsMapped['responses'] : [] as $single) {
+      $certId = $single['certID'] ?? [];
+      $serial = $certId['serialNumber'] ?? NULL;
+      $thisUpdate = self::timeValue($single['thisUpdate'] ?? NULL);
+      $nextUpdate = array_key_exists('nextUpdate', $single) ? self::timeValue($single['nextUpdate']) : NULL;
+      if (!$serial instanceof BigInteger || $thisUpdate === NULL || (array_key_exists('nextUpdate', $single) && $nextUpdate === NULL)) {
+        throw new \RuntimeException('receipt_malformed');
+      }
+      $choice = $single['certStatus'] ?? [];
+      $status = 'unknown';
+      if (is_array($choice) && array_key_exists('good', $choice)) {
         $status = 'good';
       }
-      elseif (array_key_exists('revoked', $choice)) {
+      elseif (is_array($choice) && array_key_exists('revoked', $choice)) {
         $status = 'revoked';
       }
+      $responses[] = [
+        'hash_alg' => (string) ($certId['hashAlgorithm']['algorithm'] ?? ''),
+        'name_hash' => (string) ($certId['issuerNameHash'] ?? ''),
+        'key_hash' => (string) ($certId['issuerKeyHash'] ?? ''),
+        'serial_hex' => self::normalizeSerialHex($serial->toHex()),
+        'status' => $status,
+        'this_update' => $thisUpdate,
+        'next_update' => $nextUpdate,
+      ];
     }
+    if ($responses === []) {
+      throw new \RuntimeException('receipt_malformed');
+    }
+
+    $extensions = $tbsMapped['responseExtensions'] ?? NULL;
+    $nonce = is_array($extensions) ? self::nonceFromExtensions($extensions) : NULL;
+
     $signature = $mapped['signature'] ?? '';
     if (!is_string($signature) || strlen($signature) < 2) {
       throw new \RuntimeException('signature_invalid');
@@ -842,24 +992,100 @@ final class Rfc3161Asn1 {
     if (ord($signature[0]) === 0) {
       $signature = substr($signature, 1);
     }
-    $certs = $mapped['certs'] ?? [];
-    $responder = '';
-    if (is_array($certs) && isset($certs[0])) {
-      $firstCert = $certs[0];
-      $responder = $firstCert instanceof Element ? $firstCert->element : (is_string($firstCert) ? $firstCert : '');
+    $certs = [];
+    foreach (is_array($mapped['certs'] ?? NULL) ? $mapped['certs'] : [] as $cert) {
+      $der = $cert instanceof Element ? $cert->element : (is_string($cert) ? $cert : '');
+      if ($der !== '') {
+        $certs[] = $der;
+      }
     }
     $hashAlg = $mapped['signatureAlgorithm']['algorithm'] ?? '';
     if (!is_string($hashAlg) || $hashAlg === '') {
       throw new \RuntimeException('receipt_malformed');
     }
     return [
-      'status' => $status,
       'produced_at' => $stamp,
+      'responder_id' => $responder,
+      'responses' => $responses,
+      'nonce' => $nonce,
       'tbs' => $tbsDer,
       'signature' => $signature,
-      'responder_cert' => $responder,
+      'certs' => $certs,
       'hash_alg' => $hashAlg,
     ];
+  }
+
+  /**
+   * Lowercase hex without leading zeros, so serials compare as numbers.
+   */
+  public static function normalizeSerialHex(string $hex): string {
+    $trimmed = ltrim(strtolower($hex), '0');
+    return $trimmed === '' ? '0' : $trimmed;
+  }
+
+  /**
+   * Unix time for a mapped GeneralizedTime, or NULL when unreadable.
+   */
+  private static function timeValue(mixed $value): ?int {
+    if (!is_string($value) || $value === '') {
+      return NULL;
+    }
+    $stamp = strtotime($value);
+    return $stamp === FALSE ? NULL : $stamp;
+  }
+
+  /**
+   * Builds an OCSP nonce extension (RFC 8954). The value is an OCTET STRING.
+   *
+   * @return array<string, mixed>
+   *   Mapping source for one Extension.
+   */
+  private static function nonceExtension(string $nonce): array {
+    return [
+      'extnId' => self::OID_OCSP_NONCE,
+      'critical' => FALSE,
+      'extnValue' => self::octetString($nonce),
+    ];
+  }
+
+  /**
+   * Reads the nonce from mapped Extensions, or NULL when there is none.
+   *
+   * @param array<int, array<string, mixed>> $extensions
+   *   Mapped Extensions.
+   */
+  private static function nonceFromExtensions(array $extensions): ?string {
+    foreach ($extensions as $ext) {
+      if (($ext['extnId'] ?? '') !== self::OID_OCSP_NONCE) {
+        continue;
+      }
+      $value = $ext['extnValue'] ?? '';
+      if (!is_string($value) || $value === '') {
+        return '';
+      }
+      // RFC 8954 wraps the nonce in an OCTET STRING. Older responders sent
+      // the bytes bare; keep those as-is so the comparison still works.
+      $inner = ASN1::decodeBER($value);
+      if (is_array($inner) && isset($inner[0])) {
+        $octets = ASN1::asn1map($inner[0], ['type' => ASN1::TYPE_OCTET_STRING]);
+        if (is_string($octets) && strlen($value) === ($inner[0]['length'] ?? -1)) {
+          return $octets;
+        }
+      }
+      return $value;
+    }
+    return NULL;
+  }
+
+  /**
+   * DER OCTET STRING for raw bytes.
+   */
+  private static function octetString(string $bytes): string {
+    $der = ASN1::encodeDER($bytes, ['type' => ASN1::TYPE_OCTET_STRING]);
+    if (!is_string($der)) {
+      throw new \RuntimeException('receipt_malformed');
+    }
+    return $der;
   }
 
   /**
@@ -1078,7 +1304,38 @@ final class Rfc3161Asn1 {
                 ],
               ],
             ],
+            'requestExtensions' => [
+              'constant' => 2,
+              'optional' => TRUE,
+              'explicit' => TRUE,
+            ] + self::extensionsMap(),
           ],
+        ],
+      ],
+    ];
+  }
+
+  /**
+   * Extensions mapping (RFC 5280).
+   *
+   * @return array<string, mixed>
+   *   phpseclib mapping.
+   */
+  private static function extensionsMap(): array {
+    return [
+      'type' => ASN1::TYPE_SEQUENCE,
+      'min' => 1,
+      'max' => -1,
+      'children' => [
+        'type' => ASN1::TYPE_SEQUENCE,
+        'children' => [
+          'extnId' => ['type' => ASN1::TYPE_OBJECT_IDENTIFIER],
+          'critical' => [
+            'type' => ASN1::TYPE_BOOLEAN,
+            'optional' => TRUE,
+            'default' => FALSE,
+          ],
+          'extnValue' => ['type' => ASN1::TYPE_OCTET_STRING],
         ],
       ],
     ];
@@ -1196,9 +1453,20 @@ final class Rfc3161Asn1 {
               'certID' => self::certIdMap(),
               'certStatus' => ['type' => ASN1::TYPE_ANY],
               'thisUpdate' => ['type' => ASN1::TYPE_GENERALIZED_TIME],
+              'nextUpdate' => [
+                'type' => ASN1::TYPE_GENERALIZED_TIME,
+                'constant' => 0,
+                'optional' => TRUE,
+                'explicit' => TRUE,
+              ],
             ],
           ],
         ],
+        'responseExtensions' => [
+          'constant' => 1,
+          'optional' => TRUE,
+          'explicit' => TRUE,
+        ] + self::extensionsMap(),
       ],
     ];
   }
@@ -1219,10 +1487,22 @@ final class Rfc3161Asn1 {
           'optional' => TRUE,
           'explicit' => TRUE,
         ],
+        // ResponderID ::= CHOICE { byName [1] Name, byKey [2] KeyHash }.
+        // Both are EXPLICIT; a responder may use either.
         'responderID' => [
-          'type' => ASN1::TYPE_ANY,
-          'constant' => 1,
-          'explicit' => TRUE,
+          'type' => ASN1::TYPE_CHOICE,
+          'children' => [
+            'byName' => [
+              'type' => ASN1::TYPE_ANY,
+              'constant' => 1,
+              'explicit' => TRUE,
+            ],
+            'byKey' => [
+              'type' => ASN1::TYPE_OCTET_STRING,
+              'constant' => 2,
+              'explicit' => TRUE,
+            ],
+          ],
         ],
         'producedAt' => ['type' => ASN1::TYPE_GENERALIZED_TIME],
         'responses' => [
@@ -1265,9 +1545,19 @@ final class Rfc3161Asn1 {
                 'optional' => TRUE,
                 'explicit' => TRUE,
               ],
+              'singleExtensions' => [
+                'constant' => 1,
+                'optional' => TRUE,
+                'explicit' => TRUE,
+              ] + self::extensionsMap(),
             ],
           ],
         ],
+        'responseExtensions' => [
+          'constant' => 1,
+          'optional' => TRUE,
+          'explicit' => TRUE,
+        ] + self::extensionsMap(),
       ],
     ];
   }

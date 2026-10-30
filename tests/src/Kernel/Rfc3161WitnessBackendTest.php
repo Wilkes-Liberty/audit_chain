@@ -34,6 +34,15 @@ final class Rfc3161WitnessBackendTest extends KernelTestBase {
   private Rfc3161FixtureFactory $pki;
 
   /**
+   * Mocked Drupal clock, shared with the fixtures.
+   *
+   * OCSP freshness is checked against this clock, and the fixture
+   * certificates are only valid from the moment they are minted, so the
+   * mock takes the factory clock instead of a fixed date.
+   */
+  private int $now;
+
+  /**
    * {@inheritdoc}
    */
   protected static $modules = ['system', 'user', 'key', 'encrypt', 'audit_chain'];
@@ -44,6 +53,7 @@ final class Rfc3161WitnessBackendTest extends KernelTestBase {
   protected function setUp(): void {
     parent::setUp();
     $this->pki = new Rfc3161FixtureFactory();
+    $this->now = $this->pki->now;
     $this->transport = new ScriptedWitnessTransport();
     $this->container->set('audit_chain.witness_transport', $this->transport);
     $this->container->set('audit_chain.witness_dns', new MapWitnessDns([
@@ -51,8 +61,8 @@ final class Rfc3161WitnessBackendTest extends KernelTestBase {
       'ocsp.example' => ['1.1.1.1'],
     ]));
     $time = $this->createMock(TimeInterface::class);
-    $time->method('getRequestTime')->willReturn(1790000000);
-    $time->method('getCurrentTime')->willReturn(1790000000);
+    $time->method('getRequestTime')->willReturn($this->now);
+    $time->method('getCurrentTime')->willReturn($this->now);
     $this->container->set('datetime.time', $time);
     $this->installEntitySchema('user');
     $this->installAuditChainTables();
@@ -324,6 +334,132 @@ final class Rfc3161WitnessBackendTest extends KernelTestBase {
   }
 
   /**
+   * A responder from another trusted root may not vouch for the TSA.
+   *
+   * Both roots are configured as anchors, so the stray responder chains
+   * to a trust anchor. It still did not get authority from the CA that
+   * issued the TSA certificate, so submit must refuse it.
+   */
+  public function testOcspFromUnauthorizedResponderWritesNothing(): void {
+    $digest = $this->realDigest();
+    $this->configureRfc3161($this->pki->trustBundle() . "\n" . $this->pki->otherRootPem);
+    $manager = $this->container->get('audit_chain.witness_manager');
+    $cases = [
+      'other_root' => ['signer' => 'other_root'],
+      'no_eku' => ['signer' => 'no_eku'],
+    ];
+    foreach ($cases as $label => $options) {
+      $before = $this->receiptRows();
+      $this->transport->script[] = function (): array {
+        $req = $this->transport->calls[array_key_last($this->transport->calls)]['body'];
+        return ['status' => 200, 'body' => $this->pki->grantedResponse($req)];
+      };
+      $this->transport->script[] = [
+        'status' => 200,
+        'body' => $this->pki->ocsp('good', $options),
+      ];
+      try {
+        $manager->submit($digest, 'rfc3161', TRUE);
+        $this->fail("OCSP signed by the $label responder stored a receipt.");
+      }
+      catch (\RuntimeException $exception) {
+        $this->assertSame('untrusted_tsa', $exception->getMessage(), $label);
+      }
+      // Rows are stdClass objects, so compare by value, not identity.
+      $this->assertEquals($before, $this->receiptRows(), $label);
+    }
+  }
+
+  /**
+   * A stale stored OCSP answer fails verify even if live OCSP is good.
+   */
+  public function testStaleStoredOcspFailsVerify(): void {
+    $digest = $this->realDigest();
+    $this->configureRfc3161();
+    $this->transport->script[] = function (): array {
+      $req = $this->transport->calls[array_key_last($this->transport->calls)]['body'];
+      return ['status' => 200, 'body' => $this->pki->grantedResponse($req)];
+    };
+    $this->scriptOcsp('good');
+    $manager = $this->container->get('audit_chain.witness_manager');
+    $receipt = $manager->submit($digest, 'rfc3161');
+
+    // Swap the stored answer for one whose nextUpdate ended an hour
+    // before the token was issued. Signature, responder, CertID, and
+    // producedAt are all fine, so only the freshness check can fail it.
+    $envelope = Rfc3161Asn1::decodeEnvelope(base64_decode($receipt->opaqueToken, TRUE));
+    $stale = $this->pki->ocsp('good', [
+      'this_update' => $this->now - 7200,
+      'next_update' => $this->now - 3600,
+    ]);
+    $this->container->get('database')->update('audit_chain_witness_receipt')
+      ->fields(['opaque_token' => base64_encode(Rfc3161Asn1::encodeEnvelope($envelope['token'], $stale))])
+      ->condition('id', $receipt->id)
+      ->execute();
+    $this->scriptOcsp('good');
+    $verdict = $manager->verify($receipt->id, $digest);
+    $this->assertFalse($verdict->valid);
+    $this->assertSame('certificate_invalid', $verdict->reason);
+  }
+
+  /**
+   * With ocsp_nonce on, the request carries a nonce that must be echoed.
+   */
+  public function testOcspNonceMustEcho(): void {
+    $digest = $this->realDigest();
+    $this->configureRfc3161();
+    $this->config('audit_chain.settings')->set('witness_rfc3161.ocsp_nonce', TRUE)->save();
+    $manager = $this->container->get('audit_chain.witness_manager');
+    $grant = function (): array {
+      $req = $this->transport->calls[array_key_last($this->transport->calls)]['body'];
+      return ['status' => 200, 'body' => $this->pki->grantedResponse($req)];
+    };
+
+    // Echoed nonce: accepted.
+    $this->transport->script[] = $grant;
+    $this->transport->script[] = function (): array {
+      $req = $this->transport->calls[array_key_last($this->transport->calls)]['body'];
+      $nonce = Rfc3161Asn1::decodeOcspRequestNonce($req);
+      $this->assertIsString($nonce);
+      $this->assertSame(32, strlen($nonce));
+      return ['status' => 200, 'body' => $this->pki->ocsp('good', ['nonce' => $nonce])];
+    };
+    $receipt = $manager->submit($digest, 'rfc3161', TRUE);
+    $this->assertSame('confirmed', $receipt->status);
+
+    // Missing or different nonce: refused, nothing stored.
+    foreach (['missing' => NULL, 'different' => str_repeat("\x01", 32)] as $label => $nonce) {
+      $before = $this->receiptRows();
+      $this->transport->script[] = $grant;
+      $this->transport->script[] = [
+        'status' => 200,
+        'body' => $this->pki->ocsp('good', $nonce === NULL ? [] : ['nonce' => $nonce]),
+      ];
+      try {
+        $manager->submit($digest, 'rfc3161', TRUE);
+        $this->fail("A $label OCSP nonce stored a receipt.");
+      }
+      catch (\RuntimeException $exception) {
+        $this->assertSame('certificate_invalid', $exception->getMessage(), $label);
+      }
+      // Rows are stdClass objects, so compare by value, not identity.
+      $this->assertEquals($before, $this->receiptRows(), $label);
+    }
+  }
+
+  /**
+   * Nonces stay off unless configured, so the request has none.
+   */
+  public function testOcspNonceOffByDefault(): void {
+    $digest = $this->realDigest();
+    $this->configureRfc3161();
+    $this->scriptGranted();
+    $this->container->get('audit_chain.witness_manager')->submit($digest, 'rfc3161', TRUE);
+    $this->assertFalse($this->config('audit_chain.settings')->get('witness_rfc3161.ocsp_nonce'));
+    $this->assertNull(Rfc3161Asn1::decodeOcspRequestNonce($this->transport->calls[1]['body']));
+  }
+
+  /**
    * Live OCSP revoked on an unexpired signer is certificate_revoked.
    */
   public function testOcspRevokedAtVerify(): void {
@@ -420,6 +556,16 @@ final class Rfc3161WitnessBackendTest extends KernelTestBase {
     $this->assertSame('', $reloaded['tsa_url']);
     $this->assertSame('', $reloaded['policy_oid']);
     $this->assertSame('', $reloaded['trust_anchors']);
+    $this->assertFalse($reloaded['ocsp_nonce']);
+
+    // Update 10009 adds ocsp_nonce (off) to sites that ran 10007 before
+    // the key existed, and never flips an operator's TRUE back.
+    $this->config('audit_chain.settings')->clear('witness_rfc3161.ocsp_nonce')->save();
+    audit_chain_update_10009();
+    $this->assertFalse($this->config('audit_chain.settings')->get('witness_rfc3161.ocsp_nonce'));
+    $this->config('audit_chain.settings')->set('witness_rfc3161.ocsp_nonce', TRUE)->save();
+    audit_chain_update_10009();
+    $this->assertTrue($this->config('audit_chain.settings')->get('witness_rfc3161.ocsp_nonce'));
     $this->assertSame([], $this->container->get('database')->select('audit_chain_log', 'l')
       ->fields('l', ['operation'])
       ->condition('operation', 'before_rfc3161', '<>')
@@ -437,6 +583,7 @@ final class Rfc3161WitnessBackendTest extends KernelTestBase {
       'trust_anchors' => $anchors ?? $this->pki->trustBundle(),
       'ocsp_override' => '',
       'credential_key' => '',
+      'ocsp_nonce' => FALSE,
     ])->save();
   }
 

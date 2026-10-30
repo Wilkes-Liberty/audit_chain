@@ -6,6 +6,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.13.2] - 2026-10-29
+
+### Changed
+- Use independent changelog fragments for pull requests and the shared validator for lossless release preparation.
+
+  Keep the FIPS test runner and compiled-library cache on a compatible Ubuntu image.
+
+### Fixed
+- Delete leftover `audit_chain.witness_demo` state on uninstall so a reinstall cannot revive a stale demo digest. Persist only the current digest; receipt ids stay in the receipt table.
+
+### Tests
+- Run Composer under the system libraries in the OpenSSL 3 FIPS job. Only the provider guard and PHPUnit load the isolated 3.0.16 prefix on `LD_LIBRARY_PATH`.
+
 ## [1.13.1] - 2026-10-23
 
 ### Fixed

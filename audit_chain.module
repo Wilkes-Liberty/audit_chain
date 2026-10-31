@@ -41,7 +41,6 @@ function audit_chain_theme(): array {
         'tiles' => [],
         'charts' => [],
         'quick_actions' => [],
-        'window' => '24h',
         'windows' => [],
         'gaps' => [],
       ],

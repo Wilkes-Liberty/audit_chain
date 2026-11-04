@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\audit_chain;
 
 use Drupal\audit_chain\Witness\DestinationPolicy;
+use Drupal\audit_chain\Witness\OcspResponseValidator;
 use Drupal\audit_chain\Witness\Rfc3161Asn1;
 use Drupal\audit_chain\Witness\Rfc3161Crypto;
 use Drupal\audit_chain\Witness\WitnessDnsResolverInterface;
@@ -24,6 +25,13 @@ use Drupal\key\KeyRepositoryInterface;
  * timeStamping EKU, algorithms meet the floor, and OCSP returns good.
  * Upgrade makes no network call. Verify re-checks the stored evidence
  * and, while the signer is unexpired, re-checks OCSP live.
+ *
+ * OCSP answers are judged by OcspResponseValidator: the response must be
+ * about this signer, signed by its issuing CA or a delegated responder
+ * that CA authorized, current, and (when ocsp_nonce is on) bound to our
+ * request.
+ *
+ * @phpstan-import-type OcspBasicResponse from \Drupal\audit_chain\Witness\Rfc3161Asn1
  */
 final class Rfc3161WitnessBackend implements IdentifiedWitnessBackendInterface {
 
@@ -83,11 +91,20 @@ final class Rfc3161WitnessBackend implements IdentifiedWitnessBackendInterface {
       throw new \RuntimeException('timestamp_rejected');
     }
     $checked = $this->inspectToken($response['token'], $digest, $request['nonce'], $config);
-    $ocsp = $this->liveOcsp($checked['signer_pem'], $config, $checked['validity'], TRUE);
-    if ($ocsp['status'] !== 'good') {
-      throw new \RuntimeException($ocsp['status'] === 'revoked' ? 'certificate_revoked' : 'certificate_invalid');
-    }
-    $token = base64_encode(Rfc3161Asn1::encodeEnvelope($response['token'], $ocsp['der']));
+    // liveOcsp() throws unless the signer is confirmed good, so a receipt
+    // is never written on a revoked, unknown, or unauthenticated answer.
+    $ocsp = $this->liveOcsp($checked['signer_pem'], $config, TRUE);
+    // The live check uses the local clock. Verify judges these same bytes
+    // against the token genTime. A TSA clock behind us and an OCSP clock
+    // ahead of us can pass each check alone and still miss when they are
+    // added, which would store a confirmed receipt that cannot verify.
+    $this->assertStoredOcsp(
+      Rfc3161Asn1::decodeOcspResponse($ocsp),
+      $checked['signer_pem'],
+      $checked['gen_time'],
+      $config,
+    );
+    $token = base64_encode(Rfc3161Asn1::encodeEnvelope($response['token'], $ocsp));
     return new WitnessReceipt(
       $this->uuid->generate(),
       $this->id(),
@@ -121,16 +138,11 @@ final class Rfc3161WitnessBackend implements IdentifiedWitnessBackendInterface {
       $envelope = Rfc3161Asn1::decodeEnvelope($bytes);
       $checked = $this->inspectToken($envelope['token'], $digest, NULL, $config);
       $stored = Rfc3161Asn1::decodeOcspResponse($envelope['ocsp']);
-      $this->assertStoredOcsp($stored, $checked['signer_pem'], $checked['validity'], $config);
-      $validity = $checked['validity'];
-      if ($this->time->getCurrentTime() <= $validity['to']) {
-        $live = $this->liveOcsp($checked['signer_pem'], $config, $validity, FALSE);
-        if ($live['status'] === 'revoked') {
-          return new WitnessVerdict(FALSE, 'certificate_revoked');
-        }
-        if ($live['status'] !== 'good') {
-          return new WitnessVerdict(FALSE, 'certificate_invalid');
-        }
+      $this->assertStoredOcsp($stored, $checked['signer_pem'], $checked['gen_time'], $config);
+      if ($this->time->getCurrentTime() <= $checked['validity']['to']) {
+        // Throws certificate_revoked / certificate_invalid / etc., which
+        // the catch below turns into the matching verdict.
+        $this->liveOcsp($checked['signer_pem'], $config, FALSE);
       }
       return new WitnessVerdict(TRUE, 'confirmed', [
         'policy' => $checked['policy'],
@@ -211,25 +223,24 @@ final class Rfc3161WitnessBackend implements IdentifiedWitnessBackendInterface {
   }
 
   /**
-   * Asks the OCSP responder about the TSA signer.
+   * Asks the OCSP responder about the TSA signer and checks the answer.
    *
-   * Submit treats revoked, unknown, or an unreachable responder as a
-   * thrown failure so no receipt is stored. Verify maps unreachable to
-   * revocation_unreachable and leaves other outcomes to the caller.
+   * Anything short of an authenticated, current "good" for this signer
+   * throws. On submit every failure propagates so no receipt is stored.
+   * On verify, failures that are not documented verify reasons (transport
+   * trouble, an unparsable body) become revocation_unreachable.
    *
    * @param string $signerPem
    *   TSA signer certificate PEM.
    * @param array<string, mixed> $config
    *   Loaded RFC 3161 settings.
-   * @param array{from: int, to: int} $validity
-   *   Signer certificate window.
    * @param bool $submit
    *   TRUE when a failed check must throw before a receipt is written.
    *
-   * @return array{status: string, der: string}
-   *   Cert status and the raw OCSP response.
+   * @return string
+   *   The raw OCSP response, for the submit envelope.
    */
-  private function liveOcsp(string $signerPem, array $config, array $validity, bool $submit): array {
+  private function liveOcsp(string $signerPem, array $config, bool $submit): string {
     $url = $config['ocsp_override'] !== '' ? $config['ocsp_override'] : Rfc3161Crypto::ocspUri($signerPem);
     if ($url === '') {
       throw new \RuntimeException('revocation_unreachable');
@@ -241,9 +252,14 @@ final class Rfc3161WitnessBackend implements IdentifiedWitnessBackendInterface {
     catch (\RuntimeException $exception) {
       throw new \RuntimeException('revocation_unreachable', 0, $exception);
     }
+    $signerDer = Rfc3161Crypto::pemToDer($signerPem);
     $issuerDer = Rfc3161Crypto::pemToDer($this->issuerPem($signerPem, $config['trust_anchors']));
-    $hashes = Rfc3161Asn1::ocspIssuerHashes(Rfc3161Crypto::pemToDer($signerPem), $issuerDer);
-    $body = Rfc3161Asn1::encodeOcspRequest($hashes['name_hash'], $hashes['key_hash'], $hashes['serial_hex']);
+    $hashes = Rfc3161Asn1::ocspIssuerHashes($signerDer, $issuerDer);
+    // A nonce stops a captured "good" answer from being replayed later.
+    // It is opt-in because many CDN-fronted responders serve pre-signed
+    // answers and ignore request nonces (RFC 8954 allows that).
+    $nonce = $config['ocsp_nonce'] ? random_bytes(32) : NULL;
+    $body = Rfc3161Asn1::encodeOcspRequest($hashes['name_hash'], $hashes['key_hash'], $hashes['serial_hex'], $nonce);
     try {
       $result = $this->transport->request('POST', $url, $body, [
         'Accept' => 'application/ocsp-response',
@@ -258,7 +274,7 @@ final class Rfc3161WitnessBackend implements IdentifiedWitnessBackendInterface {
     }
     try {
       $parsed = Rfc3161Asn1::decodeOcspResponse($result['body']);
-      $this->assertOcspCrypto($parsed, $signerPem, $validity, $config);
+      OcspResponseValidator::assertGood($parsed, $signerDer, $issuerDer, $this->time->getCurrentTime(), $nonce);
     }
     catch (\RuntimeException $exception) {
       if ($submit) {
@@ -269,60 +285,38 @@ final class Rfc3161WitnessBackend implements IdentifiedWitnessBackendInterface {
       }
       throw new \RuntimeException('revocation_unreachable', 0, $exception);
     }
-    return ['status' => $parsed['status'], 'der' => $result['body']];
+    return $result['body'];
   }
 
   /**
-   * Stored OCSP must be good, in-window, and have a valid signature.
+   * Checks an OCSP answer against the token genTime.
    *
-   * @param array{status: string, produced_at: int, tbs: string, signature: string, responder_cert: string, hash_alg: string} $stored
-   *   Envelope OCSP.
+   * Submit calls this before storing a receipt, and verify calls it on
+   * the stored bytes. Freshness is judged against genTime: the answer has
+   * to show the signer was good when the timestamp was issued. The nonce
+   * used at submit is not kept, so it is not re-checked here; the live
+   * check covers replay while the signer is still valid.
+   *
+   * @param OcspBasicResponse $stored
+   *   Envelope OCSP, as returned by Rfc3161Asn1::decodeOcspResponse().
    * @param string $signerPem
    *   TSA signer certificate PEM.
-   * @param array{from: int, to: int} $validity
-   *   Signer certificate window.
+   * @param int $genTime
+   *   TSTInfo genTime of the stored token.
    * @param array<string, mixed> $config
    *   Loaded RFC 3161 settings.
    */
-  private function assertStoredOcsp(array $stored, string $signerPem, array $validity, array $config): void {
-    if ($stored['status'] !== 'good') {
-      throw new \RuntimeException($stored['status'] === 'revoked' ? 'certificate_revoked' : 'certificate_invalid');
-    }
-    $this->assertOcspCrypto($stored, $signerPem, $validity, $config);
+  private function assertStoredOcsp(array $stored, string $signerPem, int $genTime, array $config): void {
+    $issuerDer = Rfc3161Crypto::pemToDer($this->issuerPem($signerPem, $config['trust_anchors']));
+    OcspResponseValidator::assertGood($stored, Rfc3161Crypto::pemToDer($signerPem), $issuerDer, $genTime, NULL);
   }
 
   /**
-   * Checks OCSP signature, responder trust, producedAt, and algorithms.
+   * Finds the trust anchor that issued the TSA signer.
    *
-   * @param array{status: string, produced_at: int, tbs: string, signature: string, responder_cert: string, hash_alg: string} $ocsp
-   *   Parsed OCSP response.
-   * @param string $signerPem
-   *   TSA signer certificate PEM.
-   * @param array{from: int, to: int} $validity
-   *   Signer certificate window.
-   * @param array<string, mixed> $config
-   *   Loaded RFC 3161 settings.
-   */
-  private function assertOcspCrypto(array $ocsp, string $signerPem, array $validity, array $config): void {
-    if ($ocsp['produced_at'] < $validity['from'] || $ocsp['produced_at'] > $validity['to']) {
-      throw new \RuntimeException('certificate_invalid');
-    }
-    if (Rfc3161Asn1::isWeakOid($ocsp['hash_alg'])) {
-      throw new \RuntimeException('weak_algorithm');
-    }
-    $responderPem = $ocsp['responder_cert'] !== ''
-      ? Rfc3161Crypto::derToPem($ocsp['responder_cert'])
-      : $this->issuerPem($signerPem, $config['trust_anchors']);
-    if (!Rfc3161Crypto::verifyOcspSignature($ocsp['tbs'], $ocsp['signature'], $responderPem, $ocsp['hash_alg'])) {
-      throw new \RuntimeException('signature_invalid');
-    }
-    if (!Rfc3161Crypto::chainsToAnchor($responderPem, $config['trust_anchors']) && !Rfc3161Crypto::chainsToAnchor($responderPem, [$this->issuerPem($signerPem, $config['trust_anchors'])])) {
-      throw new \RuntimeException('untrusted_tsa');
-    }
-  }
-
-  /**
-   * Finds the issuer PEM among the trust anchors.
+   * There is no fallback: the OCSP CertID and responder checks are only
+   * meaningful against the real issuer, so a signer that no configured
+   * anchor signed is untrusted_tsa rather than checked against a guess.
    *
    * @param string $signerPem
    *   TSA signer certificate PEM.
@@ -335,9 +329,6 @@ final class Rfc3161WitnessBackend implements IdentifiedWitnessBackendInterface {
       if ($key !== FALSE && openssl_x509_verify($signerPem, $key) === 1) {
         return $anchor;
       }
-    }
-    if ($anchors !== []) {
-      return $anchors[0];
     }
     throw new \RuntimeException('untrusted_tsa');
   }
@@ -393,8 +384,9 @@ final class Rfc3161WitnessBackend implements IdentifiedWitnessBackendInterface {
    * Empty install defaults cannot be selected. A private or non-HTTPS
    * TSA URL is rejected by DestinationPolicy at request time.
    *
-   * @return array{tsa_url: string, policy_oid: string, trust_anchors: list<string>, ocsp_override: string, credential_key: string}
-   *   TSA URL, policy, anchors, optional OCSP override, optional key id.
+   * @return array{tsa_url: string, policy_oid: string, trust_anchors: list<string>, ocsp_override: string, credential_key: string, ocsp_nonce: bool}
+   *   TSA URL, policy, anchors, optional OCSP override, optional key id,
+   *   and whether OCSP requests carry a nonce.
    */
   private function configuration(): array {
     $value = $this->configFactory->get('audit_chain.settings')->get('witness_rfc3161');
@@ -422,6 +414,8 @@ final class Rfc3161WitnessBackend implements IdentifiedWitnessBackendInterface {
       'trust_anchors' => $anchors,
       'ocsp_override' => $ocsp,
       'credential_key' => $credential,
+      // Only a real TRUE turns nonces on; a missing key keeps them off.
+      'ocsp_nonce' => ($value['ocsp_nonce'] ?? FALSE) === TRUE,
     ];
   }
 

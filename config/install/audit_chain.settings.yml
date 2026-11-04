@@ -33,3 +33,4 @@ witness_rfc3161:
   trust_anchors: ''
   ocsp_override: ''
   credential_key: ''
+  ocsp_nonce: false

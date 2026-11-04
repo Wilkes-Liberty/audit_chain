@@ -262,6 +262,7 @@ function audit_chain_update_10007(): string {
       'trust_anchors' => '',
       'ocsp_override' => '',
       'credential_key' => '',
+      'ocsp_nonce' => FALSE,
     ]);
     $config->save();
   }
@@ -282,6 +283,23 @@ function audit_chain_update_10008(): string {
     $config->save();
   }
   return 'Set stream_exclude_dblog to FALSE when missing. Successful appends keep using logger.channel.audit_chain. Rolling this update back is a no-op.';
+}
+
+/**
+ * Adds the RFC 3161 ocsp_nonce setting, off, when it is missing.
+ *
+ * Off keeps today's behavior for responders that ignore nonces. An
+ * existing value is never overwritten, so rerunning is a no-op, and a code
+ * rollback simply ignores the extra key.
+ */
+function audit_chain_update_10009(): string {
+  $config = \Drupal::configFactory()->getEditable('audit_chain.settings');
+  $settings = $config->get('witness_rfc3161');
+  if (is_array($settings) && !array_key_exists('ocsp_nonce', $settings)) {
+    $config->set('witness_rfc3161.ocsp_nonce', FALSE);
+    $config->save();
+  }
+  return 'Added witness_rfc3161.ocsp_nonce (off) when missing. No TSA or OCSP responder was contacted and no audit row changed.';
 }
 
 /**

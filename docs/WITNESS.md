@@ -65,7 +65,40 @@ returns good. The stored token is a versioned DER envelope
 (`audit_chain.rfc3161.v1`) holding the TimeStampToken and the OCSP
 response captured at submit. Upgrade makes no network call. Verify
 re-checks that evidence and, while the signer certificate is unexpired,
-re-checks OCSP live. Install defaults are empty, so the backend cannot
+re-checks OCSP live.
+
+An OCSP answer counts only when all of these hold; otherwise submit
+writes nothing and verify returns the reason in brackets:
+
+- A SingleResponse's CertID names the TSA signer: same serial, same
+  issuer Name hash, same issuer key hash (`certificate_invalid`). Other
+  responses in the same reply are ignored.
+- It is signed by the CA that issued the TSA certificate, or by a
+  delegated responder that this same CA issued directly with
+  `id-kp-OCSPSigning`, embedded in the reply, and named by the
+  responderID (byName or byKey). A byName identifier can match more than
+  one embedded certificate during a key rollover; each authorized
+  certificate is tried against the signature. Chaining to some other
+  configured anchor is not enough (`untrusted_tsa`, or
+  `signature_invalid` when the signature does not verify).
+- It is current: `thisUpdate` and `producedAt` are not more than five
+  minutes in the future, `thisUpdate` is not more than five minutes
+  after `producedAt`, and `nextUpdate` has not passed (five minutes of
+  skew). With no `nextUpdate`, `thisUpdate` must be under an hour old
+  (`certificate_invalid`). The live check uses the current time. The
+  stored answer is judged against the token genTime, and submit applies
+  that check too, so a confirmed receipt is not stored when verify would
+  reject it.
+- Critical extensions on the response or on a SingleResponse are
+  rejected unless they are the OCSP nonce (`certificate_invalid`).
+  Unknown extensions that are not critical are ignored.
+- With `witness_rfc3161.ocsp_nonce` set to `true`, the request carries a
+  random RFC 8954 nonce and the answer must echo it (`certificate_invalid`).
+  It is off by default because many CDN-fronted responders ignore nonces.
+- The status is good. Revoked is `certificate_revoked`; unknown is
+  `certificate_invalid`.
+
+Install defaults are empty, so the backend cannot
 be selected until an operator sets a HTTPS TSA URL, policy OID, and
 trust-anchor PEM bundle. A vendor credential, if required, is a Key
 entity id and is never exported as the secret. Free public TSAs are not

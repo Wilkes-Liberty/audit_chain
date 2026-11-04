@@ -19,9 +19,13 @@ namespace Drupal\audit_chain\Witness;
  *   CA signed directly that carries id-kp-OCSPSigning (RFC 6960 4.2.2.2).
  *   Any other certificate, even one that chains to a trust anchor, is
  *   untrusted_tsa.
- * - Freshness: thisUpdate and producedAt may not be in the future and
- *   nextUpdate may not have passed, with a small clock skew allowance.
- *   Without nextUpdate the answer must be recent (certificate_invalid).
+ * - Freshness: thisUpdate and producedAt may not be in the future,
+ *   thisUpdate may not be later than producedAt beyond the skew
+ *   allowance, and nextUpdate may not have passed. Without nextUpdate
+ *   the answer must be recent (certificate_invalid).
+ * - Responder key rollover: a byName responderID can match more than one
+ *   embedded certificate. Each authorized candidate is tried against the
+ *   signature.
  * - Nonce: when the request carried one, the response must echo it, so a
  *   recorded "good" answer cannot be replayed (certificate_invalid).
  * - Status: only good passes. Revoked is certificate_revoked; unknown is
@@ -87,10 +91,7 @@ final class OcspResponseValidator {
 
     // Authenticity first, so nothing below acts on an unsigned claim.
     $single = self::matchingResponse($ocsp['responses'], $signerDer, $issuerDer);
-    $responderPem = self::authorizedResponder($ocsp['responder_id'], $ocsp['certs'], $ocsp['produced_at'], $issuerDer);
-    if (!Rfc3161Crypto::verifyOcspSignature($ocsp['tbs'], $ocsp['signature'], $responderPem, $ocsp['hash_alg'])) {
-      throw new \RuntimeException('signature_invalid');
-    }
+    self::assertResponderSignature($ocsp, $issuerDer);
 
     // The signer must have been inside its validity window when the
     // responder vouched for it.
@@ -148,7 +149,30 @@ final class OcspResponseValidator {
   }
 
   /**
-   * Returns the PEM of the certificate allowed to sign this response.
+   * Checks that an authorized responder signed the response.
+   *
+   * A byName responderID names a subject, not a key. During a rollover
+   * the reply can embed two still-valid certificates with that subject.
+   * The signature is tried against each authorized one. Committing to the
+   * first certificate rejects a response the next certificate verifies.
+   *
+   * @param OcspBasicResponse $ocsp
+   *   Parsed basic response.
+   * @param string $issuerDer
+   *   Issuing CA certificate.
+   */
+  private static function assertResponderSignature(array $ocsp, string $issuerDer): void {
+    $candidates = self::responderCandidates($ocsp['responder_id'], $ocsp['certs'], $ocsp['produced_at'], $issuerDer);
+    foreach ($candidates as $pem) {
+      if (Rfc3161Crypto::verifyOcspSignature($ocsp['tbs'], $ocsp['signature'], $pem, $ocsp['hash_alg'])) {
+        return;
+      }
+    }
+    throw new \RuntimeException('signature_invalid');
+  }
+
+  /**
+   * PEMs of certificates allowed to sign this response.
    *
    * @param array{type: string, value: string} $responderId
    *   Parsed responderID.
@@ -158,14 +182,17 @@ final class OcspResponseValidator {
    *   Response producedAt.
    * @param string $issuerDer
    *   Issuing CA certificate.
+   *
+   * @return list<string>
+   *   Authorized responder PEMs, issuer first when it signed directly.
    */
-  private static function authorizedResponder(array $responderId, array $certs, int $producedAt, string $issuerDer): string {
+  private static function responderCandidates(array $responderId, array $certs, int $producedAt, string $issuerDer): array {
     $issuerSubject = Rfc3161Asn1::subjectNameDer($issuerDer);
     $issuerPem = Rfc3161Crypto::derToPem($issuerDer);
 
     // Case 1: the CA that issued the TSA certificate signed the answer.
     if (self::responderIdMatches($responderId, $issuerDer)) {
-      return $issuerPem;
+      return [$issuerPem];
     }
 
     // Case 2: a delegated responder. It has to be shipped in the response,
@@ -175,6 +202,7 @@ final class OcspResponseValidator {
     if ($issuerKey === FALSE) {
       throw new \RuntimeException('untrusted_tsa');
     }
+    $found = [];
     foreach ($certs as $certDer) {
       if (!self::responderIdMatches($responderId, $certDer)) {
         continue;
@@ -193,9 +221,12 @@ final class OcspResponseValidator {
       if ($producedAt + self::CLOCK_SKEW < $window['from'] || $producedAt - self::CLOCK_SKEW > $window['to']) {
         continue;
       }
-      return $certPem;
+      $found[] = $certPem;
     }
-    throw new \RuntimeException('untrusted_tsa');
+    if ($found === []) {
+      throw new \RuntimeException('untrusted_tsa');
+    }
+    return $found;
   }
 
   /**
@@ -223,9 +254,18 @@ final class OcspResponseValidator {
 
   /**
    * Rejects answers from the future, past nextUpdate, or too old.
+   *
+   * The thisUpdate field is when the status was known. The producedAt
+   * field is when the responder signed. A thisUpdate later than
+   * producedAt, beyond skew, claims a status the signature does not
+   * cover: a key that has since expired can backdate producedAt into its
+   * validity window and still advertise a current status.
    */
   private static function assertFresh(int $producedAt, int $thisUpdate, ?int $nextUpdate, int $at): void {
     if ($thisUpdate > $at + self::CLOCK_SKEW || $producedAt > $at + self::CLOCK_SKEW) {
+      throw new \RuntimeException('certificate_invalid');
+    }
+    if ($thisUpdate > $producedAt + self::CLOCK_SKEW) {
       throw new \RuntimeException('certificate_invalid');
     }
     if ($nextUpdate !== NULL) {

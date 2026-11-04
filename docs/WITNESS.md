@@ -76,14 +76,22 @@ writes nothing and verify returns the reason in brackets:
 - It is signed by the CA that issued the TSA certificate, or by a
   delegated responder that this same CA issued directly with
   `id-kp-OCSPSigning`, embedded in the reply, and named by the
-  responderID (byName or byKey). Chaining to some other configured anchor
-  is not enough (`untrusted_tsa`, or `signature_invalid` when the
-  signature does not verify).
+  responderID (byName or byKey). A byName identifier can match more than
+  one embedded certificate during a key rollover; each authorized
+  certificate is tried against the signature. Chaining to some other
+  configured anchor is not enough (`untrusted_tsa`, or
+  `signature_invalid` when the signature does not verify).
 - It is current: `thisUpdate` and `producedAt` are not more than five
-  minutes in the future and `nextUpdate` has not passed (five minutes of
+  minutes in the future, `thisUpdate` is not more than five minutes
+  after `producedAt`, and `nextUpdate` has not passed (five minutes of
   skew). With no `nextUpdate`, `thisUpdate` must be under an hour old
-  (`certificate_invalid`). The live check uses the current time; the
-  stored answer is judged against the token genTime.
+  (`certificate_invalid`). The live check uses the current time. The
+  stored answer is judged against the token genTime, and submit applies
+  that check too, so a confirmed receipt is not stored when verify would
+  reject it.
+- Critical extensions on the response or on a SingleResponse are
+  rejected unless they are the OCSP nonce (`certificate_invalid`).
+  Unknown extensions that are not critical are ignored.
 - With `witness_rfc3161.ocsp_nonce` set to `true`, the request carries a
   random RFC 8954 nonce and the answer must echo it (`certificate_invalid`).
   It is off by default because many CDN-fronted responders ignore nonces.

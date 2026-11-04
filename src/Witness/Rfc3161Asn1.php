@@ -60,6 +60,17 @@ final class Rfc3161Asn1 {
   public const OID_OCSP_NONCE = '1.3.6.1.5.5.7.48.1.2';
 
   /**
+   * OCSP extensions whose semantics this decoder implements.
+   *
+   * A critical extension not in this list changes the meaning of the
+   * response, so it is rejected instead of discarded. Non-critical
+   * unknown extensions are ignored.
+   */
+  private const KNOWN_OCSP_EXTENSIONS = [
+    self::OID_OCSP_NONCE,
+  ];
+
+  /**
    * Id-kp-OCSPSigning, required on a delegated OCSP responder certificate.
    */
   public const OID_OCSP_SIGNING = '1.3.6.1.5.5.7.3.9';
@@ -356,10 +367,11 @@ final class Rfc3161Asn1 {
    *   Good, revoked, or unknown.
    * @param string $producedAt
    *   GeneralizedTime source string.
-   * @param array{this_update?: string, next_update?: string, responder_key_hash?: string, nonce?: string, extra_responses?: list<array{name_hash: string, key_hash: string, serial_hex: string, status: string}>} $options
+   * @param array{this_update?: string, next_update?: string, responder_key_hash?: string, nonce?: string, nonce_critical?: bool, extra_responses?: list<array{name_hash: string, key_hash: string, serial_hex: string, status: string}>, extra_response_extensions?: list<array{oid: string, critical: bool}>, extra_single_extensions?: list<array{oid: string, critical: bool}>} $options
    *   Fixture-only knobs: thisUpdate (defaults to producedAt), nextUpdate
    *   (omitted by default), a byKey responderID instead of byName, a nonce
-   *   extension, and additional SingleResponses placed before this one.
+   *   extension, additional SingleResponses placed before this one, and
+   *   extra extensions on the response or each SingleResponse.
    */
   public static function encodeOcspTbs(
     string $responderNameDer,
@@ -383,8 +395,15 @@ final class Rfc3161Asn1 {
       'producedAt' => $producedAt,
       'responses' => $responses,
     ];
+    $extensions = [];
     if (isset($options['nonce'])) {
-      $source['responseExtensions'] = [self::nonceExtension($options['nonce'])];
+      $extensions[] = self::nonceExtension($options['nonce'], (bool) ($options['nonce_critical'] ?? FALSE));
+    }
+    foreach ($options['extra_response_extensions'] ?? [] as $extension) {
+      $extensions[] = self::rawExtension($extension['oid'], $extension['critical']);
+    }
+    if ($extensions !== []) {
+      $source['responseExtensions'] = $extensions;
     }
     $der = ASN1::encodeDER($source, self::ocspTbsEncodeMap());
     if (!is_string($der) || $der === '') {
@@ -429,16 +448,27 @@ final class Rfc3161Asn1 {
     if (isset($options['next_update'])) {
       $single['nextUpdate'] = $options['next_update'];
     }
+    $extensions = [];
+    foreach ($options['extra_single_extensions'] ?? [] as $extension) {
+      if (is_array($extension) && isset($extension['oid'], $extension['critical'])) {
+        $extensions[] = self::rawExtension((string) $extension['oid'], (bool) $extension['critical']);
+      }
+    }
+    if ($extensions !== []) {
+      $single['singleExtensions'] = $extensions;
+    }
     return $single;
   }
 
   /**
    * Reads an OCSP response and the exact TBS bytes that were signed.
    *
-   * Nothing here decides whether the response is acceptable; that is
-   * OcspResponseValidator's job. Every SingleResponse is returned so the
-   * validator can pick the one whose CertID names the TSA signer, instead
-   * of trusting whichever response happens to come first.
+   * Acceptability of the signer, the CertID, and the times is
+   * OcspResponseValidator's job. Critical extensions are the exception:
+   * they are refused here, before the decoder discards extension bytes it
+   * does not return. Every SingleResponse is returned so the validator
+   * can pick the one whose CertID names the TSA signer, instead of
+   * trusting whichever response happens to come first.
    *
    * @return OcspBasicResponse
    *   Parsed basic response.
@@ -968,6 +998,7 @@ final class Rfc3161Asn1 {
       elseif (is_array($choice) && array_key_exists('revoked', $choice)) {
         $status = 'revoked';
       }
+      self::assertKnownCriticalExtensions(self::extensionList($single['singleExtensions'] ?? NULL));
       $responses[] = [
         'hash_alg' => (string) ($certId['hashAlgorithm']['algorithm'] ?? ''),
         'name_hash' => (string) ($certId['issuerNameHash'] ?? ''),
@@ -982,7 +1013,8 @@ final class Rfc3161Asn1 {
       throw new \RuntimeException('receipt_malformed');
     }
 
-    $extensions = $tbsMapped['responseExtensions'] ?? NULL;
+    $extensions = self::extensionList($tbsMapped['responseExtensions'] ?? NULL);
+    self::assertKnownCriticalExtensions($extensions);
     $nonce = is_array($extensions) ? self::nonceFromExtensions($extensions) : NULL;
 
     $signature = $mapped['signature'] ?? '';
@@ -1040,12 +1072,66 @@ final class Rfc3161Asn1 {
    * @return array<string, mixed>
    *   Mapping source for one Extension.
    */
-  private static function nonceExtension(string $nonce): array {
+  private static function nonceExtension(string $nonce, bool $critical = FALSE): array {
     return [
       'extnId' => self::OID_OCSP_NONCE,
-      'critical' => FALSE,
+      'critical' => $critical,
       'extnValue' => self::octetString($nonce),
     ];
+  }
+
+  /**
+   * One fixture extension whose value this decoder does not interpret.
+   *
+   * @return array<string, mixed>
+   *   Mapping source for one Extension.
+   */
+  private static function rawExtension(string $oid, bool $critical): array {
+    return [
+      'extnId' => $oid,
+      'critical' => $critical,
+      'extnValue' => self::octetString("\x00"),
+    ];
+  }
+
+  /**
+   * Mapped Extensions, or NULL when the field was absent.
+   *
+   * @param mixed $extensions
+   *   Value taken from a phpseclib map.
+   *
+   * @return array<int, array<string, mixed>>|null
+   *   Extension list.
+   */
+  private static function extensionList(mixed $extensions): ?array {
+    if ($extensions === NULL) {
+      return NULL;
+    }
+    if (!is_array($extensions)) {
+      throw new \RuntimeException('receipt_malformed');
+    }
+    return $extensions;
+  }
+
+  /**
+   * Rejects a critical OCSP extension this decoder does not implement.
+   *
+   * @param array<int, array<string, mixed>>|null $extensions
+   *   Mapped responseExtensions or singleExtensions.
+   */
+  private static function assertKnownCriticalExtensions(?array $extensions): void {
+    if ($extensions === NULL) {
+      return;
+    }
+    foreach ($extensions as $extension) {
+      if (!is_array($extension) || empty($extension['critical'])) {
+        continue;
+      }
+      $oid = (string) ($extension['extnId'] ?? '');
+      if (!in_array($oid, self::KNOWN_OCSP_EXTENSIONS, TRUE)) {
+        throw new \RuntimeException('certificate_invalid');
+      }
+    }
   }
 
   /**
@@ -1459,6 +1545,11 @@ final class Rfc3161Asn1 {
                 'optional' => TRUE,
                 'explicit' => TRUE,
               ],
+              'singleExtensions' => [
+                'constant' => 1,
+                'optional' => TRUE,
+                'explicit' => TRUE,
+              ] + self::extensionsMap(),
             ],
           ],
         ],

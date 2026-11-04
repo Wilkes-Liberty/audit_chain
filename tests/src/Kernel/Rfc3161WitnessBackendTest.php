@@ -403,6 +403,42 @@ final class Rfc3161WitnessBackendTest extends KernelTestBase {
   }
 
   /**
+   * Submit refuses an OCSP answer that verify would reject at genTime.
+   *
+   * The TSA clock is 180 seconds behind the local clock and the OCSP
+   * clock is 180 seconds ahead. Each side is inside the five-minute skew
+   * of the clock it is compared to, and the two together are not: verify
+   * would see producedAt 360 seconds after genTime. Nothing is stored.
+   */
+  public function testSubmitRejectsOcspThatCannotVerifyAtGenTime(): void {
+    $digest = $this->realDigest();
+    $this->configureRfc3161();
+    $genTime = $this->now - 180;
+    $producedAt = $this->now + 180;
+    $before = $this->receiptRows();
+    $this->transport->script[] = function () use ($genTime): array {
+      $req = $this->transport->calls[array_key_last($this->transport->calls)]['body'];
+      return ['status' => 200, 'body' => $this->pki->grantedResponse($req, NULL, NULL, $genTime)];
+    };
+    $this->transport->script[] = [
+      'status' => 200,
+      'body' => $this->pki->ocsp('good', [
+        'produced_at' => $producedAt,
+        'this_update' => $producedAt,
+      ]),
+    ];
+    $manager = $this->container->get('audit_chain.witness_manager');
+    try {
+      $manager->submit($digest, 'rfc3161', TRUE);
+      $this->fail('An OCSP answer that misses genTime stored a receipt.');
+    }
+    catch (\RuntimeException $exception) {
+      $this->assertSame('certificate_invalid', $exception->getMessage());
+    }
+    $this->assertEquals($before, $this->receiptRows());
+  }
+
+  /**
    * With ocsp_nonce on, the request carries a nonce that must be echoed.
    */
   public function testOcspNonceMustEcho(): void {

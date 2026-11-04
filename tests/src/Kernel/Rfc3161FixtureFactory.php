@@ -45,6 +45,19 @@ final class Rfc3161FixtureFactory {
   public string $ocspKeyPem = '';
 
   /**
+   * Second OCSP responder with the same subject as $ocspPem and a new key.
+   *
+   * A byName responderID matches both certificates. Responses signed by
+   * this key, with $ocspPem embedded first, are the rollover case.
+   */
+  public string $ocspRolloverPem = '';
+
+  /**
+   * Private key for $ocspRolloverPem.
+   */
+  public string $ocspRolloverKeyPem = '';
+
+  /**
    * Second root used for the untrusted-signer case.
    */
   public string $otherRootPem = '';
@@ -80,6 +93,13 @@ final class Rfc3161FixtureFactory {
   public readonly int $now;
 
   /**
+   * Signer and expired responder for a backdated producedAt.
+   *
+   * @var array{signer_pem: string, responder_pem: string, responder_key: string}|null
+   */
+  private ?array $historical = NULL;
+
+  /**
    * Builds the PKI.
    *
    * @param string $variant
@@ -108,12 +128,13 @@ final class Rfc3161FixtureFactory {
   /**
    * Granted TimeStampResp that echoes the request nonce and imprint.
    */
-  public function grantedResponse(string $requestDer, ?string $policy = NULL, ?string $nonce = NULL): string {
+  public function grantedResponse(string $requestDer, ?string $policy = NULL, ?string $nonce = NULL, ?int $genTime = NULL): string {
     $req = Rfc3161Asn1::decodeTimeStampReq($requestDer);
     return Rfc3161Asn1::encodeTimeStampResp(0, $this->token(
       $req['imprint'],
       $nonce ?? $req['nonce'],
       $policy ?? $req['policy'],
+      $genTime,
     ));
   }
 
@@ -127,12 +148,12 @@ final class Rfc3161FixtureFactory {
   /**
    * CMS TimeStampToken for one imprint.
    */
-  public function token(string $imprint, string $nonce, string $policy): string {
+  public function token(string $imprint, string $nonce, string $policy, ?int $genTime = NULL): string {
     $tst = Rfc3161Asn1::encodeTstInfo(
       $imprint,
       $policy,
       $nonce,
-      self::generalizedTime($this->now),
+      self::generalizedTime($genTime ?? $this->now),
     );
     return Rfc3161Crypto::signCms($tst, $this->tsaPem, $this->tsaKeyPem);
   }
@@ -154,20 +175,33 @@ final class Rfc3161FixtureFactory {
    *   - serial_hex, name_hash, key_hash: CertID overrides.
    *   - produced_at, this_update, next_update: Unix times.
    *   - nonce: raw nonce bytes to echo in responseExtensions.
+   *   - nonce_critical: mark that nonce extension critical.
    *   - extra_responses: SingleResponses placed before the real one.
+   *   - extra_response_extensions, extra_single_extensions: extensions
+   *     beyond the nonce, each array{oid: string, critical: bool}.
+   *   - signer_pem, signer_key_pem: sign with this key instead of signer.
+   *   - subject_pem: certificate the CertID names. Defaults to the TSA.
    */
   public function ocsp(string $status = 'good', array $options = []): string {
+    $subjectPem = is_string($options['subject_pem'] ?? NULL) ? $options['subject_pem'] : $this->tsaPem;
     $hashes = Rfc3161Asn1::ocspIssuerHashes(
-      Rfc3161Crypto::pemToDer($this->tsaPem),
+      Rfc3161Crypto::pemToDer($subjectPem),
       Rfc3161Crypto::pemToDer($this->rootPem),
     );
-    [$signerPem, $signerKeyPem] = match ($options['signer'] ?? 'delegated') {
-      'issuer' => [$this->rootPem, $this->rootKeyPem],
-      'no_eku' => [$this->ocspNoEkuPem, $this->ocspNoEkuKeyPem],
-      'other_root' => [$this->ocspOtherRootPem, $this->ocspOtherRootKeyPem],
-      'tsa' => [$this->tsaPem, $this->tsaKeyPem],
-      default => [$this->ocspPem, $this->ocspKeyPem],
-    };
+    if (is_string($options['signer_pem'] ?? NULL) && is_string($options['signer_key_pem'] ?? NULL)) {
+      $signerPem = $options['signer_pem'];
+      $signerKeyPem = $options['signer_key_pem'];
+    }
+    else {
+      [$signerPem, $signerKeyPem] = match ($options['signer'] ?? 'delegated') {
+        'issuer' => [$this->rootPem, $this->rootKeyPem],
+        'no_eku' => [$this->ocspNoEkuPem, $this->ocspNoEkuKeyPem],
+        'other_root' => [$this->ocspOtherRootPem, $this->ocspOtherRootKeyPem],
+        'tsa' => [$this->tsaPem, $this->tsaKeyPem],
+        'rollover' => [$this->ocspRolloverPem, $this->ocspRolloverKeyPem],
+        default => [$this->ocspPem, $this->ocspKeyPem],
+      };
+    }
     $signerDer = Rfc3161Crypto::pemToDer($signerPem);
     $produced = (int) ($options['produced_at'] ?? $this->now);
     $tbsOptions = [
@@ -182,8 +216,17 @@ final class Rfc3161FixtureFactory {
     if (isset($options['nonce'])) {
       $tbsOptions['nonce'] = $options['nonce'];
     }
+    if (($options['nonce_critical'] ?? FALSE) === TRUE) {
+      $tbsOptions['nonce_critical'] = TRUE;
+    }
     if (isset($options['extra_responses'])) {
       $tbsOptions['extra_responses'] = $options['extra_responses'];
+    }
+    if (isset($options['extra_response_extensions'])) {
+      $tbsOptions['extra_response_extensions'] = $options['extra_response_extensions'];
+    }
+    if (isset($options['extra_single_extensions'])) {
+      $tbsOptions['extra_single_extensions'] = $options['extra_single_extensions'];
     }
     $tbs = Rfc3161Asn1::encodeOcspTbs(
       Rfc3161Asn1::subjectNameDer($signerDer),
@@ -202,6 +245,86 @@ final class Rfc3161FixtureFactory {
       $signature,
       array_map([Rfc3161Crypto::class, 'pemToDer'], $certs),
     );
+  }
+
+  /**
+   * OCSP signed by a responder certificate that has already expired.
+   *
+   * The signer is valid from 40 days ago through the next decade. The
+   * responder was valid from 40 days ago until yesterday, so producedAt
+   * can sit inside that window while thisUpdate claims "now". Returns
+   * the signer PEM because it is not $this->tsaPem.
+   *
+   * @return array{der: string, signer_pem: string}
+   *   Response DER and the certificate the CertID names.
+   */
+  public function historicalOcsp(int $producedAt, int $thisUpdate, ?int $nextUpdate = NULL): array {
+    $this->historical ??= $this->buildHistoricalPair();
+    $options = [
+      'signer_pem' => $this->historical['responder_pem'],
+      'signer_key_pem' => $this->historical['responder_key'],
+      'subject_pem' => $this->historical['signer_pem'],
+      'produced_at' => $producedAt,
+      'this_update' => $thisUpdate,
+    ];
+    if ($nextUpdate !== NULL) {
+      $options['next_update'] = $nextUpdate;
+    }
+    return [
+      'der' => $this->ocsp('good', $options),
+      'signer_pem' => $this->historical['signer_pem'],
+    ];
+  }
+
+  /**
+   * Mints the signer and expired responder used by historicalOcsp().
+   *
+   * @return array{signer_pem: string, responder_pem: string, responder_key: string}
+   *   PEMs. The responder key is a PEM too.
+   */
+  private function buildHistoricalPair(): array {
+    $cnf = $this->opensslConfig();
+    try {
+      $rootCert = openssl_x509_read($this->rootPem);
+      $rootKey = openssl_pkey_get_private($this->rootKeyPem);
+      if ($rootCert === FALSE || $rootKey === FALSE) {
+        throw new \RuntimeException('fixture_pki_sign');
+      }
+      $signerKey = $this->newKey();
+      $responderKey = $this->newKey();
+      $signer = $this->signCert(
+        ['CN' => 'Audit Chain Backdated TSA'],
+        $signerKey,
+        $rootCert,
+        $rootKey,
+        'tsa_cert',
+        $cnf,
+        'sha256',
+        11,
+        $this->now - 40 * 86400,
+        $this->now + 3650 * 86400,
+      );
+      $responder = $this->signCert(
+        ['CN' => 'Audit Chain Expired OCSP'],
+        $responderKey,
+        $rootCert,
+        $rootKey,
+        'ocsp_cert',
+        $cnf,
+        'sha256',
+        12,
+        $this->now - 40 * 86400,
+        $this->now - 86400,
+      );
+    }
+    finally {
+      unlink($cnf);
+    }
+    return [
+      'signer_pem' => $signer['pem'],
+      'responder_pem' => $responder['pem'],
+      'responder_key' => $this->exportKey($responderKey),
+    ];
   }
 
   /**
@@ -242,6 +365,12 @@ final class Rfc3161FixtureFactory {
       'no_eku' => 'tsa_no_eku',
       default => 'tsa_cert',
     };
+    // notBefore sits two hours before the factory clock. A token genTime
+    // a few minutes behind $this->now is then still inside the certificate,
+    // which is what the submit-versus-verify clock-split test needs.
+    // openssl_csr_sign always starts at the current time, so this one
+    // certificate is dated through the openssl CLI.
+    $tsaNotBefore = time() - 7200;
     $tsa = $this->signCert(
       ['CN' => 'Audit Chain Test TSA'],
       $tsaKey,
@@ -251,6 +380,8 @@ final class Rfc3161FixtureFactory {
       $cnf,
       'sha256',
       2,
+      $tsaNotBefore,
+      $tsaNotBefore + 3650 * 86400,
     );
     $ocsp = $this->signCert(
       ['CN' => 'Audit Chain Test OCSP'],
@@ -268,6 +399,21 @@ final class Rfc3161FixtureFactory {
     $this->tsaKeyPem = $this->exportKey($tsaKey);
     $this->ocspPem = $ocsp['pem'];
     $this->ocspKeyPem = $this->exportKey($ocspKey);
+    // Same subject as the delegated responder, different key. Both stay
+    // valid at the factory clock so a byName rollover has two candidates.
+    $rolloverKey = $this->newKey();
+    $rollover = $this->signCert(
+      ['CN' => 'Audit Chain Test OCSP'],
+      $rolloverKey,
+      $root['cert'],
+      $rootKey,
+      'ocsp_cert',
+      $cnf,
+      'sha256',
+      6,
+    );
+    $this->ocspRolloverPem = $rollover['pem'];
+    $this->ocspRolloverKeyPem = $this->exportKey($rolloverKey);
 
     $otherKey = $this->newKey();
     $other = $this->signCert(
@@ -448,6 +594,10 @@ CNF);
    *   Certificate signature digest.
    * @param int $serial
    *   Certificate serial number.
+   * @param int|null $notBefore
+   *   Unix notBefore. NULL keeps openssl_csr_sign's "now".
+   * @param int|null $notAfter
+   *   Unix notAfter, required when $notBefore is set.
    *
    * @return array{cert: \OpenSSLCertificate, pem: string}
    *   Certificate resource and PEM.
@@ -461,10 +611,23 @@ CNF);
     string $cnf,
     string $digest,
     int $serial,
+    ?int $notBefore = NULL,
+    ?int $notAfter = NULL,
   ): array {
     $csr = openssl_csr_new($dn, $key, ['digest_alg' => $digest, 'config' => $cnf]);
     if ($csr === FALSE) {
       throw new \RuntimeException('fixture_pki_csr');
+    }
+    if ($notBefore !== NULL) {
+      if ($caCert === NULL || $notAfter === NULL || $digest !== 'sha256') {
+        throw new \RuntimeException('fixture_pki_sign');
+      }
+      $pem = $this->signCsrWithValidity($csr, $caCert, $caKey, $ext, $cnf, $serial, $notBefore, $notAfter);
+      $cert = openssl_x509_read($pem);
+      if ($cert === FALSE) {
+        throw new \RuntimeException('fixture_pki_sign');
+      }
+      return ['cert' => $cert, 'pem' => $pem];
     }
     $cert = openssl_csr_sign($csr, $caCert, $caKey, 3650, [
       'digest_alg' => $digest,
@@ -477,6 +640,79 @@ CNF);
     $pem = '';
     openssl_x509_export($cert, $pem);
     return ['cert' => $cert, 'pem' => $pem];
+  }
+
+  /**
+   * Signs a CSR with an explicit validity window.
+   *
+   * PHP's openssl_csr_sign starts the certificate at the current time, so
+   * a notBefore in the past has to go through the openssl CLI. The CLI
+   * sees the process environment, including a FIPS OPENSSL_CONF when the
+   * suite is running under that provider. SHA-256 is an approved digest.
+   */
+  private function signCsrWithValidity(
+    \OpenSSLCertificateSigningRequest $csr,
+    \OpenSSLCertificate $caCert,
+    \OpenSSLAsymmetricKey $caKey,
+    string $ext,
+    string $cnf,
+    int $serial,
+    int $notBefore,
+    int $notAfter,
+  ): string {
+    $dir = sys_get_temp_dir();
+    $csrPath = tempnam($dir, 'accsr');
+    $caPath = tempnam($dir, 'acca');
+    $keyPath = tempnam($dir, 'ackey');
+    $outPath = tempnam($dir, 'accert');
+    if ($csrPath === FALSE || $caPath === FALSE || $keyPath === FALSE || $outPath === FALSE) {
+      throw new \RuntimeException('fixture_pki_sign');
+    }
+    $csrPem = '';
+    $caPem = '';
+    $keyPem = '';
+    try {
+      if (!openssl_csr_export($csr, $csrPem) || !openssl_x509_export($caCert, $caPem) || !openssl_pkey_export($caKey, $keyPem)) {
+        throw new \RuntimeException('fixture_pki_sign');
+      }
+      file_put_contents($csrPath, $csrPem);
+      file_put_contents($caPath, $caPem);
+      file_put_contents($keyPath, $keyPem);
+      $command = [
+        'openssl', 'x509', '-req',
+        '-in', $csrPath,
+        '-CA', $caPath,
+        '-CAkey', $keyPath,
+        '-set_serial', (string) $serial,
+        '-not_before', gmdate('YmdHis', $notBefore) . 'Z',
+        '-not_after', gmdate('YmdHis', $notAfter) . 'Z',
+        '-sha256',
+        '-extfile', $cnf,
+        '-extensions', $ext,
+        '-out', $outPath,
+      ];
+      $process = proc_open($command, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+      if (!is_resource($process)) {
+        throw new \RuntimeException('fixture_pki_sign');
+      }
+      stream_get_contents($pipes[1]);
+      $stderr = stream_get_contents($pipes[2]);
+      fclose($pipes[1]);
+      fclose($pipes[2]);
+      $exit = proc_close($process);
+      $pem = file_get_contents($outPath);
+      if ($exit !== 0 || !is_string($pem) || !str_contains($pem, 'BEGIN CERTIFICATE')) {
+        $detail = is_string($stderr) ? trim($stderr) : '';
+        throw new \RuntimeException('fixture_pki_sign' . ($detail === '' ? '' : ': ' . $detail));
+      }
+      return $pem;
+    }
+    finally {
+      unlink($csrPath);
+      unlink($caPath);
+      unlink($keyPath);
+      unlink($outPath);
+    }
   }
 
   /**

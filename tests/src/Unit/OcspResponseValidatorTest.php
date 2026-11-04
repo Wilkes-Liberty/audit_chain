@@ -273,6 +273,82 @@ final class OcspResponseValidatorTest extends UnitTestCase {
   }
 
   /**
+   * A thisUpdate later than producedAt, beyond skew, is refused.
+   *
+   * The responder certificate expired yesterday. producedAt sits inside
+   * the window it used to be valid, and thisUpdate is the reference time,
+   * so the future check and the "no nextUpdate" age check both pass. The
+   * refusal is the gap between the two timestamps: an expired key must
+   * not advertise a current status by backdating the signature.
+   */
+  public function testThisUpdateAfterProducedAtRejected(): void {
+    $producedAt = $this->pki->now - 30 * 86400;
+    $attack = $this->pki->historicalOcsp($producedAt, $this->pki->now);
+    $this->assertHistoricalRejected('certificate_invalid', $attack, $this->pki->now);
+
+    $withNext = $this->pki->historicalOcsp($producedAt, $this->pki->now, $this->pki->now + 86400);
+    $this->assertHistoricalRejected('certificate_invalid', $withNext, $this->pki->now);
+
+    $skew = OcspResponseValidator::CLOCK_SKEW;
+    $boundaryAt = $producedAt + $skew;
+    $boundary = $this->pki->historicalOcsp($producedAt, $boundaryAt);
+    $this->assertHistoricalAccepted($boundary, $boundaryAt);
+    $pastSkew = $this->pki->historicalOcsp($producedAt, $boundaryAt + 1);
+    $this->assertHistoricalRejected('certificate_invalid', $pastSkew, $boundaryAt + 1);
+
+    $consistent = $this->pki->historicalOcsp($producedAt, $producedAt);
+    $this->assertHistoricalAccepted($consistent, $producedAt);
+  }
+
+  /**
+   * A byName rollover is accepted when a later certificate verifies.
+   *
+   * Both certificates share a subject and are authorized. The reply lists
+   * the older key first and is signed by the newer one.
+   */
+  public function testByNameRolloverTriesTheSigningCertificate(): void {
+    $older = Rfc3161Crypto::pemToDer($this->pki->ocspPem);
+    $newer = Rfc3161Crypto::pemToDer($this->pki->ocspRolloverPem);
+    $this->assertSame(Rfc3161Asn1::subjectNameDer($older), Rfc3161Asn1::subjectNameDer($newer));
+    $this->assertAccepted($this->pki->ocsp('good', [
+      'signer' => 'rollover',
+      'certs' => [$this->pki->ocspPem, $this->pki->ocspRolloverPem],
+    ]));
+  }
+
+  /**
+   * Unknown critical extensions are refused. Non-critical ones are not.
+   *
+   * The nonce is the one extension this decoder implements, so a critical
+   * nonce is still accepted.
+   */
+  public function testUnsupportedCriticalExtensionRejected(): void {
+    $oid = '1.2.3.4.5.6';
+    $this->assertAccepted($this->pki->ocsp('good', [
+      'extra_response_extensions' => [['oid' => $oid, 'critical' => FALSE]],
+    ]));
+    $this->assertAccepted($this->pki->ocsp('good', [
+      'extra_single_extensions' => [['oid' => $oid, 'critical' => FALSE]],
+    ]));
+    foreach (['extra_response_extensions', 'extra_single_extensions'] as $key) {
+      try {
+        Rfc3161Asn1::decodeOcspResponse($this->pki->ocsp('good', [
+          $key => [['oid' => $oid, 'critical' => TRUE]],
+        ]));
+        $this->fail("$key was accepted.");
+      }
+      catch (\RuntimeException $exception) {
+        $this->assertSame('certificate_invalid', $exception->getMessage(), $key);
+      }
+    }
+    $nonce = random_bytes(16);
+    $this->assertAccepted($this->pki->ocsp('good', [
+      'nonce' => $nonce,
+      'nonce_critical' => TRUE,
+    ]), $nonce);
+  }
+
+  /**
    * A nonce we sent must come back unchanged.
    */
   public function testNonceMustEcho(): void {
@@ -347,6 +423,52 @@ final class OcspResponseValidatorTest extends UnitTestCase {
         Rfc3161Crypto::pemToDer($this->pki->rootPem),
         $this->pki->now,
         $nonce,
+      );
+    }
+    catch (\RuntimeException $exception) {
+      $this->assertSame($reason, $exception->getMessage());
+      return;
+    }
+    $this->fail("Expected $reason, but the OCSP response was accepted.");
+  }
+
+  /**
+   * Asserts a historical OCSP fixture passes at $at.
+   *
+   * @param array{der: string, signer_pem: string} $fixture
+   *   Output of Rfc3161FixtureFactory::historicalOcsp().
+   * @param int $at
+   *   Reference time.
+   */
+  private function assertHistoricalAccepted(array $fixture, int $at): void {
+    $single = OcspResponseValidator::assertGood(
+      Rfc3161Asn1::decodeOcspResponse($fixture['der']),
+      Rfc3161Crypto::pemToDer($fixture['signer_pem']),
+      Rfc3161Crypto::pemToDer($this->pki->rootPem),
+      $at,
+      NULL,
+    );
+    $this->assertSame('good', $single['status']);
+  }
+
+  /**
+   * Asserts a historical OCSP fixture fails with one reason.
+   *
+   * @param string $reason
+   *   Expected witness reason code.
+   * @param array{der: string, signer_pem: string} $fixture
+   *   Output of Rfc3161FixtureFactory::historicalOcsp().
+   * @param int $at
+   *   Reference time.
+   */
+  private function assertHistoricalRejected(string $reason, array $fixture, int $at): void {
+    try {
+      OcspResponseValidator::assertGood(
+        Rfc3161Asn1::decodeOcspResponse($fixture['der']),
+        Rfc3161Crypto::pemToDer($fixture['signer_pem']),
+        Rfc3161Crypto::pemToDer($this->pki->rootPem),
+        $at,
+        NULL,
       );
     }
     catch (\RuntimeException $exception) {

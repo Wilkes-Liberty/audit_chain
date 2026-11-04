@@ -94,6 +94,16 @@ final class Rfc3161WitnessBackend implements IdentifiedWitnessBackendInterface {
     // liveOcsp() throws unless the signer is confirmed good, so a receipt
     // is never written on a revoked, unknown, or unauthenticated answer.
     $ocsp = $this->liveOcsp($checked['signer_pem'], $config, TRUE);
+    // The live check uses the local clock. Verify judges these same bytes
+    // against the token genTime. A TSA clock behind us and an OCSP clock
+    // ahead of us can pass each check alone and still miss when they are
+    // added, which would store a confirmed receipt that cannot verify.
+    $this->assertStoredOcsp(
+      Rfc3161Asn1::decodeOcspResponse($ocsp),
+      $checked['signer_pem'],
+      $checked['gen_time'],
+      $config,
+    );
     $token = base64_encode(Rfc3161Asn1::encodeEnvelope($response['token'], $ocsp));
     return new WitnessReceipt(
       $this->uuid->generate(),
@@ -279,12 +289,13 @@ final class Rfc3161WitnessBackend implements IdentifiedWitnessBackendInterface {
   }
 
   /**
-   * Re-checks the OCSP answer stored at submit.
+   * Checks an OCSP answer against the token genTime.
    *
-   * Freshness is judged against the token genTime: the stored answer has
+   * Submit calls this before storing a receipt, and verify calls it on
+   * the stored bytes. Freshness is judged against genTime: the answer has
    * to show the signer was good when the timestamp was issued. The nonce
    * used at submit is not kept, so it is not re-checked here; the live
-   * check in verify() covers replay while the signer is still valid.
+   * check covers replay while the signer is still valid.
    *
    * @param OcspBasicResponse $stored
    *   Envelope OCSP, as returned by Rfc3161Asn1::decodeOcspResponse().

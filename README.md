@@ -210,7 +210,7 @@ client can be selected explicitly. Neither runs while `witness_backend`
 is empty. The RFC 3161 backend is fail-closed with empty install
 defaults: it stores a confirmed token only after signature, policy,
   chain, timeStamping EKU, and OCSP checks (CertID, authorized
-  responder, freshness, optional nonce), using PHP's openssl
+  responder, freshness, critical extensions, optional nonce), using PHP's openssl
   extension. The XRPL client does not hold a seed and does not submit a
   mainnet transaction. See [docs/WITNESS.md](docs/WITNESS.md).
 

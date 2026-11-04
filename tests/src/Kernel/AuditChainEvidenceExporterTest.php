@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\audit_chain\Kernel;
 
+use Drupal\audit_chain\EvidenceExporter;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\key\Entity\Key;
 use GuzzleHttp\Client;
@@ -318,12 +319,18 @@ final class AuditChainEvidenceExporterTest extends KernelTestBase {
     $this->container->set('http_client', new Client(['handler' => $stack]));
     $exporter = \Drupal::service('audit_chain.evidence_exporter');
 
-    $run = $exporter->exportTo('http://collector.example.test/ingest');
+    $offHost = 'http://collector.example.test/ingest';
+    $loopback = 'http://127.0.0.1:8125/ingest';
+    // Same helper the settings form uses; a drift here is a deny-path miss.
+    $this->assertFalse(EvidenceExporter::isLoopbackDestination($offHost));
+    $this->assertTrue(EvidenceExporter::isLoopbackDestination($loopback));
+
+    $run = $exporter->exportTo($offHost);
     $this->assertFalse($run['ok'], 'Evidence must not travel plain HTTP off-host.');
     $this->assertSame('insecure_destination', $run['reason']);
     $this->assertCount(0, $history, 'The refused batch is never sent.');
 
-    $run = $exporter->exportTo('http://127.0.0.1:8125/ingest');
+    $run = $exporter->exportTo($loopback);
     $this->assertTrue($run['ok'], 'Loopback HTTP (an on-host collector) stays allowed.');
   }
 

@@ -77,7 +77,7 @@ final class AuditChainDashboardController extends ControllerBase {
       '#tiles' => $this->widget('tiles', fn() => $this->buildTiles($window), []),
       '#charts' => $this->widget('charts', fn() => $this->buildCharts($window), []),
       '#quick_actions' => $this->widget('quick_actions', fn() => $this->buildQuickActions(), []),
-      '#window' => $window,
+      // Active window is windows[].active; the template never printed #window.
       '#windows' => $this->widget('windows', fn() => $this->buildWindowLinks($window), []),
       '#attached' => [
         'library' => ['audit_chain/dashboard'],
@@ -178,7 +178,7 @@ final class AuditChainDashboardController extends ControllerBase {
    * @param string $current
    *   The current window.
    *
-   * @return array<int, array{key: string, label: string, url: string, active: bool}>
+   * @return array<int, array{label: string, url: string, active: bool}>
    *   The window links.
    */
   private function buildWindowLinks(string $current): array {
@@ -189,8 +189,8 @@ final class AuditChainDashboardController extends ControllerBase {
     ];
     $links = [];
     foreach (AuditChainMetrics::windows() as $window) {
+      // Twig only reads url, label, and active — no per-link key.
       $links[] = [
-        'key' => $window,
         'label' => (string) $labels[$window],
         'url' => Url::fromRoute('audit_chain.dashboard', [], [
           'query' => ['window' => $window],

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\audit_chain\Kernel;
 
+use Drupal\audit_chain\EvidenceExporter;
 use Drupal\audit_chain\Form\AuditChainSettingsForm;
 use Drupal\Core\Form\FormState;
 use Drupal\Core\Url;
@@ -99,19 +100,32 @@ final class AuditChainSettingsFormTest extends KernelTestBase {
    * @covers ::validateForm
    */
   public function testExportDestinationFollowsExporterRules(): void {
+    $offHost = 'http://collector.example.test/ingest';
+    $loopbackV4 = 'http://127.0.0.1:8125/ingest';
+    $loopbackName = 'http://localhost/ingest';
+    $loopbackV6 = 'http://[::1]/ingest';
+
+    // The form calls EvidenceExporter::isLoopbackDestination(); these
+    // assertions pin the helper so the allowlist cannot drift again.
+    $this->assertFalse(EvidenceExporter::isLoopbackDestination($offHost));
+    $this->assertTrue(EvidenceExporter::isLoopbackDestination($loopbackV4));
+    $this->assertTrue(EvidenceExporter::isLoopbackDestination($loopbackName));
+    $this->assertTrue(EvidenceExporter::isLoopbackDestination($loopbackV6));
+
     $this->assertArrayHasKey(
       'export_destination',
-      $this->validateExport(TRUE, 'http://collector.example.test/ingest'),
+      $this->validateExport(TRUE, $offHost),
       'Off-host HTTP must be refused, matching REASON_INSECURE_DESTINATION.',
     );
-    $this->assertSame([], $this->validateExport(TRUE, 'http://127.0.0.1:8125/ingest'));
-    $this->assertSame([], $this->validateExport(TRUE, 'http://localhost/ingest'));
+    $this->assertSame([], $this->validateExport(TRUE, $loopbackV4));
+    $this->assertSame([], $this->validateExport(TRUE, $loopbackName));
+    $this->assertSame([], $this->validateExport(TRUE, $loopbackV6));
     $this->assertSame([], $this->validateExport(TRUE, 'https://evidence.example.test/ingest'));
     $this->assertSame([], $this->validateExport(TRUE, '/var/evidence/chain.ndjson'));
     $this->assertSame([], $this->validateExport(FALSE, ''));
     $this->assertArrayHasKey(
       'export_destination',
-      $this->validateExport(FALSE, 'http://collector.example.test/ingest'),
+      $this->validateExport(FALSE, $offHost),
       'An insecure destination is refused even when cron export is off.',
     );
   }

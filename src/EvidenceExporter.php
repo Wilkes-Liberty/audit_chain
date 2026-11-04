@@ -86,6 +86,7 @@ final class EvidenceExporter {
     private readonly TimeInterface $time,
     private readonly ClientInterface $httpClient,
     private readonly LoggerInterface $logger,
+    private readonly AuditChainRecoverySupport $recoverySupport,
     private readonly ?ChainGap $gaps = NULL,
   ) {}
 
@@ -114,7 +115,7 @@ final class EvidenceExporter {
   public function exportTo(string $destination, ?int $fromId = NULL, ?string $channel = NULL, ?int $limit = NULL): array {
     // Evidence must not travel plain HTTP off-host: refuse before reading a
     // single row. Loopback stays allowed for on-host collector sidecars.
-    if (str_starts_with($destination, 'http://') && !$this->isLoopback($destination)) {
+    if (str_starts_with($destination, 'http://') && !self::isLoopbackDestination($destination)) {
       $this->logger->warning('Evidence export to @destination refused: plain HTTP off-host would expose evidence in transit. Use https:// or a loopback collector.', [
         '@destination' => self::redactDestination($destination),
       ]);
@@ -130,9 +131,9 @@ final class EvidenceExporter {
     $verification = $this->state->get(ScheduledVerifier::STATE_KEY);
     // A cached pre-incident success cannot authorize whole-history export
     // after explicit recovery. Recovery evidence has its own export contract.
-    $recoveryExists = $this->database->schema()->tableExists('audit_chain_recovery')
-      && $this->database->select('audit_chain_recovery', 'r')
-        ->fields('r', ['segment_id'])->range(0, 1)->forUpdate()->execute()->fetchField() !== FALSE;
+    // Existence only: export does not hold the append mutex, so this is
+    // not a serialized current read.
+    $recoveryExists = $this->recoverySupport->hasRecoveryRecord();
     if ($recoveryExists || (\is_array($verification) && empty($verification['ok']))) {
       $this->logger->warning('Evidence export to @destination refused: whole-history verification is failing or recovery records an unresolved historical exception. Use the explicit recovery-record export for that exception.', [
         '@destination' => self::redactDestination($destination),
@@ -350,9 +351,22 @@ final class EvidenceExporter {
 
   /**
    * Whether an http(s) destination's host is a loopback address.
+   *
+   * The settings form calls this so the insecure-HTTP allowlist cannot
+   * drift from exportTo(). An unparseable host is not loopback.
+   *
+   * @param string $destination
+   *   An http(s):// URL. The caller still decides whether plain HTTP is
+   *   in play; this only names the host.
+   *
+   * @return bool
+   *   TRUE for 127.0.0.1, ::1 (bracketed or not), or localhost.
    */
-  private function isLoopback(string $destination): bool {
+  public static function isLoopbackDestination(string $destination): bool {
     $host = parse_url($destination, PHP_URL_HOST);
+    // parse_url() has returned both ::1 and [::1] for IPv6 loopback
+    // across PHP versions; keep both so an on-host collector is not
+    // refused after a runtime upgrade.
     return \in_array($host, ['127.0.0.1', '::1', '[::1]', 'localhost'], TRUE);
   }
 

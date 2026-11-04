@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\audit_chain\Form;
 
+use Drupal\audit_chain\EvidenceExporter;
 use Drupal\Core\Form\ConfigFormBase;
 use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\Url;
@@ -183,11 +184,10 @@ final class AuditChainSettingsForm extends ConfigFormBase {
 
     // Same rule as EvidenceExporter::exportTo(): evidence must not travel
     // plain HTTP off-host. Loopback stays allowed for on-host collectors.
-    if ($destination !== '' && str_starts_with($destination, 'http://')) {
-      $host = parse_url($destination, PHP_URL_HOST);
-      if (!\in_array($host, ['127.0.0.1', '::1', '[::1]', 'localhost'], TRUE)) {
-        $form_state->setErrorByName('export_destination', $this->t('Plain HTTP off-host would expose evidence in transit. Use https:// or a loopback collector.'));
-      }
+    if ($destination !== ''
+      && str_starts_with($destination, 'http://')
+      && !EvidenceExporter::isLoopbackDestination($destination)) {
+      $form_state->setErrorByName('export_destination', $this->t('Plain HTTP off-host would expose evidence in transit. Use https:// or a loopback collector.'));
     }
   }
 

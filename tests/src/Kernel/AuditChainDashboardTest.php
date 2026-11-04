@@ -356,7 +356,14 @@ final class AuditChainDashboardTest extends KernelTestBase {
     $request = Request::create('/admin/reports/audit-chain', 'GET', ['window' => 'forever']);
     $controller = AuditChainDashboardController::create($this->container);
     $build = $controller->dashboard($request);
-    $this->assertSame('24h', $build['#window']);
+
+    // Unknown ?window= is ignored; the 24h toggle is the only active link.
+    $active = array_values(array_filter(
+      $build['#windows'],
+      static fn(array $link): bool => $link['active'],
+    ));
+    $this->assertCount(1, $active);
+    $this->assertStringContainsString('window=24h', $active[0]['url']);
   }
 
   /**

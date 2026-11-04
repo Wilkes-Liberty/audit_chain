@@ -102,6 +102,9 @@ services:
       - '@datetime.time'
       - '@http_client'
       - '@logger.channel.audit_chain'
+      # Export asks this collaborator whether a recovery row exists. The
+      # probe is a plain SELECT: export does not hold the append mutex.
+      - '@audit_chain.recovery_support'
       - '@audit_chain.chain_gap'
 
   audit_chain.archive_bundle_exporter:

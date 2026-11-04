@@ -646,9 +646,13 @@ CNF);
    * Signs a CSR with an explicit validity window.
    *
    * PHP's openssl_csr_sign starts the certificate at the current time, so
-   * a notBefore in the past has to go through the openssl CLI. The CLI
-   * sees the process environment, including a FIPS OPENSSL_CONF when the
-   * suite is running under that provider. SHA-256 is an approved digest.
+   * a notBefore in the past has to go through the openssl CLI. openssl
+   * x509 -not_before exists on 3.2 and later, but the FIPS job builds
+   * OpenSSL 3.0.16, whose x509 command rejects that flag. openssl ca
+   * -startdate is in both. The command keeps the process environment, and
+   * when OPENSSL_CONF is set (the FIPS provider config) those sections are
+   * copied in front of the CA database sections so the provider stays
+   * loaded. SHA-256 is an approved digest.
    */
   private function signCsrWithValidity(
     \OpenSSLCertificateSigningRequest $csr,
@@ -660,12 +664,13 @@ CNF);
     int $notBefore,
     int $notAfter,
   ): string {
-    $dir = sys_get_temp_dir();
-    $csrPath = tempnam($dir, 'accsr');
-    $caPath = tempnam($dir, 'acca');
-    $keyPath = tempnam($dir, 'ackey');
-    $outPath = tempnam($dir, 'accert');
-    if ($csrPath === FALSE || $caPath === FALSE || $keyPath === FALSE || $outPath === FALSE) {
+    // cspell:ignore acca startdate enddate extfile newcerts preserveDN
+    $work = tempnam(sys_get_temp_dir(), 'acca');
+    if ($work === FALSE) {
+      throw new \RuntimeException('fixture_pki_sign');
+    }
+    unlink($work);
+    if (!mkdir($work, 0700)) {
       throw new \RuntimeException('fixture_pki_sign');
     }
     $csrPem = '';
@@ -675,23 +680,41 @@ CNF);
       if (!openssl_csr_export($csr, $csrPem) || !openssl_x509_export($caCert, $caPem) || !openssl_pkey_export($caKey, $keyPem)) {
         throw new \RuntimeException('fixture_pki_sign');
       }
+      $csrPath = $work . '/request.pem';
+      $caPath = $work . '/anchor.pem';
+      $keyPath = $work . '/private.pem';
+      $outPath = $work . '/signed.pem';
+      $serialFile = $work . '/serial';
+      $newCerts = $work . '/issued';
       file_put_contents($csrPath, $csrPem);
       file_put_contents($caPath, $caPem);
       file_put_contents($keyPath, $keyPem);
+      file_put_contents($work . '/index.txt', '');
+      file_put_contents($serialFile, $this->evenHexSerial($serial) . "\n");
+      if (!mkdir($newCerts, 0700)) {
+        throw new \RuntimeException('fixture_pki_sign');
+      }
+      $configPath = $work . '/ca.cnf';
+      file_put_contents($configPath, $this->caConfig($work, $serialFile, $newCerts));
+      $env = getenv();
+      if (!is_array($env)) {
+        $env = [];
+      }
+      $env['OPENSSL_CONF'] = $configPath;
       $command = [
-        'openssl', 'x509', '-req',
+        'openssl', 'ca', '-batch', '-notext',
         '-in', $csrPath,
-        '-CA', $caPath,
-        '-CAkey', $keyPath,
-        '-set_serial', (string) $serial,
-        '-not_before', gmdate('YmdHis', $notBefore) . 'Z',
-        '-not_after', gmdate('YmdHis', $notAfter) . 'Z',
-        '-sha256',
+        '-cert', $caPath,
+        '-keyfile', $keyPath,
+        '-startdate', gmdate('YmdHis', $notBefore) . 'Z',
+        '-enddate', gmdate('YmdHis', $notAfter) . 'Z',
+        '-md', 'sha256',
         '-extfile', $cnf,
         '-extensions', $ext,
+        '-preserveDN',
         '-out', $outPath,
       ];
-      $process = proc_open($command, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+      $process = proc_open($command, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, NULL, $env);
       if (!is_resource($process)) {
         throw new \RuntimeException('fixture_pki_sign');
       }
@@ -708,11 +731,87 @@ CNF);
       return $pem;
     }
     finally {
-      unlink($csrPath);
-      unlink($caPath);
-      unlink($keyPath);
-      unlink($outPath);
+      $this->removeTree($work);
     }
+  }
+
+  /**
+   * Even-width hex serial for the openssl ca serial file.
+   */
+  private function evenHexSerial(int $serial): string {
+    $hex = strtoupper(dechex($serial));
+    if (strlen($hex) % 2 === 1) {
+      $hex = '0' . $hex;
+    }
+    return $hex;
+  }
+
+  /**
+   * OpenSSL config for one openssl ca invocation.
+   *
+   * A FIPS job points OPENSSL_CONF at the provider config. openssl ca
+   * reads that variable as its whole config, so the provider sections
+   * have to be in the same file as the CA database.
+   */
+  private function caConfig(string $work, string $serialFile, string $newCerts): string {
+    $prefix = '';
+    $inherited = getenv('OPENSSL_CONF');
+    if (is_string($inherited) && $inherited !== '' && is_readable($inherited)) {
+      $copied = file_get_contents($inherited);
+      if (!is_string($copied)) {
+        throw new \RuntimeException('fixture_pki_sign');
+      }
+      $prefix = $copied . "\n";
+    }
+    return $prefix . <<<CNF
+[ ca ]
+default_ca = ca_default
+
+[ ca_default ]
+database = {$work}/index.txt
+serial = {$serialFile}
+new_certs_dir = {$newCerts}
+default_md = sha256
+policy = ca_policy
+email_in_dn = no
+unique_subject = no
+copy_extensions = none
+
+[ ca_policy ]
+commonName = supplied
+countryName = optional
+stateOrProvinceName = optional
+localityName = optional
+organizationName = optional
+organizationalUnitName = optional
+emailAddress = optional
+CNF;
+  }
+
+  /**
+   * Deletes a temporary directory tree.
+   */
+  private function removeTree(string $dir): void {
+    if (!is_dir($dir)) {
+      return;
+    }
+    $items = scandir($dir);
+    if (!is_array($items)) {
+      return;
+    }
+    foreach ($items as $item) {
+      if ($item === '.' || $item === '..') {
+        continue;
+      }
+      $path = $dir . '/' . $item;
+      if (is_dir($path)) {
+        $this->removeTree($path);
+      }
+      else {
+        unlink($path);
+      }
+    }
+    rmdir($dir);
   }
 
   /**

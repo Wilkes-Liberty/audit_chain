@@ -664,7 +664,7 @@ CNF);
     int $notBefore,
     int $notAfter,
   ): string {
-    // cspell:ignore acca startdate enddate extfile newcerts preserveDN
+    // cspell:ignore acca startdate enddate extfile newcerts preserveDN notext
     $work = tempnam(sys_get_temp_dir(), 'acca');
     if ($work === FALSE) {
       throw new \RuntimeException('fixture_pki_sign');
@@ -697,9 +697,6 @@ CNF);
       $configPath = $work . '/ca.cnf';
       file_put_contents($configPath, $this->caConfig($work, $serialFile, $newCerts));
       $env = getenv();
-      if (!is_array($env)) {
-        $env = [];
-      }
       $env['OPENSSL_CONF'] = $configPath;
       $command = [
         'openssl', 'ca', '-batch', '-notext',

@@ -873,28 +873,33 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
    */
   private function latestRowHash(): ?string {
     $floor = LogRowLookup::lastId($this->database);
-    $query = $this->database->select('audit_chain_log', 'l');
-    $query->fields('l', ['id', 'row_hash']);
-    $query->forUpdate();
-    if ($floor > 0) {
-      $query->condition('id', $floor, '>=');
-    }
-    else {
-      // The snapshot saw no rows. Keep the ordered locking read for this case
-      // so a stale empty snapshot cannot lock every row of a large log.
-      $query->orderBy('id', 'DESC')->range(0, 1);
-    }
-
     $latestId = NULL;
     $hash = NULL;
-    foreach ($query->execute() as $record) {
-      if ($latestId === NULL || (int) $record->id > $latestId) {
-        $latestId = (int) $record->id;
-        $hash = $record->row_hash;
+    if ($floor > 0) {
+      $query = $this->database->select('audit_chain_log', 'l');
+      $query->fields('l', ['id', 'row_hash']);
+      $query->condition('id', $floor, '>=');
+      $query->forUpdate();
+      foreach ($query->execute() as $record) {
+        if ($latestId === NULL || (int) $record->id > $latestId) {
+          $latestId = (int) $record->id;
+          $hash = $record->row_hash;
+        }
       }
     }
+    if ($latestId === NULL) {
+      // The snapshot saw no rows, or the head row it saw is gone. Fall back to
+      // the ordered locking read; it is cheap on an empty table, and it keeps
+      // the chain off a NULL predecessor when rows still exist.
+      $query = $this->database->select('audit_chain_log', 'l');
+      $query->fields('l', ['row_hash']);
+      $query->orderBy('id', 'DESC');
+      $query->range(0, 1);
+      $query->forUpdate();
+      $hash = $query->execute()->fetchField();
+    }
 
-    return ($hash !== NULL && $hash !== '') ? (string) $hash : NULL;
+    return ($hash !== FALSE && $hash !== NULL && $hash !== '') ? (string) $hash : NULL;
   }
 
   /**

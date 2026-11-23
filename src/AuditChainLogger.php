@@ -529,12 +529,7 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
       return ['sealed' => FALSE, 'message' => 'A non-empty reason is required.', 'seal' => NULL];
     }
 
-    $maxId = (int) $this->database->select('audit_chain_log', 'l')
-      ->orderBy('id', 'DESC')
-      ->range(0, 1)
-      ->fields('l', ['id'])
-      ->execute()
-      ->fetchField();
+    $maxId = LogRowLookup::lastId($this->database);
     if ($maxId < 1) {
       return ['sealed' => FALSE, 'message' => 'The chain is empty.', 'seal' => NULL];
     }
@@ -865,23 +860,41 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
   /**
    * Returns the most recently inserted row's hash, or NULL when empty.
    *
-   * Called only while the mutex row lock is held. FOR UPDATE forces a
-   * current read under MySQL repeatable-read so the head is the latest
-   * committed row, not the caller's possibly-stale snapshot.
+   * Called only while the mutex row lock is held. MAX(id) finds the head
+   * through the primary key; the FOR UPDATE read from that id onward then
+   * forces a current read under MySQL repeatable-read, so a row committed
+   * after the caller's snapshot is still found. That read covers one row
+   * unless the snapshot was stale, and it has no ORDER BY: on PostgreSQL an
+   * ORDER BY id DESC renders as DESC NULLS LAST, which the primary key cannot
+   * serve, and the old form scanned and sorted the whole log on every append.
    *
    * @return string|null
    *   The hex hash, or NULL.
    */
   private function latestRowHash(): ?string {
-    $hash = $this->database->select('audit_chain_log', 'l')
-      ->fields('l', ['row_hash'])
-      ->orderBy('id', 'DESC')
-      ->range(0, 1)
-      ->forUpdate()
-      ->execute()
-      ->fetchField();
+    $floor = LogRowLookup::lastId($this->database);
+    $query = $this->database->select('audit_chain_log', 'l');
+    $query->fields('l', ['id', 'row_hash']);
+    $query->forUpdate();
+    if ($floor > 0) {
+      $query->condition('id', $floor, '>=');
+    }
+    else {
+      // The snapshot saw no rows. Keep the ordered locking read for this case
+      // so a stale empty snapshot cannot lock every row of a large log.
+      $query->orderBy('id', 'DESC')->range(0, 1);
+    }
 
-    return ($hash !== FALSE && $hash !== NULL && $hash !== '') ? (string) $hash : NULL;
+    $latestId = NULL;
+    $hash = NULL;
+    foreach ($query->execute() as $record) {
+      if ($latestId === NULL || (int) $record->id > $latestId) {
+        $latestId = (int) $record->id;
+        $hash = $record->row_hash;
+      }
+    }
+
+    return ($hash !== NULL && $hash !== '') ? (string) $hash : NULL;
   }
 
   /**
@@ -1052,13 +1065,13 @@ final class AuditChainLogger implements AuditChainLoggerInterface {
    * Last non-empty stored row_hash for ids <= $throughId.
    */
   private function lastStoredHashThrough(int $throughId): ?string {
+    $id = LogRowLookup::lastId($this->database, $throughId, TRUE);
+    if ($id === 0) {
+      return NULL;
+    }
     $hash = $this->database->select('audit_chain_log', 'l')
       ->fields('l', ['row_hash'])
-      ->condition('id', $throughId, '<=')
-      ->isNotNull('row_hash')
-      ->condition('row_hash', '', '<>')
-      ->orderBy('id', 'DESC')
-      ->range(0, 1)
+      ->condition('id', $id)
       ->execute()
       ->fetchField();
     return ($hash !== FALSE && $hash !== NULL && $hash !== '') ? (string) $hash : NULL;

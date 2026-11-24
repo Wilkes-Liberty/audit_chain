@@ -46,6 +46,7 @@ phpseclib
 recognisable
 rewalk
 rfc3161
+seqscan
 sekret
 serialised
 serialises

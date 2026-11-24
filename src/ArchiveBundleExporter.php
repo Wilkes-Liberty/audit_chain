@@ -95,10 +95,7 @@ final class ArchiveBundleExporter {
    * Returns the last stored row id.
    */
   private function latestId(): int {
-    $id = $this->database->select('audit_chain_log', 'l')
-      ->fields('l', ['id'])->orderBy('id', 'DESC')->range(0, 1)
-      ->execute()->fetchField();
-    return $id === FALSE ? 0 : (int) $id;
+    return LogRowLookup::lastId($this->database);
   }
 
   /**

@@ -259,13 +259,8 @@ final class RewindDetector {
       ->condition('id', $through)
       ->execute()
       ->fetchField();
-    $max = $this->database->select('audit_chain_log', 'l')
-      ->fields('l', ['id'])
-      ->orderBy('id', 'DESC')
-      ->range(0, 1)
-      ->execute()
-      ->fetchField();
-    $headMovedBack = $max === FALSE || (int) $max < $through;
+    $max = LogRowLookup::lastId($this->database);
+    $headMovedBack = $max < $through;
     $headMissing = !is_string($live) || !hash_equals($manifest['chain_head'], $live);
     if ($headMovedBack || $headMissing) {
       return $this->result(self::STATUS_REWOUND, self::REASON_REWOUND, $digest, $through);

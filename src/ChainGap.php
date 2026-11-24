@@ -116,14 +116,9 @@ final class ChainGap {
       }
       $this->assertRecordable($statement['gap']);
       $this->chain->logKeyed(self::CHANNEL, self::OPERATION, $statement['gap']);
-      $id = $this->database->select('audit_chain_log', 'l')
-        ->fields('l', ['id'])
-        ->orderBy('id', 'DESC')
-        ->range(0, 1)
-        ->execute()
-        ->fetchField();
+      $id = LogRowLookup::lastId($this->database);
       return [
-        'id' => (int) $id,
+        'id' => $id,
         'gap' => $statement['gap'],
         'snapshot_digest' => $statement['snapshot_digest'],
         'created' => TRUE,
@@ -372,11 +367,10 @@ final class ChainGap {
     if (!is_string($fork) || !hash_equals($gap['fork_row_hash'], $fork)) {
       throw new \RuntimeException('The fork row is not the live row at that id.');
     }
-    $live = $this->database->select('audit_chain_log', 'l')
+    $nextId = LogRowLookup::firstIdAfter($this->database, (int) $gap['fork_id']);
+    $live = $nextId === NULL ? FALSE : $this->database->select('audit_chain_log', 'l')
       ->fields('l', ['prev_hash', 'row_hash'])
-      ->condition('id', $gap['fork_id'], '>')
-      ->orderBy('id')
-      ->range(0, 1)
+      ->condition('id', $nextId)
       ->execute()
       ->fetchAssoc();
     $forkHash = (string) $gap['fork_row_hash'];
